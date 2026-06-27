@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "aku",
+    "name": "Akù",
     "slug": "aku",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -8,15 +8,51 @@
     "scheme": "aku",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "bundleIdentifier": "com.nippysky.aku",
+      "supportsTablet": false,
+      "alternateIcons": {
+        "aku-midnight": {
+          "image": "./assets/images/icons/icon-midnight.png"
+        },
+        "aku-gold": {
+          "image": "./assets/images/icons/icon-gold.png"
+        },
+        "aku-linen": {
+          "image": "./assets/images/icons/icon-linen.png"
+        },
+        "aku-graphite": {
+          "image": "./assets/images/icons/icon-graphite.png"
+        },
+        "aku-coral": {
+          "image": "./assets/images/icons/icon-coral.png"
+        }
+      },
+      "infoPlist": {
+        "NSFaceIDUsageDescription": "Akù uses Face ID to keep your financial data secure and unlock the app instantly.",
+        "NSCameraUsageDescription": "Akù uses the camera to let you update your profile photo.",
+        "UIBackgroundModes": [
+          "fetch",
+          "remote-notification"
+        ]
+      }
     },
     "android": {
+      "package": "com.nippysky.aku",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+        "monochromeImage": "./assets/images/android-icon-monochrome.png",
+        "backgroundColor": "#163A2F"
       },
+      "permissions": [
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT",
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.VIBRATE",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.CAMERA",
+        "android.permission.SCHEDULE_EXACT_ALARM"
+      ],
       "predictiveBackGestureEnabled": false
     },
     "web": {
@@ -25,16 +61,30 @@
     },
     "plugins": [
       "expo-router",
+      "expo-local-authentication",
+      "expo-secure-store",
+      "expo-sqlite",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/notification-icon.png",
+          "color": "#163A2F",
+          "sounds": []
+        }
+      ],
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#208AEF",
+          "backgroundColor": "#163A2F",
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 120,
           "android": {
             "image": "./assets/images/splash-icon.png",
-            "imageWidth": 76
+            "imageWidth": 120,
+            "backgroundColor": "#163A2F"
           }
         }
-      ]
+      ],
     ],
     "experiments": {
       "typedRoutes": true,

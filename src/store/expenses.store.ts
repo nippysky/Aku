@@ -1,0 +1,181 @@
+import { create } from 'zustand';
+import { eq, and, gte, lte } from 'drizzle-orm';
+import { getDatabase, schema } from '../lib/database/client';
+import { format, startOfMonth, endOfMonth, parseISO } from 'date-fns';
+import { generateUUID } from '../lib/uuid';
+import type {
+  Expense, ExpenseCreateInput, ExpenseUpdateInput,
+  ExpenseSummary, ExpenseCategory,
+} from '../types';
+
+// ─── Helpers ──────────────────────────────────────────────────────────────
+
+function fromDb(row: typeof schema.expenses.$inferSelect): Expense {
+  return {
+    id:          row.id,
+    userId:      row.userId,
+    householdId: row.householdId ?? null,
+    amount:      row.amount,
+    category:    row.category as ExpenseCategory,
+    description: row.description ?? null,
+    date:        row.date,
+    isShared:    Boolean(row.isShared),
+    createdAt:   row.createdAt,
+    updatedAt:   row.updatedAt,
+  };
+}
+
+function buildSummary(expenses: Expense[], month: string): ExpenseSummary {
+  const zero = {} as Record<ExpenseCategory, number>;
+  const cats: ExpenseCategory[] = [
+    'food','transport','shopping','entertainment','housing',
+    'utilities','health','family','education','savings','gifts','other',
+  ];
+  cats.forEach((c) => { zero[c] = 0; });
+
+  const monthExpenses = expenses.filter((e) => e.date.startsWith(month));
+  const byCategory = { ...zero };
+  let totalAmount = 0;
+
+  monthExpenses.forEach((e) => {
+    byCategory[e.category] = (byCategory[e.category] ?? 0) + e.amount;
+    totalAmount += e.amount;
+  });
+
+  return { totalAmount, byCategory, month, previousMonth: null };
+}
+
+// ─── State ────────────────────────────────────────────────────────────────
+
+interface ExpensesState {
+  expenses:       Expense[];
+  summary:        ExpenseSummary | null;
+  selectedMonth:  string; // 'YYYY-MM'
+  isLoading:      boolean;
+  error:          string | null;
+
+  // Actions
+  load:           (userId: string) => Promise<void>;
+  loadMonth:      (userId: string, month: string) => Promise<void>;
+  add:            (input: ExpenseCreateInput, userId: string) => Promise<Expense>;
+  update:         (input: ExpenseUpdateInput) => Promise<void>;
+  remove:         (id: string) => Promise<void>;
+  setMonth:       (month: string) => void;
+  clearError:     () => void;
+}
+
+// ─── Store ────────────────────────────────────────────────────────────────
+
+export const useExpensesStore = create<ExpensesState>()((set, get) => ({
+  expenses:      [],
+  summary:       null,
+  selectedMonth: format(new Date(), 'yyyy-MM'),
+  isLoading:     false,
+  error:         null,
+
+  load: async (userId) => {
+    set({ isLoading: true, error: null });
+    try {
+      const db = getDatabase();
+      const month = get().selectedMonth;
+
+      const rows = await db
+        .select()
+        .from(schema.expenses)
+        .where(
+          and(
+            eq(schema.expenses.userId, userId),
+            gte(schema.expenses.date, `${month}-01`),
+            lte(schema.expenses.date, `${month}-31`),
+          )
+        )
+        .orderBy(schema.expenses.date);
+
+      const expenses = rows.map(fromDb);
+      const summary = buildSummary(expenses, month);
+      set({ expenses, summary });
+    } catch (e: any) {
+      set({ error: e?.message ?? 'Failed to load expenses' });
+    } finally {
+      set({ isLoading: false });
+    }
+  },
+
+  loadMonth: async (userId, month) => {
+    set({ selectedMonth: month });
+    await get().load(userId);
+  },
+
+  add: async (input, userId) => {
+    set({ isLoading: true, error: null });
+    try {
+      const db = getDatabase();
+      const now = new Date().toISOString();
+      const id = generateUUID();
+
+      await db.insert(schema.expenses).values({
+        id,
+        userId,
+        householdId: input.householdId,
+        amount:      input.amount,
+        category:    input.category,
+        description: input.description,
+        date:        input.date,
+        isShared:    input.isShared,
+        createdAt:   now,
+        updatedAt:   now,
+      });
+
+      const newExpense: Expense = {
+        ...input,
+        id,
+        userId,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      const expenses = [newExpense, ...get().expenses].sort((a, b) =>
+        b.date.localeCompare(a.date)
+      );
+      const summary = buildSummary(expenses, get().selectedMonth);
+      set({ expenses, summary });
+      return newExpense;
+    } catch (e: any) {
+      set({ error: e?.message ?? 'Failed to add expense' });
+      throw e;
+    } finally {
+      set({ isLoading: false });
+    }
+  },
+
+  update: async (input) => {
+    const { id, ...rest } = input;
+    const db = getDatabase();
+    const now = new Date().toISOString();
+
+    await db
+      .update(schema.expenses)
+      .set({ ...rest, updatedAt: now })
+      .where(eq(schema.expenses.id, id));
+
+    const expenses = get().expenses.map((e) =>
+      e.id === id ? { ...e, ...rest, updatedAt: now } : e
+    );
+    const summary = buildSummary(expenses, get().selectedMonth);
+    set({ expenses, summary });
+  },
+
+  remove: async (id) => {
+    const db = getDatabase();
+    await db.delete(schema.expenses).where(eq(schema.expenses.id, id));
+    const expenses = get().expenses.filter((e) => e.id !== id);
+    const summary = buildSummary(expenses, get().selectedMonth);
+    set({ expenses, summary });
+  },
+
+  setMonth: (month) => {
+    set({ selectedMonth: month });
+  },
+
+  clearError: () => set({ error: null }),
+}));
