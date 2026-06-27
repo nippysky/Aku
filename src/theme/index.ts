@@ -25,7 +25,7 @@ export function useTheme() {
       ? false
       : scheme === 'dark';
 
-  const colors: ColorScheme = isDark ? DarkColors : LightColors;
+  const colors = (isDark ? DarkColors : LightColors) as ColorScheme;
 
   const platform = {
     // Card style

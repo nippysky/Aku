@@ -1,13 +1,12 @@
 import React from 'react';
-import { StyleSheet, Platform } from 'react-native';
+import { StyleSheet, Platform, ViewStyle, StyleProp } from 'react-native';
 import { BlurView } from 'expo-blur';
-import Animated from 'react-native-reanimated';
 import { useTheme } from '../../theme';
 
 interface Props {
-  style?: object;
-  animatedIndex?: Animated.SharedValue<number>;
-  animatedPosition?: Animated.SharedValue<number>;
+  style?: StyleProp<ViewStyle>;
+  animatedIndex?: unknown;
+  animatedPosition?: unknown;
 }
 
 export function GlassSheetBackground({ style }: Props) {

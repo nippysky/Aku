@@ -198,6 +198,7 @@ export function AmountInput({
           placeholderTextColor={colors.inputPlaceholder}
           editable={editable}
           selectTextOnFocus
+          // @ts-ignore — includeFontPadding is a valid Android prop not in RN types
           includeFontPadding={false}
           textAlignVertical="center"
         />

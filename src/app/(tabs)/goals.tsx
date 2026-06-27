@@ -13,7 +13,6 @@ import Animated, {
   FadeInDown,
   useAnimatedStyle,
   useSharedValue,
-  withSpring,
   withTiming,
 } from 'react-native-reanimated';
 import { Plus, Target } from 'lucide-react-native';
@@ -22,6 +21,7 @@ import { Card } from '../../components/ui/Card';
 import { ProgressRing } from '../../components/ui/ProgressRing';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { AddGoalSheet } from '../../components/goals/AddGoalSheet';
+import { AddContributionSheet } from '../../components/goals/AddContributionSheet';
 import { useGoalsStore } from '../../store/goals.store';
 import { useAuthStore } from '../../store/auth.store';
 import type { GoalWithProgress } from '../../types';
@@ -159,32 +159,6 @@ function SummaryCard({ goals }: SummaryCardProps) {
         </Text>
       </View>
     </Card>
-  );
-}
-
-// ─── FAB ─────────────────────────────────────────────────────────────────────
-
-function FAB({ onPress }: { onPress: () => void }) {
-  const { colors, shadow } = useTheme();
-  const scale = useSharedValue(1);
-
-  const animStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: scale.value }],
-  }));
-
-  return (
-    <Animated.View style={[styles.fab, animStyle, shadow.lg]}>
-      <Pressable
-        onPress={onPress}
-        onPressIn={() => { scale.value = withSpring(0.94, { damping: 20, stiffness: 400 }); }}
-        onPressOut={() => { scale.value = withSpring(1, { damping: 20, stiffness: 400 }); }}
-        style={[styles.fabInner, { backgroundColor: colors.primary }]}
-        accessibilityRole="button"
-        accessibilityLabel="Add goal"
-      >
-        <Plus size={24} color={colors.accent} strokeWidth={2} />
-      </Pressable>
-    </Animated.View>
   );
 }
 
@@ -380,7 +354,7 @@ export default function GoalsScreen() {
 
   const [filter,      setFilter]      = useState<FilterKey>('all');
   const [addOpen,     setAddOpen]     = useState(false);
-  const [contribGoal, setContribGoal] = useState<string | null>(null);
+  const [contribGoal, setContribGoal] = useState<{ id: string; name: string } | null>(null);
 
   useEffect(() => {
     if (user) load(user.id);
@@ -392,16 +366,16 @@ export default function GoalsScreen() {
     return true;
   });
 
-  const handleAddSavings = useCallback((goalId: string) => {
-    router.push(`/goals/${goalId}` as never);
-  }, [router]);
+  const handleAddSavings = useCallback((goal: GoalWithProgress) => {
+    setContribGoal({ id: goal.id, name: goal.name });
+  }, []);
 
   const renderItem = useCallback(
     ({ item }: { item: GoalWithProgress }) => (
       <GoalCardLarge
         goal={item}
         onPress={() => router.push(`/goals/${item.id}` as never)}
-        onAddSavings={() => handleAddSavings(item.id)}
+        onAddSavings={() => handleAddSavings(item)}
       />
     ),
     [router, handleAddSavings],
@@ -441,7 +415,7 @@ export default function GoalsScreen() {
         renderItem={renderItem}
         contentContainerStyle={[
           styles.listContent,
-          { paddingBottom: insets.bottom + layout.tabBarHeight + 80 },
+          { paddingBottom: insets.bottom + layout.tabBarHeight + 24 },
         ]}
         showsVerticalScrollIndicator={false}
         ListHeaderComponent={
@@ -475,15 +449,23 @@ export default function GoalsScreen() {
         }
       />
 
-      {/* ── FAB ── */}
-      <FAB onPress={() => setAddOpen(true)} />
-
       {/* ── Add Goal Sheet ── */}
       <AddGoalSheet
         isOpen={addOpen}
         onClose={() => setAddOpen(false)}
         onSuccess={() => { if (user) load(user.id); }}
       />
+
+      {/* ── Add Contribution Sheet ── */}
+      {contribGoal && (
+        <AddContributionSheet
+          goalId={contribGoal.id}
+          goalName={contribGoal.name}
+          isOpen={!!contribGoal}
+          onClose={() => setContribGoal(null)}
+          onSuccess={() => { if (user) load(user.id); }}
+        />
+      )}
     </View>
   );
 }
@@ -625,19 +607,4 @@ const styles = StyleSheet.create({
     paddingVertical:    8,
   },
 
-  // FAB
-  fab: {
-    position:     'absolute',
-    bottom:       100,
-    right:        24,
-    borderRadius: 28,
-    overflow:     'visible',
-  },
-  fabInner: {
-    width:          56,
-    height:         56,
-    borderRadius:   28,
-    alignItems:     'center',
-    justifyContent: 'center',
-  },
 });

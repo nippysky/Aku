@@ -1,6 +1,5 @@
-import React, { useCallback, useRef, useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -8,11 +7,6 @@ import {
   Text,
   View,
 } from 'react-native';
-import {
-  BottomSheetModal,
-  BottomSheetScrollView,
-} from '@gorhom/bottom-sheet';
-import { GlassSheetBackground } from '../ui/GlassSheetBackground';
 import { useForm, Controller } from 'react-hook-form';
 import {
   Home, Zap, Car, UtensilsCrossed, Heart, BookOpen, Tv,
@@ -22,6 +16,7 @@ import {
 import { format, parseISO } from 'date-fns';
 import { useTheme } from '../../theme';
 import { Palette } from '../../theme/colors';
+import { SheetModal } from '../ui/SheetModal';
 import { Input } from '../ui/Input';
 import { AmountInput } from '../ui/AmountInput';
 import { Button } from '../ui/Button';
@@ -92,7 +87,6 @@ interface AddBillSheetProps {
 
 type FrequencyOption = { value: BillFrequency; label: string };
 
-const SNAP_POINTS = ['75%', '92%'];
 const CATEGORIES = Object.keys(BILL_CATEGORIES) as BillCategory[];
 const FREQUENCIES: FrequencyOption[] = [
   { value: 'weekly',    label: 'Weekly'    },
@@ -106,13 +100,12 @@ const FREQUENCIES: FrequencyOption[] = [
 
 export function AddBillSheet({ isOpen, onClose, onSuccess }: AddBillSheetProps) {
   const { colors, text, font, fontSize, radius } = useTheme();
-  const sheetRef = useRef<BottomSheetModal>(null);
   const { add } = useBillsStore();
   const { user } = useAuthStore();
   const { showToast } = useUIStore();
   const [showDatePicker, setShowDatePicker] = useState(false);
 
-  const { control, handleSubmit, reset, setError, formState: { errors, isSubmitting } } = useForm<FormData>({
+  const { control, handleSubmit, reset, setError, watch, setValue, formState: { errors, isSubmitting } } = useForm<FormData>({
     defaultValues: {
       name:      '',
       amount:    0,
@@ -129,16 +122,9 @@ export function AddBillSheet({ isOpen, onClose, onSuccess }: AddBillSheetProps) 
     },
   });
 
-  useEffect(() => {
-    if (isOpen) {
-      sheetRef.current?.present();
-    } else {
-      sheetRef.current?.dismiss();
-    }
-  }, [isOpen]);
+  const dueDate = watch('dueDate');
 
   const handleClose = useCallback(() => {
-    sheetRef.current?.dismiss();
     reset();
     onClose();
   }, [onClose, reset]);
@@ -176,24 +162,11 @@ export function AddBillSheet({ isOpen, onClose, onSuccess }: AddBillSheetProps) 
     } catch {
       showToast('error', 'Failed to add bill');
     }
-  }, [user, add, showToast, reset, handleClose, onSuccess]);
+  }, [user, add, showToast, reset, handleClose, onSuccess, setError]);
 
   return (
-    <BottomSheetModal
-      ref={sheetRef}
-      snapPoints={SNAP_POINTS}
-      enablePanDownToClose
-      onDismiss={onClose}
-      keyboardBehavior="interactive"
-      keyboardBlurBehavior="restore"
-      backgroundComponent={Platform.OS === 'ios' ? GlassSheetBackground : undefined}
-      backgroundStyle={Platform.OS !== 'ios' ? { backgroundColor: colors.card } : undefined}
-      handleIndicatorStyle={{ backgroundColor: colors.border, width: 36 }}
-    >
-      <BottomSheetScrollView
-        contentContainerStyle={[styles.content, { paddingBottom: 40 }]}
-        keyboardShouldPersistTaps="handled"
-      >
+    <>
+      <SheetModal visible={isOpen} onClose={handleClose}>
         {/* Title */}
         <Text
           style={[
@@ -295,7 +268,7 @@ export function AddBillSheet({ isOpen, onClose, onSuccess }: AddBillSheetProps) 
           control={control}
           name="dueDate"
           render={({ field }) => (
-            <View style={[styles.field]}>
+            <View style={styles.field}>
               <Text style={[text.label, { color: colors.textSecondary, marginBottom: 6 }]}>
                 Due date
               </Text>
@@ -314,10 +287,7 @@ export function AddBillSheet({ isOpen, onClose, onSuccess }: AddBillSheetProps) 
                 <Text
                   style={[
                     text.body,
-                    {
-                      color: field.value ? colors.text : colors.textTertiary,
-                      flex:  1,
-                    },
+                    { color: field.value ? colors.text : colors.textTertiary, flex: 1 },
                   ]}
                 >
                   {field.value ? formatDisplayDate(field.value) : 'Select due date'}
@@ -329,13 +299,6 @@ export function AddBillSheet({ isOpen, onClose, onSuccess }: AddBillSheetProps) 
                   {errors.dueDate.message}
                 </Text>
               )}
-              <AkuDatePicker
-                isOpen={showDatePicker}
-                value={field.value}
-                onChange={(d) => { field.onChange(d); setShowDatePicker(false); }}
-                onClose={() => setShowDatePicker(false)}
-                title="Select due date"
-              />
             </View>
           )}
         />
@@ -463,18 +426,23 @@ export function AddBillSheet({ isOpen, onClose, onSuccess }: AddBillSheetProps) 
             size="lg"
           />
         </View>
-      </BottomSheetScrollView>
-    </BottomSheetModal>
+      </SheetModal>
+
+      {/* Date picker sits outside the sheet so it layers on top */}
+      <AkuDatePicker
+        isOpen={showDatePicker}
+        value={dueDate}
+        onChange={(d) => { setValue('dueDate', d); setShowDatePicker(false); }}
+        onClose={() => setShowDatePicker(false)}
+        title="Select due date"
+      />
+    </>
   );
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  content: {
-    paddingHorizontal: 24,
-    paddingTop:        8,
-  },
   title: {
     marginBottom:  24,
     letterSpacing: -0.5,
@@ -518,7 +486,6 @@ const styles = StyleSheet.create({
     justifyContent:  'space-between',
     paddingVertical: 14,
     borderBottomWidth: 1,
-    marginBottom:    0,
   },
   submit: {
     marginTop: 28,

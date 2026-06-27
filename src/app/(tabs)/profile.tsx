@@ -34,7 +34,8 @@ import {
   MessageSquare,
   Check,
 } from 'lucide-react-native';
-import { BottomSheetModal, BottomSheetView } from '@gorhom/bottom-sheet';
+import { BottomSheetModal, BottomSheetView, BottomSheetBackdrop } from '@gorhom/bottom-sheet';
+import type { BottomSheetBackdropProps } from '@gorhom/bottom-sheet';
 import { getActiveIconLabel } from '../../lib/app-icons';
 import { useTheme } from '../../theme';
 import { useAuthStore } from '../../store/auth.store';
@@ -219,6 +220,13 @@ export default function ProfileScreen() {
   const openThemePicker = useCallback(() => {
     themeSheetRef.current?.present();
   }, []);
+
+  const renderBackdrop = useCallback(
+    (props: BottomSheetBackdropProps) => (
+      <BottomSheetBackdrop {...props} disappearsOnIndex={-1} appearsOnIndex={0} opacity={0.5} />
+    ),
+    [],
+  );
 
   // ── Active app icon ───────────────────────────────────────────────────
   const [activeIconId, setActiveIconId] = useState<string>('default');
@@ -409,7 +417,7 @@ export default function ProfileScreen() {
           <SettingsRow
             icon={Lock}
             label="Change Passcode"
-            onPress={() => router.push('/(onboarding)/pin-setup' as never)}
+            onPress={() => router.push('/change-passcode' as never)}
             isFirst
           />
           <SettingsRow
@@ -548,6 +556,7 @@ export default function ProfileScreen() {
       <BottomSheetModal
         ref={themeSheetRef}
         snapPoints={['35%']}
+        backdropComponent={renderBackdrop}
         backgroundStyle={{ backgroundColor: colors.card }}
         handleIndicatorStyle={{ backgroundColor: colors.border }}
       >

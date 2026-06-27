@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import {
   Platform,
   Pressable,
@@ -27,8 +27,6 @@ import {
   Wallet,
   Target,
   TrendingUp,
-  Plus,
-  ChevronRight,
 } from 'lucide-react-native';
 import {
   UtensilsCrossed, Car, ShoppingBag, Tv, Home,
@@ -41,16 +39,11 @@ import { EmptyState } from '../../components/ui/EmptyState';
 import { BillRow } from '../../components/home/BillRow';
 import { BudgetBar } from '../../components/home/BudgetBar';
 import { GoalCard } from '../../components/home/GoalCard';
-import { AddBillSheet } from '../../components/bills/AddBillSheet';
-import { AddExpenseSheet } from '../../components/expenses/AddExpenseSheet';
-import { AddGoalSheet } from '../../components/goals/AddGoalSheet';
-import { ExpandableFAB } from '../../components/ui/ExpandableFAB';
 import { useAuthStore } from '../../store/auth.store';
 import { useBillsStore } from '../../store/bills.store';
 import { useExpensesStore } from '../../store/expenses.store';
 import { useBudgetsStore } from '../../store/budgets.store';
 import { useGoalsStore } from '../../store/goals.store';
-import { useUIStore } from '../../store/ui.store';
 import { EXPENSE_CATEGORIES } from '../../types';
 import type { Bill } from '../../types';
 
@@ -187,98 +180,17 @@ function SectionHeader({
   );
 }
 
-// ─── Tour overlay ─────────────────────────────────────────────────────────────
-
-function TourOverlay() {
-  const { colors, text, font, fontSize, radius, shadow } = useTheme();
-  const { isTourActive, tourStep, tourSteps, nextStep, skipTour } = useUIStore();
-
-  if (!isTourActive) return null;
-
-  const step = tourSteps[tourStep];
-  if (!step) return null;
-
-  const isLast = tourStep === tourSteps.length - 1;
-
-  return (
-    <Animated.View
-      entering={FadeInDown.duration(280)}
-      style={[styles.tourOverlay, { backgroundColor: colors.overlay }]}
-    >
-      <View
-        style={[
-          styles.tourTooltip,
-          {
-            backgroundColor: colors.card,
-            borderRadius:    radius.xl,
-            ...shadow.lg,
-          },
-        ]}
-      >
-        <Text
-          style={[
-            { fontFamily: font.displayLight, fontSize: fontSize.xl, color: colors.text },
-            styles.tourTitle,
-          ]}
-        >
-          {step.title}
-        </Text>
-        <Text style={[text.body, { color: colors.textSecondary, marginTop: 8 }]}>
-          {step.body}
-        </Text>
-        <View style={styles.tourActions}>
-          <TouchableOpacity onPress={skipTour} hitSlop={8}>
-            <Text style={[text.buttonLabel, { color: colors.textTertiary }]}>Skip</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={nextStep}
-            style={[
-              styles.tourNextBtn,
-              { backgroundColor: colors.primary, borderRadius: radius.full },
-            ]}
-          >
-            <Text style={[text.buttonLabel, { color: colors.textOnForest }]}>
-              {isLast ? 'Done' : 'Next'}
-            </Text>
-          </TouchableOpacity>
-        </View>
-        {/* Step dots */}
-        <View style={styles.tourDots}>
-          {tourSteps.map((_, i) => (
-            <View
-              key={i}
-              style={[
-                styles.tourDot,
-                {
-                  backgroundColor: i === tourStep ? colors.primary : colors.border,
-                  width: i === tourStep ? 16 : 6,
-                },
-              ]}
-            />
-          ))}
-        </View>
-      </View>
-    </Animated.View>
-  );
-}
-
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function HomeScreen() {
   const { colors, text, font, fontSize, spacing, layout, radius } = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-
   const { user } = useAuthStore();
   const { bills, upcoming, overdue, dueToday, load: loadBills } = useBillsStore();
   const { expenses, summary, load: loadExpenses } = useExpensesStore();
   const { budgets, load: loadBudgets } = useBudgetsStore();
   const { goals, load: loadGoals } = useGoalsStore();
-  const { isTourActive } = useUIStore();
-
-  const [addBillOpen,    setAddBillOpen]    = React.useState(false);
-  const [addExpenseOpen, setAddExpenseOpen] = React.useState(false);
-  const [addGoalOpen,    setAddGoalOpen]    = React.useState(false);
 
   useEffect(() => {
     if (user) {
@@ -320,6 +232,8 @@ export default function HomeScreen() {
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
+      {/* Status bar shield is now global in _layout.tsx */}
+
       <ScrollView
         contentContainerStyle={[
           styles.scrollContent,
@@ -505,6 +419,7 @@ export default function HomeScreen() {
                   spent={b.spent}
                   total={b.amount}
                   status={b.status}
+                  onPress={() => router.push(`/budgets/${b.id}` as never)}
                 />
               ))
             )}
@@ -530,7 +445,12 @@ export default function HomeScreen() {
               contentContainerStyle={styles.goalsRow}
             >
               {displayGoals.map((goal) => (
-                <GoalCard key={goal.id} goal={goal} size="md" />
+                <GoalCard
+                  key={goal.id}
+                  goal={goal}
+                  size="md"
+                  onPress={() => router.push(`/goals/${goal.id}` as never)}
+                />
               ))}
             </ScrollView>
           )}
@@ -588,50 +508,7 @@ export default function HomeScreen() {
         </Animated.View>
       </ScrollView>
 
-      {/* ── Expandable FAB ── */}
-      <ExpandableFAB
-        bottomInset={insets.bottom + layout.tabBarHeight + 16}
-        actions={[
-          {
-            icon:    Target,
-            label:   'Goal',
-            tint:    '#C9A96A',
-            onPress: () => setAddGoalOpen(true),
-          },
-          {
-            icon:    Wallet,
-            label:   'Expense',
-            tint:    '#4A90D9',
-            onPress: () => setAddExpenseOpen(true),
-          },
-          {
-            icon:    Receipt,
-            label:   'Bill',
-            tint:    '#E8734A',
-            onPress: () => setAddBillOpen(true),
-          },
-        ]}
-      />
 
-      {/* Sheets */}
-      <AddBillSheet
-        isOpen={addBillOpen}
-        onClose={() => setAddBillOpen(false)}
-        onSuccess={() => user && loadBills(user.id)}
-      />
-      <AddExpenseSheet
-        isOpen={addExpenseOpen}
-        onClose={() => setAddExpenseOpen(false)}
-        onSuccess={() => user && loadExpenses(user.id)}
-      />
-      <AddGoalSheet
-        isOpen={addGoalOpen}
-        onClose={() => setAddGoalOpen(false)}
-        onSuccess={() => user && loadGoals(user.id)}
-      />
-
-      {/* Tour overlay */}
-      <TourOverlay />
     </View>
   );
 }
@@ -738,41 +615,4 @@ const styles = StyleSheet.create({
     paddingBottom: 4,
   },
 
-  // Tour
-  tourOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems:     'center',
-    justifyContent: 'flex-end',
-    paddingBottom:  120,
-    paddingHorizontal: 24,
-    zIndex:         999,
-  },
-  tourTooltip: {
-    width:   '100%',
-    padding: 24,
-  },
-  tourTitle: {
-    letterSpacing: -0.3,
-  },
-  tourActions: {
-    flexDirection:   'row',
-    alignItems:      'center',
-    justifyContent:  'space-between',
-    marginTop:       24,
-  },
-  tourNextBtn: {
-    paddingHorizontal: 24,
-    paddingVertical:   12,
-  },
-  tourDots: {
-    flexDirection:  'row',
-    alignItems:     'center',
-    justifyContent: 'center',
-    marginTop:      20,
-    gap:            6,
-  },
-  tourDot: {
-    height:       6,
-    borderRadius: 3,
-  },
 });

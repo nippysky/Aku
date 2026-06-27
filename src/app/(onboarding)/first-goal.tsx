@@ -41,8 +41,11 @@ export default function FirstGoalScreen() {
   const { add: addGoal } = useGoalsStore();
 
   async function finishOnboarding() {
+    // markOnboardingComplete MUST come before unlock().
+    // unlock() triggers the nav guard; if hasOnboarded is still false the
+    // guard sends the user back to /(onboarding). Write the flag first.
+    await markOnboardingComplete();
     unlock();
-    await markOnboardingComplete();  // persist — survives restarts
     OnboardingStorage.clear();
     router.replace('/(tabs)');
   }

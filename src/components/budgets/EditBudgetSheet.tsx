@@ -1,23 +1,18 @@
-import React, { useCallback, useRef, useEffect } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import {
   Alert,
-  Platform,
   Pressable,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
-import {
-  BottomSheetModal,
-  BottomSheetScrollView,
-} from '@gorhom/bottom-sheet';
-import { GlassSheetBackground } from '../ui/GlassSheetBackground';
 import { useForm, Controller } from 'react-hook-form';
 import {
   UtensilsCrossed, Car, ShoppingBag, Tv, Home, Zap,
   Heart, Users, BookOpen, PiggyBank, Gift, MoreHorizontal, Trash2,
 } from 'lucide-react-native';
 import { useTheme } from '../../theme';
+import { SheetModal } from '../ui/SheetModal';
 import { AmountInput } from '../ui/AmountInput';
 import { Button } from '../ui/Button';
 import { useBudgetsStore } from '../../store/budgets.store';
@@ -45,7 +40,6 @@ interface FormData {
   period:   BudgetPeriod;
 }
 
-const SNAP_POINTS = ['60%', '80%'];
 const CATEGORIES  = Object.keys(EXPENSE_CATEGORIES) as ExpenseCategory[];
 const PERIODS: { key: BudgetPeriod; label: string }[] = [
   { key: 'weekly',  label: 'Weekly'  },
@@ -57,7 +51,6 @@ const PERIODS: { key: BudgetPeriod; label: string }[] = [
 
 export function EditBudgetSheet({ budget, onClose, onSuccess }: EditBudgetSheetProps) {
   const { colors, text, font, fontSize, radius } = useTheme();
-  const sheetRef = useRef<BottomSheetModal>(null);
 
   const { update, remove } = useBudgetsStore();
   const { showToast }      = useUIStore();
@@ -70,9 +63,9 @@ export function EditBudgetSheet({ budget, onClose, onSuccess }: EditBudgetSheetP
     formState: { errors, isSubmitting },
   } = useForm<FormData>({
     defaultValues: {
-      category: budget?.category ?? 'food',
-      amount:   budget?.amount   ?? 0,
-      period:   budget?.period   ?? 'monthly',
+      category: 'food',
+      amount:   0,
+      period:   'monthly',
     },
   });
 
@@ -87,16 +80,7 @@ export function EditBudgetSheet({ budget, onClose, onSuccess }: EditBudgetSheetP
     }
   }, [budget, reset]);
 
-  useEffect(() => {
-    if (budget) {
-      sheetRef.current?.present();
-    } else {
-      sheetRef.current?.dismiss();
-    }
-  }, [budget]);
-
   const handleClose = useCallback(() => {
-    sheetRef.current?.dismiss();
     onClose();
   }, [onClose]);
 
@@ -131,7 +115,7 @@ export function EditBudgetSheet({ budget, onClose, onSuccess }: EditBudgetSheetP
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Delete',
+          text:  'Delete',
           style: 'destructive',
           onPress: async () => {
             try {
@@ -149,189 +133,170 @@ export function EditBudgetSheet({ budget, onClose, onSuccess }: EditBudgetSheetP
   }, [budget, remove, showToast, handleClose, onSuccess]);
 
   return (
-    <BottomSheetModal
-      ref={sheetRef}
-      snapPoints={SNAP_POINTS}
-      enablePanDownToClose
-      onDismiss={onClose}
-      keyboardBehavior="interactive"
-      keyboardBlurBehavior="restore"
-      backgroundComponent={Platform.OS === 'ios' ? GlassSheetBackground : undefined}
-      backgroundStyle={Platform.OS !== 'ios' ? { backgroundColor: colors.card } : undefined}
-      handleIndicatorStyle={{ backgroundColor: colors.border, width: 36 }}
-    >
-      <BottomSheetScrollView
-        contentContainerStyle={[styles.content, { paddingBottom: 40 }]}
-        keyboardShouldPersistTaps="handled"
+    <SheetModal visible={!!budget} onClose={handleClose}>
+      {/* Title */}
+      <Text
+        style={[
+          styles.title,
+          { fontFamily: font.displayLight, fontSize: fontSize['2xl'], color: colors.text },
+        ]}
       >
-        {/* Title */}
-        <Text
-          style={[
-            styles.title,
-            { fontFamily: font.displayLight, fontSize: fontSize['2xl'], color: colors.text },
-          ]}
-        >
-          Edit Budget
-        </Text>
+        Edit Budget
+      </Text>
 
-        {/* Category grid */}
-        <Text style={[text.label, { color: colors.textSecondary, marginBottom: 10 }]}>
-          Category
-        </Text>
-        <Controller
-          control={control}
-          name="category"
-          render={({ field }) => (
-            <View style={styles.categoryGrid}>
-              {CATEGORIES.map((cat) => {
-                const meta     = EXPENSE_CATEGORIES[cat];
-                const IconComp = EXPENSE_ICONS[meta.icon] ?? MoreHorizontal;
-                const selected = field.value === cat;
-                return (
-                  <Pressable
-                    key={cat}
-                    onPress={() => field.onChange(cat)}
+      {/* Category grid */}
+      <Text style={[text.label, { color: colors.textSecondary, marginBottom: 10 }]}>
+        Category
+      </Text>
+      <Controller
+        control={control}
+        name="category"
+        render={({ field }) => (
+          <View style={styles.categoryGrid}>
+            {CATEGORIES.map((cat) => {
+              const meta     = EXPENSE_CATEGORIES[cat];
+              const IconComp = EXPENSE_ICONS[meta.icon] ?? MoreHorizontal;
+              const selected = field.value === cat;
+              return (
+                <Pressable
+                  key={cat}
+                  onPress={() => field.onChange(cat)}
+                  style={[
+                    styles.categoryItem,
+                    {
+                      backgroundColor: selected ? meta.color + '25' : colors.backgroundSecondary,
+                      borderColor:     selected ? meta.color        : colors.border,
+                      borderRadius:    radius.md,
+                    },
+                  ]}
+                >
+                  <View
                     style={[
-                      styles.categoryItem,
+                      styles.categoryIcon,
+                      { backgroundColor: meta.color + '20', borderRadius: radius.full },
+                    ]}
+                  >
+                    <IconComp size={18} color={meta.color} strokeWidth={1.8} />
+                  </View>
+                  <Text
+                    style={[
+                      text.caption,
                       {
-                        backgroundColor: selected ? meta.color + '25' : colors.backgroundSecondary,
-                        borderColor:     selected ? meta.color        : colors.border,
-                        borderRadius:    radius.md,
+                        color:      selected ? meta.color : colors.textSecondary,
+                        fontFamily: selected ? font.sansSemiBold : font.sansRegular,
+                        marginTop:  4,
+                        textAlign:  'center',
                       },
                     ]}
+                    numberOfLines={1}
                   >
-                    <View
-                      style={[
-                        styles.categoryIcon,
-                        { backgroundColor: meta.color + '20', borderRadius: radius.full },
-                      ]}
-                    >
-                      <IconComp size={18} color={meta.color} strokeWidth={1.8} />
-                    </View>
-                    <Text
-                      style={[
-                        text.caption,
-                        {
-                          color:      selected ? meta.color : colors.textSecondary,
-                          fontFamily: selected ? font.sansSemiBold : font.sansRegular,
-                          marginTop:  4,
-                          textAlign:  'center',
-                        },
-                      ]}
-                      numberOfLines={1}
-                    >
-                      {meta.label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          )}
-        />
+                    {meta.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        )}
+      />
 
-        {/* Amount */}
-        <Controller
-          control={control}
-          name="amount"
-          render={({ field }) => (
-            <AmountInput
-              label="Budget limit"
-              value={field.value}
-              onChange={field.onChange}
-              error={errors.amount?.message}
-              style={styles.field}
-            />
-          )}
-        />
-
-        {/* Period — segmented */}
-        <Text style={[text.label, { color: colors.textSecondary, marginBottom: 10 }]}>
-          Period
-        </Text>
-        <Controller
-          control={control}
-          name="period"
-          render={({ field }) => (
-            <View
-              style={[
-                styles.periodSegment,
-                {
-                  backgroundColor: colors.backgroundSecondary,
-                  borderColor:     colors.border,
-                  borderRadius:    radius.full,
-                },
-              ]}
-            >
-              {PERIODS.map(({ key, label }) => {
-                const selected = field.value === key;
-                return (
-                  <Pressable
-                    key={key}
-                    onPress={() => field.onChange(key)}
-                    style={[
-                      styles.periodSegmentBtn,
-                      selected && {
-                        backgroundColor: colors.primary,
-                        borderRadius:    radius.full,
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        text.buttonLabelSm,
-                        {
-                          color:      selected ? colors.textOnForest : colors.textSecondary,
-                          fontFamily: selected ? font.sansSemiBold   : font.sansRegular,
-                        },
-                      ]}
-                    >
-                      {label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          )}
-        />
-
-        {/* Save button */}
-        <View style={styles.submit}>
-          <Button
-            label="Save Changes"
-            onPress={handleSubmit(onSubmit)}
-            loading={isSubmitting}
-            size="lg"
+      {/* Amount */}
+      <Controller
+        control={control}
+        name="amount"
+        render={({ field }) => (
+          <AmountInput
+            label="Budget limit"
+            value={field.value}
+            onChange={field.onChange}
+            error={errors.amount?.message}
+            style={styles.field}
           />
-        </View>
+        )}
+      />
 
-        {/* Delete button */}
-        <Pressable
-          onPress={handleDelete}
-          style={[
-            styles.deleteBtn,
-            {
-              borderColor:  colors.danger,
-              borderRadius: radius.full,
-            },
-          ]}
-        >
-          <Trash2 size={16} color={colors.danger} strokeWidth={1.8} />
-          <Text style={[text.buttonLabel, styles.deleteBtnLabel, { color: colors.danger }]}>
-            Delete Budget
-          </Text>
-        </Pressable>
-      </BottomSheetScrollView>
-    </BottomSheetModal>
+      {/* Period — segmented */}
+      <Text style={[text.label, { color: colors.textSecondary, marginBottom: 10 }]}>
+        Period
+      </Text>
+      <Controller
+        control={control}
+        name="period"
+        render={({ field }) => (
+          <View
+            style={[
+              styles.periodSegment,
+              {
+                backgroundColor: colors.backgroundSecondary,
+                borderColor:     colors.border,
+                borderRadius:    radius.full,
+              },
+            ]}
+          >
+            {PERIODS.map(({ key, label }) => {
+              const selected = field.value === key;
+              return (
+                <Pressable
+                  key={key}
+                  onPress={() => field.onChange(key)}
+                  style={[
+                    styles.periodSegmentBtn,
+                    selected && {
+                      backgroundColor: colors.primary,
+                      borderRadius:    radius.full,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      text.buttonLabelSm,
+                      {
+                        color:      selected ? colors.textOnForest : colors.textSecondary,
+                        fontFamily: selected ? font.sansSemiBold   : font.sansRegular,
+                      },
+                    ]}
+                  >
+                    {label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        )}
+      />
+
+      {/* Save button */}
+      <View style={styles.submit}>
+        <Button
+          label="Save Changes"
+          onPress={handleSubmit(onSubmit)}
+          loading={isSubmitting}
+          size="lg"
+        />
+      </View>
+
+      {/* Delete button */}
+      <Pressable
+        onPress={handleDelete}
+        style={[
+          styles.deleteBtn,
+          {
+            borderColor:  colors.danger,
+            borderRadius: radius.full,
+          },
+        ]}
+      >
+        <Trash2 size={16} color={colors.danger} strokeWidth={1.8} />
+        <Text style={[text.buttonLabel, { color: colors.danger }]}>
+          Delete Budget
+        </Text>
+      </Pressable>
+    </SheetModal>
   );
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  content: {
-    paddingHorizontal: 24,
-    paddingTop:        8,
-  },
   title: {
     marginBottom:  24,
     letterSpacing: -0.5,
@@ -382,8 +347,5 @@ const styles = StyleSheet.create({
     borderWidth:     1.5,
     marginTop:       12,
     gap:             8,
-  },
-  deleteBtnLabel: {
-    // color set inline
   },
 });

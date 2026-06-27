@@ -92,7 +92,7 @@ export function ProgressRing({
 
       {/* Center content */}
       {children && (
-        <View style={[StyleSheet.absoluteFillObject, styles.center]}>
+        <View style={[StyleSheet.absoluteFill, styles.center]}>
           {children}
         </View>
       )}

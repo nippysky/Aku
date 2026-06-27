@@ -6,12 +6,11 @@ import type { User, AuthSession, BiometricConfig } from '../types';
 
 // ─── Keys ─────────────────────────────────────────────────────────────────
 const KEYS = {
-  SESSION:       'aku_session',
-  PIN_HASH:      'aku_pin_hash',
-  BIOMETRIC:     'aku_biometric',
-  USER:          'aku_user',
-  ONBOARDED:     'aku_onboarded',      // persists across restarts
-  HAS_SEEN_TOUR: 'aku_has_seen_tour',  // persists across restarts
+  SESSION:   'aku_session',
+  PIN_HASH:  'aku_pin_hash',
+  BIOMETRIC: 'aku_biometric',
+  USER:      'aku_user',
+  ONBOARDED: 'aku_onboarded',  // persists across restarts
 } as const;
 
 // ─── State ────────────────────────────────────────────────────────────────
@@ -23,7 +22,6 @@ interface AuthState {
   biometric:     BiometricConfig;
   isLocked:      boolean;
   hasOnboarded:  boolean;   // persisted — true once first onboarding complete
-  hasSeenTour:   boolean;   // persisted — true once home tour dismissed
 
   // Status
   isLoading:        boolean;
@@ -37,7 +35,6 @@ interface AuthState {
   signOut:                 () => Promise<void>;
   updateUser:              (patch: Partial<User>) => void;
   markOnboardingComplete:  () => Promise<void>;
-  markTourSeen:            () => Promise<void>;
 
   // Actions — PIN
   setupPin:         (pin: string) => Promise<void>;
@@ -65,7 +62,6 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
   biometric:      { enabled: false, type: 'none' },
   isLocked:       true,
   hasOnboarded:   false,
-  hasSeenTour:    false,
   isLoading:      false,
   isInitialized:  false,
   error:          null,
@@ -75,12 +71,11 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     try {
       set({ isLoading: true });
 
-      const [sessionJson, userJson, biometricJson, onboardedStr, tourStr] = await Promise.all([
+      const [sessionJson, userJson, biometricJson, onboardedStr] = await Promise.all([
         SecureStore.getItemAsync(KEYS.SESSION),
         SecureStore.getItemAsync(KEYS.USER),
         SecureStore.getItemAsync(KEYS.BIOMETRIC),
         SecureStore.getItemAsync(KEYS.ONBOARDED),
-        SecureStore.getItemAsync(KEYS.HAS_SEEN_TOUR),
       ]);
 
       const session: AuthSession | null = sessionJson ? JSON.parse(sessionJson) : null;
@@ -89,7 +84,6 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
         ? JSON.parse(biometricJson)
         : { enabled: false, type: 'none' };
       const hasOnboarded = onboardedStr === 'true';
-      const hasSeenTour  = tourStr === 'true';
 
       // Check if session is still valid
       const isSessionValid = session
@@ -101,7 +95,6 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
         session:       isSessionValid ? session : null,
         biometric,
         hasOnboarded,
-        hasSeenTour,
         // Locked only if onboarding is done and there's a valid session to protect
         isLocked:      hasOnboarded && isSessionValid,
         isInitialized: true,
@@ -183,12 +176,6 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
   markOnboardingComplete: async () => {
     await SecureStore.setItemAsync(KEYS.ONBOARDED, 'true');
     set({ hasOnboarded: true });
-  },
-
-  // ── Mark tour seen (persists across restarts) ──────────────────────────
-  markTourSeen: async () => {
-    await SecureStore.setItemAsync(KEYS.HAS_SEEN_TOUR, 'true');
-    set({ hasSeenTour: true });
   },
 
   // ── Setup PIN (hash + store) ───────────────────────────────────────────

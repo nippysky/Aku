@@ -1,5 +1,5 @@
 import React from 'react';
-import { Text, View, ViewStyle } from 'react-native';
+import { Pressable, Text, View, ViewStyle } from 'react-native';
 import { useTheme } from '../../theme';
 import { Palette } from '../../theme/colors';
 import type { GoalWithProgress } from '../../types';
@@ -7,14 +7,15 @@ import type { GoalWithProgress } from '../../types';
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface GoalCardProps {
-  goal:   GoalWithProgress;
-  size?:  'sm' | 'md';
-  style?: ViewStyle;
+  goal:     GoalWithProgress;
+  size?:    'sm' | 'md';
+  style?:   ViewStyle;
+  onPress?: () => void;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function GoalCard({ goal, size = 'md', style }: GoalCardProps) {
+export function GoalCard({ goal, size = 'md', style, onPress }: GoalCardProps) {
   const { colors, text, font, fontSize, radius, shadow } = useTheme();
 
   const percentage   = Math.round(goal.progress * 100);
@@ -22,7 +23,7 @@ export function GoalCard({ goal, size = 'md', style }: GoalCardProps) {
   const cardWidth    = size === 'sm' ? 160 : 180;
   const savedAmount  = Math.round(goal.targetAmount * goal.progress);
 
-  return (
+  const content = (
     <View
       style={[
         {
@@ -95,4 +96,18 @@ export function GoalCard({ goal, size = 'md', style }: GoalCardProps) {
       </View>
     </View>
   );
+
+  if (onPress) {
+    return (
+      <Pressable
+        onPress={onPress}
+        style={({ pressed }) => [{ opacity: pressed ? 0.75 : 1 }]}
+        accessibilityRole="button"
+        accessibilityLabel={`${goal.name} goal`}
+      >
+        {content}
+      </Pressable>
+    );
+  }
+  return content;
 }

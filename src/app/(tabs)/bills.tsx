@@ -13,10 +13,6 @@ import { useRouter } from 'expo-router';
 import Animated, {
   FadeInDown,
   FadeOutUp,
-  useAnimatedStyle,
-  useSharedValue,
-  withSpring,
-  withTiming,
   Layout,
 } from 'react-native-reanimated';
 import { Plus, Search, X, Receipt } from 'lucide-react-native';
@@ -89,7 +85,7 @@ function SegmentedControl({ selected, onChange }: SegmentedControlProps) {
               styles.segmentBtn,
               isActive && {
                 backgroundColor: colors.primary,
-                borderRadius:    radius.sm,
+                borderRadius:    100,
               },
             ]}
           >
@@ -162,30 +158,6 @@ function SearchBar({ visible, value, onChange, onClose }: SearchBarProps) {
           <X size={18} color={colors.textTertiary} strokeWidth={1.8} />
         </Pressable>
       </View>
-    </Animated.View>
-  );
-}
-
-// ─── FAB ─────────────────────────────────────────────────────────────────────
-
-function FAB({ onPress }: { onPress: () => void }) {
-  const { colors, shadow } = useTheme();
-  const scale = useSharedValue(1);
-
-  const animStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: scale.value }],
-  }));
-
-  return (
-    <Animated.View style={[styles.fab, animStyle, shadow.lg]}>
-      <Pressable
-        onPress={onPress}
-        onPressIn={() => { scale.value = withSpring(0.94, { damping: 20, stiffness: 400 }); }}
-        onPressOut={() => { scale.value = withSpring(1, { damping: 20, stiffness: 400 }); }}
-        style={[styles.fabInner, { backgroundColor: colors.primary }]}
-      >
-        <Plus size={24} color={colors.accent} strokeWidth={2} />
-      </Pressable>
     </Animated.View>
   );
 }
@@ -288,7 +260,7 @@ export default function BillsScreen() {
         renderItem={renderItem}
         contentContainerStyle={[
           styles.listContent,
-          { paddingBottom: insets.bottom + layout.tabBarHeight + 80 },
+          { paddingBottom: insets.bottom + layout.tabBarHeight + 24 },
         ]}
         ListEmptyComponent={
           <EmptyState
@@ -308,9 +280,6 @@ export default function BillsScreen() {
         showsVerticalScrollIndicator={false}
         style={{ paddingHorizontal: 24 }}
       />
-
-      {/* ── FAB ── */}
-      <FAB onPress={() => setAddOpen(true)} />
 
       {/* ── Sheets ── */}
       <AddBillSheet
@@ -391,19 +360,5 @@ const styles = StyleSheet.create({
   },
   billRowItem: {
     marginHorizontal: 0,
-  },
-  fab: {
-    position:  'absolute',
-    bottom:    100,
-    right:     24,
-    borderRadius: 28,
-    overflow:  'visible',
-  },
-  fabInner: {
-    width:          56,
-    height:         56,
-    borderRadius:   28,
-    alignItems:     'center',
-    justifyContent: 'center',
   },
 });

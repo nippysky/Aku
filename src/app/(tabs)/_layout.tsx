@@ -1,5 +1,5 @@
 import { Tabs } from 'expo-router';
-import { Platform, View, StyleSheet } from 'react-native';
+import { Platform, View, StyleSheet, type ColorValue } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Home, Receipt, Wallet, Target, User } from 'lucide-react-native';
@@ -8,7 +8,7 @@ import { Layout } from '../../theme/spacing';
 import { FontFamily, FontSize } from '../../theme/typography';
 
 type TabIconProps = {
-  color:   string;
+  color:   ColorValue;
   focused: boolean;
   size:    number;
 };
@@ -23,7 +23,7 @@ function TabIcon({
     <View style={[styles.iconWrap, focused && styles.iconWrapActive]}>
       <Icon
         size={size}
-        color={color}
+        color={color as string}
         strokeWidth={focused ? 2 : 1.5}
       />
     </View>
@@ -74,8 +74,8 @@ export default function TabsLayout() {
               },
             }),
 
-        tabBarActiveTintColor:   colors.tabActive,
-        tabBarInactiveTintColor: colors.tabInactive,
+        tabBarActiveTintColor:   colors.tabActive   as string,
+        tabBarInactiveTintColor: colors.tabInactive as string,
         tabBarLabelStyle: {
           fontFamily:    FontFamily.sansMedium,
           fontSize:      FontSize.xs,

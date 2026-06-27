@@ -38,6 +38,7 @@ interface ButtonProps {
   iconLeft?: LucideIcon;
   iconRight?: LucideIcon;
   fullWidth?: boolean;
+  style?: import('react-native').ViewStyle;
 }
 
 // ─── AnimatedPressable ────────────────────────────────────────────────────────
@@ -46,13 +47,8 @@ const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 // ─── Platform-specific border radius ─────────────────────────────────────────
 
-function buttonRadius(variant: ButtonVariant): number {
-  if (IS_IOS) {
-    // iOS: pill for primary/danger, rounded for secondary/ghost
-    return variant === 'primary' || variant === 'danger' ? 100 : 14;
-  }
-  // Android Material 3: 12dp for all filled, 10dp for outlined
-  return variant === 'secondary' || variant === 'ghost' ? 10 : 12;
+function buttonRadius(_variant: ButtonVariant): number {
+  return 100; // Full pill on all platforms and all variants
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -67,6 +63,7 @@ export function Button({
   iconLeft: IconLeft,
   iconRight: IconRight,
   fullWidth = true,
+  style,
 }: ButtonProps) {
   const { colors, layout, text, font, fontSize, platform } = useTheme();
   const scale = useSharedValue(1);
@@ -181,6 +178,7 @@ export function Button({
           alignSelf: fullWidth ? 'stretch' : 'flex-start',
           ...containerStyle,
         },
+        style,
       ]}
     >
       {loading ? (

@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { View, StatusBar } from 'react-native';
 import { Slot, useRouter, useSegments } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as SplashScreen from 'expo-splash-screen';
@@ -10,7 +11,6 @@ import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { useColorScheme } from 'react-native';
 import { initializeDatabase } from '../lib/database/client';
 import { useAuthStore } from '../store/auth.store';
-import { useUIStore } from '../store/ui.store';
 import { ToastContainer } from '../components/ui/ToastContainer';
 import { LightColors, DarkColors } from '../theme/colors';
 import { notificationService, useNotificationNavigation } from '../lib/notifications';
@@ -25,8 +25,7 @@ export default function RootLayout() {
   const router     = useRouter();
   const segments   = useSegments();
 
-  const { isInitialized, user, session, isLocked, hasOnboarded, hasSeenTour, markTourSeen, initialize } = useAuthStore();
-  const { startTour } = useUIStore();
+  const { isInitialized, user, session, isLocked, hasOnboarded, initialize } = useAuthStore();
 
   // Wire up notification deep-link navigation
   useNotificationNavigation();
@@ -84,9 +83,10 @@ export default function RootLayout() {
         router.replace('/(onboarding)');
       }
     } else if (isLocked) {
-      // Returning user — session exists but needs PIN/biometric to unlock.
-      // Leave alone while still completing onboarding (PIN setup etc.)
-      if (!inAuth && !inOnboarding) {
+      // Returning user — hasOnboarded=true so onboarding is genuinely done.
+      // Always push to auth regardless of current route (removes the stale
+      // root-index redirect that used to land returning users in /(onboarding)).
+      if (!inAuth) {
         router.replace('/(auth)');
       }
     } else if (hasSession) {
@@ -94,21 +94,13 @@ export default function RootLayout() {
       if (!inTabs && !inOnboarding) {
         router.replace('/(tabs)');
       }
-      // Show tour on very first landing in tabs
-      if (inTabs && !hasSeenTour) {
-        const t = setTimeout(() => {
-          startTour();
-          void markTourSeen();
-        }, 800);
-        return () => clearTimeout(t);
-      }
     } else {
       // Onboarding was completed but session expired (edge case) — re-auth
       if (!inAuth && !inOnboarding) {
         router.replace('/(auth)');
       }
     }
-  }, [isInitialized, fontsLoaded, user, session, isLocked, hasOnboarded, hasSeenTour, segments]);
+  }, [isInitialized, fontsLoaded, user, session, isLocked, hasOnboarded, segments]);
 
   if (!fontsLoaded || !isInitialized) {
     // Native splash screen handles this state
@@ -124,13 +116,37 @@ export default function RootLayout() {
               <StatusBar
                 barStyle={isDark ? 'light-content' : 'dark-content'}
                 backgroundColor={colors.background}
+                translucent={false}
               />
               <Slot />
               <ToastContainer />
+              {/* Global status bar shield — blends content scroll edge with status bar */}
+              <StatusBarShield backgroundColor={colors.background} />
             </View>
           </BottomSheetModalProvider>
         </KeyboardProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
+  );
+}
+
+// ─── StatusBarShield ──────────────────────────────────────────────────────────
+// Must be a child component so useSafeAreaInsets runs inside SafeAreaProvider.
+
+function StatusBarShield({ backgroundColor }: { backgroundColor: string }) {
+  const insets = useSafeAreaInsets();
+  return (
+    <View
+      style={{
+        position:        'absolute',
+        top:             0,
+        left:            0,
+        right:           0,
+        height:          insets.top,
+        backgroundColor,
+        zIndex:          999,
+        pointerEvents:   'none' as const,
+      }}
+    />
   );
 }

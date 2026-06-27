@@ -1,18 +1,12 @@
-import React, { useCallback, useRef, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
-  Platform,
   Pressable,
   StyleSheet,
   Switch,
   Text,
   View,
 } from 'react-native';
-import {
-  BottomSheetModal,
-  BottomSheetScrollView,
-} from '@gorhom/bottom-sheet';
-import { GlassSheetBackground } from '../ui/GlassSheetBackground';
 import { useForm, Controller } from 'react-hook-form';
 import {
   UtensilsCrossed, Car, ShoppingBag, Tv, Home, Zap,
@@ -21,6 +15,7 @@ import {
 } from 'lucide-react-native';
 import { format, parseISO } from 'date-fns';
 import { useTheme } from '../../theme';
+import { SheetModal } from '../ui/SheetModal';
 import { Input } from '../ui/Input';
 import { AmountInput } from '../ui/AmountInput';
 import { Button } from '../ui/Button';
@@ -79,14 +74,12 @@ interface EditExpenseSheetProps {
   onSuccess?: () => void;
 }
 
-const SNAP_POINTS = ['65%', '90%'];
 const CATEGORIES = Object.keys(EXPENSE_CATEGORIES) as ExpenseCategory[];
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function EditExpenseSheet({ expense, onClose, onSuccess }: EditExpenseSheetProps) {
   const { colors, text, font, fontSize, radius } = useTheme();
-  const sheetRef = useRef<BottomSheetModal>(null);
 
   const { update, remove } = useExpensesStore();
   const { showToast }      = useUIStore();
@@ -124,14 +117,10 @@ export function EditExpenseSheet({ expense, onClose, onSuccess }: EditExpenseShe
         date:        expense.date,
         isShared:    expense.isShared,
       });
-      sheetRef.current?.present();
-    } else {
-      sheetRef.current?.dismiss();
     }
   }, [expense, reset]);
 
   const handleClose = useCallback(() => {
-    sheetRef.current?.dismiss();
     onClose();
   }, [onClose]);
 
@@ -191,21 +180,8 @@ export function EditExpenseSheet({ expense, onClose, onSuccess }: EditExpenseShe
   }, [expense, remove, showToast, handleClose, onSuccess]);
 
   return (
-    <BottomSheetModal
-      ref={sheetRef}
-      snapPoints={SNAP_POINTS}
-      enablePanDownToClose
-      onDismiss={onClose}
-      keyboardBehavior="interactive"
-      keyboardBlurBehavior="restore"
-      backgroundComponent={Platform.OS === 'ios' ? GlassSheetBackground : undefined}
-      backgroundStyle={Platform.OS !== 'ios' ? { backgroundColor: colors.card } : undefined}
-      handleIndicatorStyle={{ backgroundColor: colors.border, width: 36 }}
-    >
-      <BottomSheetScrollView
-        contentContainerStyle={[styles.content, { paddingBottom: 48 }]}
-        keyboardShouldPersistTaps="handled"
-      >
+    <>
+      <SheetModal visible={!!expense} onClose={handleClose}>
         {/* Title */}
         <Text
           style={[
@@ -303,7 +279,7 @@ export function EditExpenseSheet({ expense, onClose, onSuccess }: EditExpenseShe
           )}
         />
 
-        {/* Date picker */}
+        {/* Date */}
         <View style={styles.field}>
           <Text style={[text.label, { color: colors.textSecondary, marginBottom: 6 }]}>
             Date
@@ -320,13 +296,7 @@ export function EditExpenseSheet({ expense, onClose, onSuccess }: EditExpenseShe
             ]}
           >
             <Text
-              style={[
-                text.body,
-                {
-                  color: date ? colors.text : colors.textTertiary,
-                  flex:  1,
-                },
-              ]}
+              style={[text.body, { color: date ? colors.text : colors.textTertiary, flex: 1 }]}
             >
               {date ? formatDisplay(date) : 'Select date'}
             </Text>
@@ -339,7 +309,7 @@ export function EditExpenseSheet({ expense, onClose, onSuccess }: EditExpenseShe
           )}
         </View>
 
-        {/* Shared toggle — only when household exists */}
+        {/* Shared toggle */}
         {household ? (
           <Controller
             control={control}
@@ -375,7 +345,7 @@ export function EditExpenseSheet({ expense, onClose, onSuccess }: EditExpenseShe
           />
         </View>
 
-        {/* Delete danger button */}
+        {/* Delete */}
         <Pressable
           onPress={handleDelete}
           style={styles.deleteBtn}
@@ -386,27 +356,23 @@ export function EditExpenseSheet({ expense, onClose, onSuccess }: EditExpenseShe
             Delete expense
           </Text>
         </Pressable>
-      </BottomSheetScrollView>
+      </SheetModal>
 
       <AkuDatePicker
         isOpen={showDatePicker}
         value={date}
-        onChange={(iso) => setValue('date', iso)}
+        onChange={(iso) => { setValue('date', iso); setShowDatePicker(false); }}
         onClose={() => setShowDatePicker(false)}
         minDate="2020-01-01"
         title="Select expense date"
       />
-    </BottomSheetModal>
+    </>
   );
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  content: {
-    paddingHorizontal: 24,
-    paddingTop:        8,
-  },
   title: {
     marginBottom:  24,
     letterSpacing: -0.5,
@@ -460,6 +426,6 @@ const styles = StyleSheet.create({
   deleteBtn: {
     alignItems:      'center',
     paddingVertical: 16,
-    marginTop:       8,
+    marginTop:        8,
   },
 });

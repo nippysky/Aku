@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { StyleSheet, Text, View, ViewStyle } from 'react-native';
+import { Pressable, StyleSheet, Text, View, ViewStyle } from 'react-native';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -46,6 +46,7 @@ interface BudgetBarProps {
   spent:    number;  // kobo
   total:    number;  // kobo
   status:   BudgetStatus;
+  onPress?: () => void;
   style?:   ViewStyle;
 }
 
@@ -58,7 +59,7 @@ function formatAmount(kobo: number): string {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function BudgetBar({ category, spent, total, status, style }: BudgetBarProps) {
+export function BudgetBar({ category, spent, total, status, onPress, style }: BudgetBarProps) {
   const { colors, text, font, radius } = useTheme();
 
   const meta = EXPENSE_CATEGORIES[category];
@@ -83,7 +84,7 @@ export function BudgetBar({ category, spent, total, status, style }: BudgetBarPr
     width: `${animWidth.value * 100}%` as `${number}%`,
   }));
 
-  return (
+  const inner = (
     <View style={[styles.container, style]}>
       {/* Header row */}
       <View style={styles.header}>
@@ -123,6 +124,19 @@ export function BudgetBar({ category, spent, total, status, style }: BudgetBarPr
       </View>
     </View>
   );
+
+  if (onPress) {
+    return (
+      <Pressable
+        onPress={onPress}
+        style={({ pressed }) => [{ opacity: pressed ? 0.75 : 1 }]}
+        accessibilityRole="button"
+      >
+        {inner}
+      </Pressable>
+    );
+  }
+  return inner;
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────

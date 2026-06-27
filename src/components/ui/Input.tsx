@@ -40,6 +40,8 @@ interface InputProps
     | 'maxLength'
     | 'returnKeyType'
     | 'onSubmitEditing'
+    | 'onBlur'
+    | 'onFocus'
     | 'blurOnSubmit'
     | 'textContentType'
     | 'value'

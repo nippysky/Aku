@@ -1,17 +1,11 @@
-import React, { useCallback, useRef, useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
-  Platform,
   Pressable,
   StyleSheet,
   Switch,
   Text,
   View,
 } from 'react-native';
-import {
-  BottomSheetModal,
-  BottomSheetScrollView,
-} from '@gorhom/bottom-sheet';
-import { GlassSheetBackground } from '../ui/GlassSheetBackground';
 import { useForm, Controller } from 'react-hook-form';
 import {
   UtensilsCrossed, Car, ShoppingBag, Tv, Home, Zap,
@@ -20,6 +14,7 @@ import {
 } from 'lucide-react-native';
 import { format, parseISO } from 'date-fns';
 import { useTheme } from '../../theme';
+import { SheetModal } from '../ui/SheetModal';
 import { Input } from '../ui/Input';
 import { AmountInput } from '../ui/AmountInput';
 import { Button } from '../ui/Button';
@@ -87,19 +82,17 @@ interface AddExpenseSheetProps {
   onSuccess?: () => void;
 }
 
-const SNAP_POINTS = ['65%', '90%'];
 const CATEGORIES = Object.keys(EXPENSE_CATEGORIES) as ExpenseCategory[];
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function AddExpenseSheet({ isOpen, onClose, onSuccess }: AddExpenseSheetProps) {
-  const { colors, text, font, fontSize, spacing, radius } = useTheme();
-  const sheetRef = useRef<BottomSheetModal>(null);
+  const { colors, text, font, fontSize, radius } = useTheme();
 
-  const { add, selectedMonth } = useExpensesStore();
-  const { user }               = useAuthStore();
-  const { showToast }          = useUIStore();
-  const { household }          = useHouseholdStore();
+  const { add }       = useExpensesStore();
+  const { user }      = useAuthStore();
+  const { showToast } = useUIStore();
+  const { household } = useHouseholdStore();
 
   const [showDatePicker, setShowDatePicker] = useState(false);
 
@@ -123,16 +116,7 @@ export function AddExpenseSheet({ isOpen, onClose, onSuccess }: AddExpenseSheetP
 
   const date = watch('date');
 
-  useEffect(() => {
-    if (isOpen) {
-      sheetRef.current?.present();
-    } else {
-      sheetRef.current?.dismiss();
-    }
-  }, [isOpen]);
-
   const handleClose = useCallback(() => {
-    sheetRef.current?.dismiss();
     reset();
     onClose();
   }, [onClose, reset]);
@@ -171,21 +155,8 @@ export function AddExpenseSheet({ isOpen, onClose, onSuccess }: AddExpenseSheetP
   );
 
   return (
-    <BottomSheetModal
-      ref={sheetRef}
-      snapPoints={SNAP_POINTS}
-      enablePanDownToClose
-      onDismiss={onClose}
-      keyboardBehavior="interactive"
-      keyboardBlurBehavior="restore"
-      backgroundComponent={Platform.OS === 'ios' ? GlassSheetBackground : undefined}
-      backgroundStyle={Platform.OS !== 'ios' ? { backgroundColor: colors.card } : undefined}
-      handleIndicatorStyle={{ backgroundColor: colors.border, width: 36 }}
-    >
-      <BottomSheetScrollView
-        contentContainerStyle={[styles.content, { paddingBottom: 48 }]}
-        keyboardShouldPersistTaps="handled"
-      >
+    <>
+      <SheetModal visible={isOpen} onClose={handleClose}>
         {/* Title */}
         <Text
           style={[
@@ -196,7 +167,7 @@ export function AddExpenseSheet({ isOpen, onClose, onSuccess }: AddExpenseSheetP
           Add Expense
         </Text>
 
-        {/* Amount — large, top of sheet for quick entry */}
+        {/* Amount */}
         <Controller
           control={control}
           name="amount"
@@ -283,7 +254,7 @@ export function AddExpenseSheet({ isOpen, onClose, onSuccess }: AddExpenseSheetP
           )}
         />
 
-        {/* Date picker */}
+        {/* Date */}
         <View style={styles.field}>
           <Text style={[text.label, { color: colors.textSecondary, marginBottom: 6 }]}>
             Date
@@ -300,13 +271,7 @@ export function AddExpenseSheet({ isOpen, onClose, onSuccess }: AddExpenseSheetP
             ]}
           >
             <Text
-              style={[
-                text.body,
-                {
-                  color: date ? colors.text : colors.textTertiary,
-                  flex:  1,
-                },
-              ]}
+              style={[text.body, { color: date ? colors.text : colors.textTertiary, flex: 1 }]}
             >
               {date ? formatDisplay(date) : 'Select date'}
             </Text>
@@ -319,7 +284,7 @@ export function AddExpenseSheet({ isOpen, onClose, onSuccess }: AddExpenseSheetP
           )}
         </View>
 
-        {/* Shared expense toggle — only when household exists */}
+        {/* Shared toggle — only when household exists */}
         {household ? (
           <Controller
             control={control}
@@ -354,27 +319,23 @@ export function AddExpenseSheet({ isOpen, onClose, onSuccess }: AddExpenseSheetP
             size="lg"
           />
         </View>
-      </BottomSheetScrollView>
+      </SheetModal>
 
       <AkuDatePicker
         isOpen={showDatePicker}
         value={date}
-        onChange={(iso) => setValue('date', iso)}
+        onChange={(iso) => { setValue('date', iso); setShowDatePicker(false); }}
         onClose={() => setShowDatePicker(false)}
         minDate="2020-01-01"
         title="Select expense date"
       />
-    </BottomSheetModal>
+    </>
   );
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  content: {
-    paddingHorizontal: 24,
-    paddingTop:        8,
-  },
   title: {
     marginBottom:  24,
     letterSpacing: -0.5,

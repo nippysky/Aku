@@ -5,6 +5,7 @@ import {
   StyleSheet,
   View,
   ViewStyle,
+  type StyleProp,
 } from 'react-native';
 import { BlurView } from 'expo-blur';
 import Animated, {
@@ -22,8 +23,8 @@ interface CardProps {
   children:    React.ReactNode;
   variant?:    CardVariant;
   onPress?:    () => void;
-  style?:      ViewStyle;
-  contentStyle?: ViewStyle;
+  style?:      StyleProp<ViewStyle>;
+  contentStyle?: StyleProp<ViewStyle>;
   testID?:     string;
   /** Force a solid (non-blurred) card on iOS — useful for inner cards or inputs */
   blurless?:   boolean;

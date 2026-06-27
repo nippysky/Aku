@@ -93,7 +93,7 @@ function navigateFromData(
 
     case 'home':
     default:
-      router.push('/(tabs)/' as const);
+      router.push('/(tabs)/index' as never);
       break;
   }
 }

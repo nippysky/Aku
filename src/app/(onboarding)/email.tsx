@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import {
   StyleSheet,
   Text,
@@ -11,15 +11,23 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Mail } from 'lucide-react-native';
+import { useForm, Controller } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
 import { Button, Input, KeyboardWrapper, OnboardingHeader } from '../../components/ui';
 import { useTheme } from '../../theme';
 import { OnboardingStorage } from '../../lib/onboarding-storage';
 
-// ─── Email Validation ──────────────────────────────────────────────────────
+// ─── Schema ────────────────────────────────────────────────────────────────
 
-function isValidEmail(value: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
-}
+const schema = z.object({
+  email: z
+    .string()
+    .min(1, 'Please enter your email address.')
+    .email('Please enter a valid email address.'),
+});
+
+type FormValues = z.infer<typeof schema>;
 
 // ─── Screen ────────────────────────────────────────────────────────────────
 
@@ -28,21 +36,20 @@ export default function EmailScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
 
-  const [email, setEmail]     = useState('');
-  const [error, setError]     = useState('');
-  const [touched, setTouched] = useState(false);
+  const {
+    control,
+    handleSubmit,
+    formState: { errors, isValid },
+  } = useForm<FormValues>({
+    resolver:      zodResolver(schema),
+    defaultValues: { email: '' },
+    mode:          'onChange',
+  });
 
-  const canContinue = isValidEmail(email);
-
-  function handleContinue() {
-    setTouched(true);
-    if (!isValidEmail(email)) {
-      setError('Please enter a valid email address.');
-      return;
-    }
-    setError('');
-    OnboardingStorage.setEmail(email.trim().toLowerCase());
-    router.push({ pathname: '/(onboarding)/verify', params: { email } });
+  function onSubmit({ email }: FormValues) {
+    const normalised = email.trim().toLowerCase();
+    OnboardingStorage.setEmail(normalised);
+    router.push({ pathname: '/(onboarding)/verify', params: { email: normalised } });
   }
 
   return (
@@ -89,22 +96,26 @@ export default function EmailScreen() {
             entering={FadeInDown.delay(280).duration(500)}
             style={{ marginTop: spacing[8] }}
           >
-            <Input
-              label="Email address"
-              placeholder="you@example.com"
-              value={email}
-              onChangeText={(v) => {
-                setEmail(v);
-                if (touched && error) setError('');
-              }}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoCorrect={false}
-              autoComplete="email"
-              textContentType="emailAddress"
-              returnKeyType="done"
-              error={error || undefined}
-              onSubmitEditing={handleContinue}
+            <Controller
+              control={control}
+              name="email"
+              render={({ field: { onChange, onBlur, value } }) => (
+                <Input
+                  label="Email address"
+                  placeholder="you@example.com"
+                  value={value}
+                  onChangeText={onChange}
+                  onBlur={onBlur}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  autoComplete="email"
+                  textContentType="emailAddress"
+                  returnKeyType="done"
+                  error={errors.email?.message}
+                  onSubmitEditing={handleSubmit(onSubmit)}
+                />
+              )}
             />
           </Animated.View>
         </View>
@@ -116,8 +127,8 @@ export default function EmailScreen() {
             variant="primary"
             size="lg"
             fullWidth
-            disabled={!canContinue}
-            onPress={handleContinue}
+            disabled={!isValid}
+            onPress={handleSubmit(onSubmit)}
           />
         </Animated.View>
       </View>
@@ -129,13 +140,13 @@ export default function EmailScreen() {
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
+    flex:           1,
     justifyContent: 'space-between',
   },
   content: {
-    flex: 1,
+    flex:           1,
     justifyContent: 'center',
-    paddingBottom: 24,
+    paddingBottom:  24,
   },
   iconWrap: {
     alignSelf: 'flex-start',

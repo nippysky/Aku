@@ -1,16 +1,11 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
-  Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
-import {
-  BottomSheetModal,
-  BottomSheetScrollView,
-} from '@gorhom/bottom-sheet';
-import { GlassSheetBackground } from '../ui/GlassSheetBackground';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -20,6 +15,7 @@ import { useForm, Controller } from 'react-hook-form';
 import { Calendar } from 'lucide-react-native';
 import { format, parseISO } from 'date-fns';
 import { useTheme } from '../../theme';
+import { SheetModal } from '../ui/SheetModal';
 import { Input } from '../ui/Input';
 import { AmountInput } from '../ui/AmountInput';
 import { Button } from '../ui/Button';
@@ -45,12 +41,7 @@ interface FormData {
   notes:      string;
 }
 
-// ─── Constants ────────────────────────────────────────────────────────────────
-
 const EMOJI_OPTIONS = ['✈️', '🏠', '🚗', '💍', '📚', '🎯', '💰', '🌴'];
-const SNAP_POINTS  = ['75%', '90%'];
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function todayString(): string {
   const d = new Date();
@@ -111,7 +102,6 @@ function EmojiButton({ emoji, selected, onPress }: EmojiButtonProps) {
 
 export function EditGoalSheet({ goal, onClose, onSuccess }: EditGoalSheetProps) {
   const { colors, text, font, fontSize, radius } = useTheme();
-  const sheetRef = useRef<BottomSheetModal>(null);
   const { update }    = useGoalsStore();
   const { showToast } = useUIStore();
 
@@ -149,17 +139,12 @@ export function EditGoalSheet({ goal, onClose, onSuccess }: EditGoalSheetProps) 
         targetDate: goal.targetDate ?? todayString(),
         notes:      goal.notes ?? '',
       });
-      sheetRef.current?.present();
-    } else {
-      sheetRef.current?.dismiss();
     }
   }, [goal, reset]);
 
   const handleClose = useCallback(() => {
-    sheetRef.current?.dismiss();
-    reset();
     onClose();
-  }, [onClose, reset]);
+  }, [onClose]);
 
   const onSubmit = useCallback(async (data: FormData) => {
     if (!goal) return;
@@ -187,21 +172,8 @@ export function EditGoalSheet({ goal, onClose, onSuccess }: EditGoalSheetProps) 
   }, [goal, update, showToast, handleClose, onSuccess]);
 
   return (
-    <BottomSheetModal
-      ref={sheetRef}
-      snapPoints={SNAP_POINTS}
-      enablePanDownToClose
-      onDismiss={onClose}
-      keyboardBehavior="interactive"
-      keyboardBlurBehavior="restore"
-      backgroundComponent={Platform.OS === 'ios' ? GlassSheetBackground : undefined}
-      backgroundStyle={Platform.OS !== 'ios' ? { backgroundColor: colors.card } : undefined}
-      handleIndicatorStyle={{ backgroundColor: colors.border, width: 36 }}
-    >
-      <BottomSheetScrollView
-        contentContainerStyle={[styles.content, { paddingBottom: 48 }]}
-        keyboardShouldPersistTaps="handled"
-      >
+    <>
+      <SheetModal visible={!!goal} onClose={handleClose}>
         {/* Title */}
         <Text
           style={[
@@ -220,7 +192,13 @@ export function EditGoalSheet({ goal, onClose, onSuccess }: EditGoalSheetProps) 
           control={control}
           name="emoji"
           render={({ field }) => (
-            <View style={styles.emojiRow}>
+            <ScrollView
+              horizontal
+              nestedScrollEnabled
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.emojiRow}
+              style={styles.emojiScroll}
+            >
               {EMOJI_OPTIONS.map((e) => (
                 <EmojiButton
                   key={e}
@@ -229,7 +207,7 @@ export function EditGoalSheet({ goal, onClose, onSuccess }: EditGoalSheetProps) 
                   onPress={() => field.onChange(e)}
                 />
               ))}
-            </View>
+            </ScrollView>
           )}
         />
 
@@ -315,13 +293,7 @@ export function EditGoalSheet({ goal, onClose, onSuccess }: EditGoalSheetProps) 
               ]}
             >
               <Text
-                style={[
-                  text.body,
-                  {
-                    color: targetDate ? colors.text : colors.textTertiary,
-                    flex:  1,
-                  },
-                ]}
+                style={[text.body, { color: targetDate ? colors.text : colors.textTertiary, flex: 1 }]}
               >
                 {targetDate ? formatDisplay(targetDate) : 'Select date'}
               </Text>
@@ -356,35 +328,34 @@ export function EditGoalSheet({ goal, onClose, onSuccess }: EditGoalSheetProps) 
             size="lg"
           />
         </View>
-      </BottomSheetScrollView>
+      </SheetModal>
 
       <AkuDatePicker
         isOpen={showDatePicker}
         value={targetDate}
-        onChange={(iso) => setValue('targetDate', iso)}
+        onChange={(iso) => { setValue('targetDate', iso); setShowDatePicker(false); }}
         onClose={() => setShowDatePicker(false)}
         title="Select target date"
       />
-    </BottomSheetModal>
+    </>
   );
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  content: {
-    paddingHorizontal: 24,
-    paddingTop:        8,
-  },
   title: {
     marginBottom:  24,
     letterSpacing: -0.5,
   },
+  emojiScroll: {
+    marginBottom: 20,
+    flexShrink:   0,
+  },
   emojiRow: {
     flexDirection: 'row',
-    flexWrap:      'nowrap',
     gap:            8,
-    marginBottom:  20,
+    paddingRight:   4,
   },
   emojiBtn: {
     width:          44,
@@ -417,11 +388,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical:   14,
     gap:               8,
-  },
-  dateChip: {
-    paddingHorizontal: 14,
-    paddingVertical:    8,
-    marginRight:        4,
   },
   submit: {
     marginTop: 8,

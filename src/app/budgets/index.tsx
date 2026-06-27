@@ -10,9 +10,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import Animated, {
   FadeInDown,
-  useAnimatedStyle,
-  useSharedValue,
-  withSpring,
 } from 'react-native-reanimated';
 import {
   ChevronLeft,
@@ -59,30 +56,6 @@ function overallStatus(budgets: BudgetWithSpent[]): BudgetStatus {
   if (budgets.some((b) => b.status === 'exceeded'))   return 'exceeded';
   if (budgets.some((b) => b.status === 'near-limit')) return 'near-limit';
   return 'healthy';
-}
-
-// ─── FAB ─────────────────────────────────────────────────────────────────────
-
-function FAB({ onPress }: { onPress: () => void }) {
-  const { colors, shadow } = useTheme();
-  const scale = useSharedValue(1);
-
-  const animStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: scale.value }],
-  }));
-
-  return (
-    <Animated.View style={[styles.fab, animStyle, shadow.lg]}>
-      <Pressable
-        onPress={onPress}
-        onPressIn={() => { scale.value = withSpring(0.94, { damping: 20, stiffness: 400 }); }}
-        onPressOut={() => { scale.value = withSpring(1, { damping: 20, stiffness: 400 }); }}
-        style={[styles.fabInner, { backgroundColor: colors.primary }]}
-      >
-        <Plus size={24} color={colors.accent} strokeWidth={2} />
-      </Pressable>
-    </Animated.View>
-  );
 }
 
 // ─── Progress bar ─────────────────────────────────────────────────────────────
@@ -365,7 +338,7 @@ export default function BudgetsScreen() {
         renderItem={({ item }) => (
           <BudgetCard
             budget={item}
-            onPress={() => setEditBudget(item)}
+            onPress={() => router.push(`/budgets/${item.id}` as never)}
           />
         )}
         ListHeaderComponent={<SummaryCard budgets={budgets} />}
@@ -381,13 +354,10 @@ export default function BudgetsScreen() {
         }
         contentContainerStyle={[
           styles.listContent,
-          { paddingBottom: insets.bottom + 120 },
+          { paddingBottom: insets.bottom + 40 },
         ]}
         showsVerticalScrollIndicator={false}
       />
-
-      {/* ── FAB ── */}
-      <FAB onPress={() => setAddOpen(true)} />
 
       {/* ── Sheets ── */}
       <AddBudgetSheet
@@ -497,19 +467,5 @@ const styles = StyleSheet.create({
   },
   progressFill: {
     height: '100%',
-  },
-  fab: {
-    position:     'absolute',
-    bottom:       32,
-    right:        24,
-    borderRadius: 28,
-    overflow:     'visible',
-  },
-  fabInner: {
-    width:          56,
-    height:         56,
-    borderRadius:   28,
-    alignItems:     'center',
-    justifyContent: 'center',
   },
 });

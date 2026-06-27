@@ -54,7 +54,7 @@ const STAGGER = 35;
 interface ActionItemProps {
   action:   FABAction;
   index:    number;
-  progress: Animated.SharedValue<number>;
+  progress: { value: number };
   onPress:  () => void;
 }
 
@@ -117,38 +117,45 @@ export function ExpandableFAB({ actions, bottomInset }: ExpandableFABProps) {
   // One shared value drives the entire open/close animation
   const openProgress = useSharedValue(0);
 
-  // Individual per-action progress values for staggered timing
-  const actionProgress = actions.map(() => useSharedValue(0));  // eslint-disable-line react-hooks/rules-of-hooks
+  // Per-action progress values — declared individually so hooks are never
+  // called inside a loop (Rules of Hooks). We support up to 5 actions;
+  // only the first `actions.length` are used.
+  const sv0 = useSharedValue(0);
+  const sv1 = useSharedValue(0);
+  const sv2 = useSharedValue(0);
+  const sv3 = useSharedValue(0);
+  const sv4 = useSharedValue(0);
+  const ALL_SVS = [sv0, sv1, sv2, sv3, sv4];
+  const actionProgress = ALL_SVS.slice(0, actions.length);
 
   const open = useCallback(() => {
     setIsOpen(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     openProgress.value = withSpring(1, SPRING);
-    // Stagger each action: index 0 (closest) opens first
     actionProgress.forEach((ap, i) => {
       ap.value = withDelay(i * STAGGER, withSpring(1, SPRING));
     });
-  }, [openProgress, actionProgress]);
+  }, [openProgress, sv0, sv1, sv2, sv3, sv4]);
 
   const close = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     openProgress.value = withSpring(0, SPRING);
-    // Reverse stagger on close: furthest collapses first
     const reversed = [...actionProgress].reverse();
     reversed.forEach((ap, i) => {
       ap.value = withDelay(i * STAGGER, withSpring(0, SPRING));
     });
-    // Delay the state update until after animation completes
     setTimeout(() => setIsOpen(false), actions.length * STAGGER + 200);
-  }, [openProgress, actionProgress, actions.length]);
+  }, [openProgress, sv0, sv1, sv2, sv3, sv4, actions.length]);
 
   const toggle = useCallback(() => {
     isOpen ? close() : open();
   }, [isOpen, open, close]);
 
   const handleActionPress = useCallback((action: FABAction) => {
+    // Call onPress immediately so the sheet state updates before close animation
+    // completes — this avoids a timing race where the sheet never gets to present.
+    action.onPress();
     close();
-    setTimeout(() => action.onPress(), 150);
   }, [close]);
 
   // Backdrop opacity — soft, not too heavy

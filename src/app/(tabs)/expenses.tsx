@@ -11,9 +11,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
   FadeInDown,
   FadeOutUp,
-  useAnimatedStyle,
-  useSharedValue,
-  withSpring,
 } from 'react-native-reanimated';
 import {
   Plus,
@@ -22,7 +19,7 @@ import {
   Heart, Users, BookOpen, PiggyBank, Gift, MoreHorizontal,
   X,
 } from 'lucide-react-native';
-import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
+import { useRouter } from 'expo-router';
 import { useTheme } from '../../theme';
 import { Card } from '../../components/ui/Card';
 import { EmptyState } from '../../components/ui/EmptyState';
@@ -145,36 +142,6 @@ function getTop3Categories(
     .map(([cat, amount]) => ({ cat, amount }));
 }
 
-// ─── FAB ──────────────────────────────────────────────────────────────────────
-
-function FAB({ onPress }: { onPress: () => void }) {
-  const { colors, shadow } = useTheme();
-  const scale = useSharedValue(1);
-
-  const animStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: scale.value }],
-  }));
-
-  return (
-    <Animated.View style={[styles.fab, animStyle, shadow.lg]}>
-      <Pressable
-        onPress={onPress}
-        onPressIn={() => {
-          scale.value = withSpring(0.94, { damping: 20, stiffness: 400 });
-        }}
-        onPressOut={() => {
-          scale.value = withSpring(1, { damping: 20, stiffness: 400 });
-        }}
-        style={[styles.fabInner, { backgroundColor: colors.primary }]}
-        accessibilityRole="button"
-        accessibilityLabel="Add expense"
-      >
-        <Plus size={24} color={colors.accent} strokeWidth={2} />
-      </Pressable>
-    </Animated.View>
-  );
-}
-
 // ─── Budget alert banner ──────────────────────────────────────────────────────
 
 interface BudgetBannerProps {
@@ -211,6 +178,7 @@ const EXPENSE_CATEGORIES_KEYS = Object.keys(EXPENSE_CATEGORIES) as ExpenseCatego
 export default function ExpensesScreen() {
   const { colors, text, font, fontSize, radius, layout } = useTheme();
   const insets = useSafeAreaInsets();
+  const router  = useRouter();
 
   const {
     expenses,
@@ -310,13 +278,13 @@ export default function ExpensesScreen() {
       return (
         <ExpenseRow
           expense={item.expense}
-          onPress={() => setEditExpense(item.expense)}
+          onPress={() => router.push(`/expenses/${item.expense.id}` as never)}
           onLongPress={() => setEditExpense(item.expense)}
           style={styles.expenseRow}
         />
       );
     },
-    [colors, text],
+    [colors, text, router, setEditExpense],
   );
 
   const keyExtractor = useCallback((item: ListItem, index: number): string => {
@@ -324,147 +292,153 @@ export default function ExpensesScreen() {
     return `expense-${item.expense.id}`;
   }, []);
 
-  // ── Header component for FlatList (sticky summary + filters) ──
-  const ListHeader = (
-    <>
-      {/* Budget alert banners */}
-      {exceededBudgets.slice(0, 1).map((b) => (
-        <BudgetBanner
-          key={b.id}
-          category={b.category}
-          onDismiss={() => dismissBudget(b.id)}
-        />
-      ))}
+  // ── Header component for FlatList ──
+  // Must be a function (not a JSX element) so FlatList instantiates it
+  // correctly and horizontal ScrollViews inside receive proper touch events.
+  const ListHeader = useCallback(
+    () => (
+      <>
+        {/* Budget alert banners */}
+        {exceededBudgets.slice(0, 1).map((b) => (
+          <BudgetBanner
+            key={b.id}
+            category={b.category}
+            onDismiss={() => dismissBudget(b.id)}
+          />
+        ))}
 
-      {/* Summary card */}
-      <Card style={styles.summaryCard}>
-        <View style={styles.summaryInner}>
-          {/* Total spent */}
-          <Text
-            style={[
-              styles.totalLabel,
-              text.labelCaps,
-              { color: colors.textSecondary },
-            ]}
-          >
-            Total spent
-          </Text>
-          <Text
-            style={[
-              styles.totalAmount,
-              {
-                fontFamily: font.displayLight,
-                fontSize:   fontSize['4xl'],
-                color:      colors.accent,
-                letterSpacing: -1,
-              },
-            ]}
-          >
-            ₦{(totalSpent / 100).toLocaleString('en-NG')}
-          </Text>
-          <Text style={[text.bodySm, { color: colors.textSecondary, marginTop: 4 }]}>
-            {txCount} {txCount === 1 ? 'transaction' : 'transactions'}
-          </Text>
-
-          {/* Top 3 categories */}
-          {top3.length > 0 && (
-            <View style={styles.top3Row}>
-              {top3.map(({ cat, amount }) => {
-                const meta = EXPENSE_CATEGORIES[cat];
-                const IconComp = EXPENSE_ICONS[cat] ?? MoreHorizontal;
-                return (
-                  <View key={cat} style={styles.top3Item}>
-                    <View
-                      style={[
-                        styles.top3Icon,
-                        { backgroundColor: meta.color + '22', borderRadius: radius.full },
-                      ]}
-                    >
-                      <IconComp size={16} color={meta.color} strokeWidth={1.8} />
-                    </View>
-                    <Text style={[text.caption, { color: colors.textSecondary, marginTop: 4 }]} numberOfLines={1}>
-                      {meta.label}
-                    </Text>
-                    <Text
-                      style={[
-                        text.amountSm,
-                        { color: colors.text },
-                      ]}
-                      numberOfLines={1}
-                    >
-                      ₦{(amount / 100).toLocaleString('en-NG')}
-                    </Text>
-                  </View>
-                );
-              })}
-            </View>
-          )}
-        </View>
-      </Card>
-
-      {/* Category filter pills */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.filterRow}
-        style={styles.filterScroll}
-      >
-        {/* "All" pill */}
-        <Pressable
-          onPress={() => setCategoryFilter('all')}
-          style={[
-            styles.filterPill,
-            {
-              backgroundColor: categoryFilter === 'all' ? colors.primary : colors.backgroundSecondary,
-              borderColor:     categoryFilter === 'all' ? colors.primary : colors.border,
-              borderRadius:    radius.full,
-            },
-          ]}
-        >
-          <Text
-            style={[
-              text.buttonLabelSm,
-              { color: categoryFilter === 'all' ? colors.textOnForest : colors.textSecondary },
-            ]}
-          >
-            All
-          </Text>
-        </Pressable>
-
-        {EXPENSE_CATEGORIES_KEYS.map((cat) => {
-          const meta     = EXPENSE_CATEGORIES[cat];
-          const selected = categoryFilter === cat;
-          return (
-            <Pressable
-              key={cat}
-              onPress={() => setCategoryFilter(cat)}
+        {/* Summary card */}
+        <Card style={styles.summaryCard}>
+          <View style={styles.summaryInner}>
+            {/* Total spent */}
+            <Text
               style={[
-                styles.filterPill,
+                styles.totalLabel,
+                text.labelCaps,
+                { color: colors.textSecondary },
+              ]}
+            >
+              Total spent
+            </Text>
+            <Text
+              style={[
+                styles.totalAmount,
                 {
-                  backgroundColor: selected ? colors.primary : colors.backgroundSecondary,
-                  borderColor:     selected ? colors.primary : colors.border,
-                  borderRadius:    radius.full,
+                  fontFamily: font.displayLight,
+                  fontSize:   fontSize['4xl'],
+                  color:      colors.accent,
+                  letterSpacing: -1,
                 },
               ]}
             >
-              <Text
+              ₦{(totalSpent / 100).toLocaleString('en-NG')}
+            </Text>
+            <Text style={[text.bodySm, { color: colors.textSecondary, marginTop: 4 }]}>
+              {txCount} {txCount === 1 ? 'transaction' : 'transactions'}
+            </Text>
+
+            {/* Top 3 categories */}
+            {top3.length > 0 && (
+              <View style={styles.top3Row}>
+                {top3.map(({ cat, amount }) => {
+                  const meta = EXPENSE_CATEGORIES[cat];
+                  const IconComp = EXPENSE_ICONS[cat] ?? MoreHorizontal;
+                  return (
+                    <View key={cat} style={styles.top3Item}>
+                      <View
+                        style={[
+                          styles.top3Icon,
+                          { backgroundColor: meta.color + '22', borderRadius: radius.full },
+                        ]}
+                      >
+                        <IconComp size={16} color={meta.color} strokeWidth={1.8} />
+                      </View>
+                      <Text style={[text.caption, { color: colors.textSecondary, marginTop: 4 }]} numberOfLines={1}>
+                        {meta.label}
+                      </Text>
+                      <Text
+                        style={[
+                          text.amountSm,
+                          { color: colors.text },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        ₦{(amount / 100).toLocaleString('en-NG')}
+                      </Text>
+                    </View>
+                  );
+                })}
+              </View>
+            )}
+          </View>
+        </Card>
+
+        {/* Category filter pills */}
+        <ScrollView
+          horizontal
+          nestedScrollEnabled
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.filterRow}
+          style={styles.filterScroll}
+        >
+          {/* "All" pill */}
+          <Pressable
+            onPress={() => setCategoryFilter('all')}
+            style={[
+              styles.filterPill,
+              {
+                backgroundColor: categoryFilter === 'all' ? colors.primary : colors.backgroundSecondary,
+                borderColor:     categoryFilter === 'all' ? colors.primary : colors.border,
+                borderRadius:    radius.full,
+              },
+            ]}
+          >
+            <Text
+              style={[
+                text.buttonLabelSm,
+                { color: categoryFilter === 'all' ? colors.textOnForest : colors.textSecondary },
+              ]}
+            >
+              All
+            </Text>
+          </Pressable>
+
+          {EXPENSE_CATEGORIES_KEYS.map((cat) => {
+            const meta     = EXPENSE_CATEGORIES[cat];
+            const selected = categoryFilter === cat;
+            return (
+              <Pressable
+                key={cat}
+                onPress={() => setCategoryFilter(cat)}
                 style={[
-                  text.buttonLabelSm,
-                  { color: selected ? colors.textOnForest : colors.textSecondary },
+                  styles.filterPill,
+                  {
+                    backgroundColor: selected ? colors.primary : colors.backgroundSecondary,
+                    borderColor:     selected ? colors.primary : colors.border,
+                    borderRadius:    radius.full,
+                  },
                 ]}
               >
-                {meta.label}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </ScrollView>
-    </>
+                <Text
+                  style={[
+                    text.buttonLabelSm,
+                    { color: selected ? colors.textOnForest : colors.textSecondary },
+                  ]}
+                >
+                  {meta.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </>
+    ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [exceededBudgets, top3, txCount, totalSpent, categoryFilter, colors, text, font, fontSize, radius, dismissBudget],
   );
 
   return (
-    <BottomSheetModalProvider>
-      <View style={[styles.screen, { backgroundColor: colors.background }]}>
+    <View style={[styles.screen, { backgroundColor: colors.background }]}>
         {/* ── Header ── */}
         <View
           style={[
@@ -507,11 +481,14 @@ export default function ExpensesScreen() {
         </View>
 
         {/* ── Month chips ── */}
+        {/* Outer View owns the bottom border so the ScrollView is unconstrained
+            vertically — prevents Android from clipping the pill borders. */}
+        <View style={[styles.monthScrollWrap, { borderBottomColor: colors.borderLight }]}>
         <ScrollView
           horizontal
+          nestedScrollEnabled
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.monthRow}
-          style={[styles.monthScroll, { borderBottomColor: colors.borderLight }]}
         >
           {monthOptions.map((opt) => {
             const selected = selectedMonth === opt.value;
@@ -524,7 +501,7 @@ export default function ExpensesScreen() {
                   {
                     backgroundColor: selected ? colors.primary : colors.backgroundSecondary,
                     borderColor:     selected ? colors.primary : colors.border,
-                    borderRadius:    radius.full,
+                    borderRadius:    100,
                   },
                 ]}
               >
@@ -540,12 +517,14 @@ export default function ExpensesScreen() {
             );
           })}
         </ScrollView>
+        </View>
 
         {/* ── List ── */}
         <FlatList
           data={listData}
           keyExtractor={keyExtractor}
           renderItem={renderItem}
+          style={{ flex: 1 }}
           ListHeaderComponent={ListHeader}
           ListEmptyComponent={
             <EmptyState
@@ -558,13 +537,10 @@ export default function ExpensesScreen() {
           }
           contentContainerStyle={[
             styles.listContent,
-            { paddingBottom: insets.bottom + layout.tabBarHeight + 80 },
+            { paddingBottom: insets.bottom + layout.tabBarHeight + 24 },
           ]}
           showsVerticalScrollIndicator={false}
         />
-
-        {/* ── FAB ── */}
-        <FAB onPress={() => setAddOpen(true)} />
 
         {/* ── Sheets ── */}
         <AddExpenseSheet
@@ -578,7 +554,6 @@ export default function ExpensesScreen() {
           onSuccess={handleSuccess}
         />
       </View>
-    </BottomSheetModalProvider>
   );
 }
 
@@ -615,14 +590,19 @@ const styles = StyleSheet.create({
   },
 
   // Month chips
-  monthScroll: {
+  // Outer View owns the border so ScrollView height is unconstrained (no clipping)
+  monthScrollWrap: {
     borderBottomWidth: 1,
+    flexShrink:        0,     // don't compress in flex parent
+    overflow:          'visible', // never clip pill borders
   },
   monthRow: {
     flexDirection: 'row',
     gap:           8,
-    paddingHorizontal: 16,
-    paddingVertical:   12,
+    paddingLeft:   16,
+    paddingRight:  24,
+    paddingTop:    14,   // extra top room so pill border isn't clipped on Android
+    paddingBottom: 14,
   },
   monthChip: {
     paddingHorizontal: 16,
@@ -712,18 +692,4 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
 
-  // FAB
-  fab: {
-    position:  'absolute',
-    bottom:    100,
-    right:     24,
-    borderRadius: 28,
-  },
-  fabInner: {
-    width:          56,
-    height:         56,
-    borderRadius:   28,
-    alignItems:     'center',
-    justifyContent: 'center',
-  },
 });
