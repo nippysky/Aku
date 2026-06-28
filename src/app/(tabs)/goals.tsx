@@ -1,12 +1,14 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import {
   FlatList,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import Animated, {
@@ -17,37 +19,29 @@ import Animated, {
 } from 'react-native-reanimated';
 import { Plus, Target } from 'lucide-react-native';
 import { useTheme } from '../../theme';
-import { Card } from '../../components/ui/Card';
-import { ProgressRing } from '../../components/ui/ProgressRing';
+import { Palette } from '../../theme/colors';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { AddGoalSheet } from '../../components/goals/AddGoalSheet';
 import { AddContributionSheet } from '../../components/goals/AddContributionSheet';
 import { useGoalsStore } from '../../store/goals.store';
 import { useAuthStore } from '../../store/auth.store';
+import { SkeletonBanner, SkeletonGoalCard } from '../../components/ui/Skeleton';
+import { useCurrencyFormat } from '../../hooks/useCurrencyFormat';
 import type { GoalWithProgress } from '../../types';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function formatNGN(kobo: number): string {
-  return `₦${(kobo / 100).toLocaleString('en-NG')}`;
-}
-
 function formatShortDate(dateStr: string): string {
   const [y, m, d] = dateStr.split('-');
   const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  return `${d} ${months[parseInt(m) - 1]} ${y}`;
+  return `${parseInt(d, 10)} ${months[parseInt(m, 10) - 1]} ${y}`;
 }
 
 // ─── Filter types ─────────────────────────────────────────────────────────────
 
 type FilterKey = 'all' | 'active' | 'completed';
 
-interface FilterOption {
-  key:   FilterKey;
-  label: string;
-}
-
-const FILTERS: FilterOption[] = [
+const FILTERS: { key: FilterKey; label: string }[] = [
   { key: 'all',       label: 'All'       },
   { key: 'active',    label: 'Active'    },
   { key: 'completed', label: 'Completed' },
@@ -55,14 +49,14 @@ const FILTERS: FilterOption[] = [
 
 // ─── Filter chips ─────────────────────────────────────────────────────────────
 
-interface FilterChipsProps {
+function FilterChips({
+  selected,
+  onChange,
+}: {
   selected: FilterKey;
-  onChange:  (key: FilterKey) => void;
-}
-
-function FilterChips({ selected, onChange }: FilterChipsProps) {
+  onChange: (k: FilterKey) => void;
+}) {
   const { colors, text, font, radius } = useTheme();
-
   return (
     <ScrollView
       horizontal
@@ -102,240 +96,244 @@ function FilterChips({ selected, onChange }: FilterChipsProps) {
   );
 }
 
-// ─── Summary card ─────────────────────────────────────────────────────────────
+// ─── Summary banner (forest-tinted, matches home screen) ─────────────────────
 
-interface SummaryCardProps {
-  goals: GoalWithProgress[];
-}
+function SummaryBanner({ goals }: { goals: GoalWithProgress[] }) {
+  const { colors, text, font, fontSize } = useTheme();
+  const { fmt } = useCurrencyFormat();
 
-function SummaryCard({ goals }: SummaryCardProps) {
-  const { colors, text, font, fontSize, radius } = useTheme();
-
-  const totalSaved = goals.reduce((s, g) => s + g.savedAmount, 0);
+  const totalSaved     = goals.reduce((s, g) => s + g.savedAmount, 0);
+  const totalTarget    = goals.reduce((s, g) => s + g.targetAmount, 0);
   const completedCount = goals.filter((g) => g.isCompleted).length;
-  const totalCount = goals.length;
-  const completedRatio = totalCount > 0 ? completedCount / totalCount : 0;
+  const activeCount    = goals.filter((g) => !g.isCompleted).length;
+  const overallPct     = totalTarget > 0
+    ? Math.round((totalSaved / totalTarget) * 100)
+    : 0;
 
   return (
-    <Card style={styles.summaryCard} contentStyle={styles.summaryContent}>
-      <Text
+    <View style={styles.bannerWrap}>
+      {Platform.OS === 'ios' && (
+        <BlurView intensity={85} tint="dark" style={StyleSheet.absoluteFill} />
+      )}
+      <View
         style={[
-          styles.summaryAmount,
+          StyleSheet.absoluteFill,
           {
-            fontFamily:    font.displayLight,
-            fontSize:      fontSize['3xl'],
-            color:         colors.accent,
-            letterSpacing: -0.5,
+            backgroundColor:
+              Platform.OS === 'ios' ? 'rgba(22,58,47,0.82)' : colors.primary,
+            borderRadius: 20,
           },
         ]}
-      >
-        {formatNGN(totalSaved)}
-      </Text>
-      <Text style={[text.bodySm, { color: colors.textSecondary, marginTop: 4 }]}>
-        across {totalCount} {totalCount === 1 ? 'goal' : 'goals'}
-      </Text>
-
-      {/* Mini progress bar */}
-      <View style={styles.summaryBarWrap}>
-        <View
+      />
+      {/* Content */}
+      <View style={{ position: 'relative' }}>
+        <Text style={[text.caption, { color: 'rgba(250,250,248,0.65)', letterSpacing: 1 }]}>
+          TOTAL SAVED
+        </Text>
+        <Text
           style={[
-            styles.summaryBarTrack,
-            { backgroundColor: colors.border, borderRadius: radius.full },
+            {
+              fontFamily:    font.displayLight,
+              fontSize:      fontSize['3xl'],
+              color:         Palette.linen,
+              letterSpacing: -1,
+              marginTop:     4,
+            },
           ]}
         >
-          <Animated.View
-            style={[
-              styles.summaryBarFill,
-              {
-                backgroundColor: colors.success,
-                borderRadius:    radius.full,
-                width:           `${Math.round(completedRatio * 100)}%`,
-              },
-            ]}
-          />
-        </View>
-        <Text style={[text.caption, { color: colors.textSecondary, marginTop: 6 }]}>
-          {completedCount} of {totalCount} goals completed
+          {fmt(totalSaved)}
         </Text>
+        <View style={{ flexDirection: 'row', gap: 16, marginTop: 12 }}>
+          <View>
+            <Text style={[text.caption, { color: 'rgba(250,250,248,0.55)' }]}>Active</Text>
+            <Text style={[text.bodyMedium, { color: Palette.gold, marginTop: 2 }]}>
+              {activeCount} {activeCount === 1 ? 'goal' : 'goals'}
+            </Text>
+          </View>
+          <View style={{ width: 1, backgroundColor: 'rgba(250,250,248,0.15)' }} />
+          <View>
+            <Text style={[text.caption, { color: 'rgba(250,250,248,0.55)' }]}>Completed</Text>
+            <Text style={[text.bodyMedium, { color: Palette.linen, marginTop: 2 }]}>
+              {completedCount} {completedCount === 1 ? 'goal' : 'goals'}
+            </Text>
+          </View>
+          <View style={{ width: 1, backgroundColor: 'rgba(250,250,248,0.15)' }} />
+          <View>
+            <Text style={[text.caption, { color: 'rgba(250,250,248,0.55)' }]}>Overall</Text>
+            <Text style={[text.bodyMedium, { color: Palette.linen, marginTop: 2 }]}>
+              {overallPct}%
+            </Text>
+          </View>
+        </View>
       </View>
-    </Card>
+    </View>
   );
 }
 
-// ─── GoalCard (large list version) ──────────────────────────────────────────
+// ─── Goal card (list version) ─────────────────────────────────────────────────
 
 interface GoalCardLargeProps {
-  goal:    GoalWithProgress;
-  onPress: () => void;
+  goal:         GoalWithProgress;
+  onPress:      () => void;
   onAddSavings: () => void;
 }
 
 function GoalCardLarge({ goal, onPress, onAddSavings }: GoalCardLargeProps) {
   const { colors, text, font, fontSize, radius, shadow } = useTheme();
+  const { fmt, fmtCompact } = useCurrencyFormat();
 
-  const percentage = Math.round(goal.progress * 100);
-  const ringColor  = goal.color ?? colors.accent;
-  const remaining  = goal.remaining;
+  const percentage = Math.min(Math.round(goal.progress * 100), 100);
+  const barWidth   = useSharedValue(0);
 
-  // Animated progress bar width
-  const barProgress = useSharedValue(0);
   useEffect(() => {
-    barProgress.value = withTiming(goal.progress, { duration: 800 });
+    barWidth.value = withTiming(goal.progress, { duration: 700 });
   }, [goal.progress]);
 
   const barStyle = useAnimatedStyle(() => ({
-    width: `${Math.min(barProgress.value * 100, 100)}%` as `${number}%`,
+    width: `${Math.min(barWidth.value * 100, 100)}%` as `${number}%`,
   }));
+
+  // Bar color
+  const barColor = goal.isCompleted
+    ? colors.success
+    : (goal.color ?? colors.accent);
 
   return (
     <Pressable
       onPress={onPress}
+      style={({ pressed }) => [{ opacity: pressed ? 0.94 : 1 }]}
       accessibilityRole="button"
-      accessibilityLabel={`${goal.name} goal, ${percentage}% complete`}
+      accessibilityLabel={`${goal.name}, ${percentage}% complete`}
     >
       <Animated.View
-        entering={FadeInDown.springify().damping(18)}
         style={[
           styles.goalCard,
           {
             backgroundColor: colors.card,
             borderColor:     colors.border,
-            borderRadius:    radius.lg,
+            borderRadius:    radius.xl,
             ...shadow.sm,
           },
         ]}
       >
-        {/* Top row: emoji + name + ring */}
-        <View style={styles.goalCardTop}>
-          <View style={styles.goalCardLeft}>
-            <Text style={styles.goalEmoji}>{goal.emoji ?? '🎯'}</Text>
-            <View style={styles.goalNameWrap}>
-              <Text
-                style={[
-                  {
-                    fontFamily:    font.displayLight,
-                    fontSize:      fontSize.lg,
-                    color:         colors.text,
-                    letterSpacing: -0.3,
-                  },
-                ]}
-                numberOfLines={2}
-              >
-                {goal.name}
-              </Text>
-              {goal.isCompleted && (
-                <Text style={[text.caption, { color: colors.success, marginTop: 2 }]}>
-                  ✓ Completed
-                </Text>
-              )}
-            </View>
-          </View>
-          <ProgressRing
-            progress={goal.progress}
-            size={80}
-            strokeWidth={7}
-            color={ringColor}
-            backgroundColor={colors.border}
+        {/* ── Top row: emoji + name + percentage badge ── */}
+        <View style={styles.goalTop}>
+          {/* Emoji circle */}
+          <View
+            style={[
+              styles.emojiCircle,
+              { backgroundColor: (goal.color ?? colors.accent) + '15', borderRadius: radius.md },
+            ]}
           >
+            <Text style={styles.goalEmoji}>{goal.emoji ?? '🎯'}</Text>
+          </View>
+
+          {/* Name + status */}
+          <View style={styles.goalNameWrap}>
             <Text
               style={[
-                {
-                  fontFamily:         font.sansBold,
-                  fontSize:           fontSize.sm,
-                  color:              colors.text,
-                  includeFontPadding: false,
-                } as object,
+                { fontFamily: font.displayLight, fontSize: fontSize.lg, color: colors.text, letterSpacing: -0.3 },
               ]}
+              numberOfLines={2}
+            >
+              {goal.name}
+            </Text>
+            {goal.isCompleted ? (
+              <Text style={[text.caption, { color: colors.success, marginTop: 2 }]}>
+                ✓ Goal reached
+              </Text>
+            ) : goal.targetDate ? (
+              <Text style={[text.caption, { color: colors.textTertiary, marginTop: 2 }]}>
+                by {formatShortDate(goal.targetDate)}
+              </Text>
+            ) : null}
+          </View>
+
+          {/* Percentage badge */}
+          <View
+            style={[
+              styles.pctBadge,
+              {
+                backgroundColor: (goal.color ?? colors.accent) + '15',
+                borderRadius:    radius.full,
+              },
+            ]}
+          >
+            <Text
+              style={{
+                fontFamily:    font.sansSemiBold,
+                fontSize:      fontSize.sm,
+                color:         goal.color ?? colors.accent,
+                letterSpacing: 0.2,
+              }}
             >
               {percentage}%
             </Text>
-          </ProgressRing>
+          </View>
         </View>
 
-        {/* Amounts */}
-        <View style={styles.goalAmounts}>
-          <Text style={[text.amountSm, { color: colors.textSecondary }]}>
-            {formatNGN(goal.savedAmount)}{' '}
-            <Text style={{ color: colors.textTertiary }}>
-              of {formatNGN(goal.targetAmount)}
-            </Text>
-          </Text>
-          {goal.isCompleted ? (
-            <Text style={[text.bodySm, { color: colors.success }]}>
-              Goal reached! 🎉
-            </Text>
-          ) : (
-            <Text style={[text.bodySm, { color: colors.textTertiary }]}>
-              {formatNGN(remaining)} to go
-            </Text>
-          )}
-        </View>
-
-        {/* Progress bar */}
+        {/* ── Progress bar ── */}
         <View
           style={[
             styles.progressTrack,
-            { backgroundColor: colors.border, borderRadius: radius.full },
+            { backgroundColor: colors.backgroundSecondary, borderRadius: radius.full },
           ]}
         >
           <Animated.View
             style={[
               styles.progressFill,
               barStyle,
-              {
-                backgroundColor: goal.isCompleted ? colors.success : ringColor,
-                borderRadius:    radius.full,
-              },
+              { backgroundColor: barColor, borderRadius: radius.full },
             ]}
           />
         </View>
 
-        {/* Date pill + monthly required */}
-        <View style={styles.goalMeta}>
-          {goal.targetDate && (
-            <View
-              style={[
-                styles.datePill,
-                { backgroundColor: colors.backgroundSecondary, borderRadius: radius.full },
-              ]}
-            >
-              <Text style={[text.caption, { color: colors.textSecondary }]}>
-                by {formatShortDate(goal.targetDate)}
-              </Text>
-            </View>
-          )}
-          {!goal.isCompleted && goal.monthlyRequired && goal.monthlyRequired > 0 && (
-            <Text style={[text.caption, { color: colors.textTertiary, flex: 1, textAlign: 'right' }]}>
-              Save {formatNGN(goal.monthlyRequired)}/month
+        {/* ── Amounts row ── */}
+        <View style={styles.amountsRow}>
+          <Text style={[text.amountSm, { color: colors.text }]}>
+            {fmtCompact(goal.savedAmount)}
+            <Text style={[text.amountSm, { color: colors.textTertiary }]}>
+              {' '}/ {fmt(goal.targetAmount)}
+            </Text>
+          </Text>
+
+          {!goal.isCompleted && (
+            <Text style={[text.caption, { color: colors.textTertiary }]}>
+              {fmtCompact(goal.remaining)} to go
             </Text>
           )}
         </View>
 
-        {/* Action row */}
-        <View style={[styles.goalActions, { borderTopColor: colors.borderLight }]}>
-          <Pressable
-            onPress={(e) => { e.stopPropagation(); onAddSavings(); }}
-            style={[
-              styles.ghostBtn,
-              { borderColor: colors.border, borderRadius: radius.full },
-            ]}
-            accessibilityRole="button"
-            accessibilityLabel="Add savings"
-          >
-            <Text style={[text.buttonLabelSm, { color: colors.primary }]}>
-              Add savings →
+        {/* ── Action row ── */}
+        <View style={[styles.actionRow, { borderTopColor: colors.borderLight }]}>
+          {!goal.isCompleted && (
+            <Pressable
+              onPress={(e) => { e.stopPropagation(); onAddSavings(); }}
+              style={[
+                styles.addSavingsBtn,
+                {
+                  backgroundColor: colors.primary + '12',
+                  borderColor:     colors.primary + '30',
+                  borderRadius:    radius.full,
+                },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="Add savings"
+            >
+              <Text style={[text.buttonLabelSm, { color: colors.primary }]}>
+                + Add savings
+              </Text>
+            </Pressable>
+          )}
+          {!goal.isCompleted && goal.monthlyRequired && goal.monthlyRequired > 0 ? (
+            <Text style={[text.caption, { color: colors.textTertiary }]}>
+              {fmtCompact(goal.monthlyRequired)}/mo needed
             </Text>
-          </Pressable>
-          <Pressable
-            onPress={onPress}
-            hitSlop={8}
-            accessibilityRole="link"
-            accessibilityLabel="View goal details"
-          >
-            <Text style={[text.buttonLabelSm, { color: colors.textTertiary }]}>
-              View details →
+          ) : goal.isCompleted ? (
+            <Text style={[text.caption, { color: colors.success }]}>
+              🎉 Well done!
             </Text>
-          </Pressable>
+          ) : null}
         </View>
       </Animated.View>
     </Pressable>
@@ -345,12 +343,12 @@ function GoalCardLarge({ goal, onPress, onAddSavings }: GoalCardLargeProps) {
 // ─── Main screen ─────────────────────────────────────────────────────────────
 
 export default function GoalsScreen() {
-  const { colors, text, font, fontSize, layout, spacing } = useTheme();
-  const insets = useSafeAreaInsets();
-  const router = useRouter();
+  const { colors, text, font, fontSize, layout } = useTheme();
+  const insets   = useSafeAreaInsets();
+  const router   = useRouter();
 
-  const { goals, load } = useGoalsStore();
-  const { user }        = useAuthStore();
+  const { goals, load, isLoading } = useGoalsStore();
+  const { user }                   = useAuthStore();
 
   const [filter,      setFilter]      = useState<FilterKey>('all');
   const [addOpen,     setAddOpen]     = useState(false);
@@ -370,6 +368,10 @@ export default function GoalsScreen() {
     setContribGoal({ id: goal.id, name: goal.name });
   }, []);
 
+  const handleReload = useCallback(() => {
+    if (user) load(user.id);
+  }, [user, load]);
+
   const renderItem = useCallback(
     ({ item }: { item: GoalWithProgress }) => (
       <GoalCardLarge
@@ -379,6 +381,28 @@ export default function GoalsScreen() {
       />
     ),
     [router, handleAddSavings],
+  );
+
+  const ListHeader = useCallback(
+    () => (
+      <View>
+        {/* Summary banner — only shown when there are goals */}
+        {isLoading ? (
+          <SkeletonBanner />
+        ) : goals.length > 0 ? (
+          <SummaryBanner goals={goals} />
+        ) : null}
+
+        {/* Filter chips */}
+        <Animated.View
+          entering={FadeInDown.delay(60).duration(280)}
+          style={styles.filterWrap}
+        >
+          <FilterChips selected={filter} onChange={setFilter} />
+        </Animated.View>
+      </View>
+    ),
+    [goals, filter, isLoading],
   );
 
   return (
@@ -410,42 +434,32 @@ export default function GoalsScreen() {
       </View>
 
       <FlatList
-        data={filtered}
+        data={isLoading ? [] : filtered}
         keyExtractor={(item) => item.id}
         renderItem={renderItem}
+        style={{ flex: 1 }}
+        ListHeaderComponent={ListHeader}
         contentContainerStyle={[
           styles.listContent,
           { paddingBottom: insets.bottom + layout.tabBarHeight + 24 },
         ]}
         showsVerticalScrollIndicator={false}
-        ListHeaderComponent={
-          <View>
-            {/* Summary card */}
-            {goals.length > 0 && (
-              <Animated.View entering={FadeInDown.delay(0).springify().damping(18)}>
-                <SummaryCard goals={goals} />
-              </Animated.View>
-            )}
-
-            {/* Filter chips */}
-            <Animated.View
-              entering={FadeInDown.delay(60).springify().damping(18)}
-              style={styles.filterWrap}
-            >
-              <FilterChips selected={filter} onChange={setFilter} />
-            </Animated.View>
-          </View>
-        }
         ListEmptyComponent={
-          <EmptyState
-            icon={Target}
-            title="Set your first goal"
-            message="Start saving toward something meaningful."
-            action={{
-              label:   'Add Goal',
-              onPress: () => setAddOpen(true),
-            }}
-          />
+          isLoading ? (
+            <View style={{ gap: 16, paddingTop: 8 }}>
+              {[0, 1, 2].map((i) => <SkeletonGoalCard key={i} />)}
+            </View>
+          ) : (
+            <EmptyState
+              icon={Target}
+              title="Set your first goal"
+              message="Start saving toward something meaningful."
+              action={{
+                label:   'Add Goal',
+                onPress: () => setAddOpen(true),
+              }}
+            />
+          )
         }
       />
 
@@ -453,7 +467,7 @@ export default function GoalsScreen() {
       <AddGoalSheet
         isOpen={addOpen}
         onClose={() => setAddOpen(false)}
-        onSuccess={() => { if (user) load(user.id); }}
+        onSuccess={handleReload}
       />
 
       {/* ── Add Contribution Sheet ── */}
@@ -463,7 +477,7 @@ export default function GoalsScreen() {
           goalName={contribGoal.name}
           isOpen={!!contribGoal}
           onClose={() => setContribGoal(null)}
-          onSuccess={() => { if (user) load(user.id); }}
+          onSuccess={handleReload}
         />
       )}
     </View>
@@ -473,9 +487,7 @@ export default function GoalsScreen() {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-  },
+  screen: { flex: 1 },
 
   // Header
   header: {
@@ -486,9 +498,7 @@ const styles = StyleSheet.create({
     paddingBottom:     12,
     borderBottomWidth: 1,
   },
-  headerTitle: {
-    letterSpacing: -0.5,
-  },
+  headerTitle:   { letterSpacing: -0.5 },
   headerIconBtn: {
     width:          40,
     height:         40,
@@ -497,40 +507,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
 
-  // Summary card
-  summaryCard: {
-    marginHorizontal: 24,
-    marginTop:        16,
-    marginBottom:     4,
-  },
-  summaryContent: {
-    padding: 20,
-  },
-  summaryAmount: {
-    lineHeight: 40,
-  },
-  summaryBarWrap: {
-    marginTop: 16,
-  },
-  summaryBarTrack: {
-    height:   6,
-    width:    '100%',
-    overflow: 'hidden',
-  },
-  summaryBarFill: {
-    height: 6,
+  // Banner
+  bannerWrap: {
+    marginTop:    16,
+    borderRadius: 20,
+    padding:      20,
+    overflow:     'hidden',
   },
 
   // Filters
-  filterWrap: {
-    paddingTop:    12,
-    paddingBottom: 4,
-  },
+  filterWrap: { paddingTop: 12, paddingBottom: 4 },
   filterRow: {
-    flexDirection:    'row',
-    paddingHorizontal: 24,
-    gap:              8,
-    paddingBottom:    8,
+    flexDirection: 'row',
+    gap:           8,
+    paddingBottom: 8,
   },
   filterChip: {
     paddingHorizontal: 16,
@@ -540,71 +530,65 @@ const styles = StyleSheet.create({
 
   // List
   listContent: {
-    paddingTop: 4,
-    gap:        16,
+    paddingTop:        8,
+    gap:               14,
     paddingHorizontal: 24,
   },
 
-  // Goal card (large)
+  // Goal card
   goalCard: {
     borderWidth: 1,
-    padding:     16,
-    gap:         12,
+    padding:     18,
+    gap:         14,
   },
-  goalCardTop: {
-    flexDirection:  'row',
-    alignItems:     'flex-start',
-    justifyContent: 'space-between',
-    gap:            12,
-  },
-  goalCardLeft: {
+  goalTop: {
     flexDirection: 'row',
     alignItems:    'flex-start',
-    flex:          1,
-    gap:           10,
+    gap:           12,
+  },
+  emojiCircle: {
+    width:          48,
+    height:         48,
+    alignItems:     'center',
+    justifyContent: 'center',
+    flexShrink:     0,
   },
   goalEmoji: {
     fontSize:   24,
     lineHeight: 30,
-    marginTop:  2,
   },
   goalNameWrap: {
     flex: 1,
   },
-  goalAmounts: {
-    flexDirection:  'row',
-    alignItems:     'center',
-    justifyContent: 'space-between',
+  pctBadge: {
+    paddingHorizontal: 10,
+    paddingVertical:   5,
+    flexShrink:        0,
   },
   progressTrack: {
-    height:   5,
+    height:   6,
     width:    '100%',
     overflow: 'hidden',
   },
   progressFill: {
-    height: 5,
+    height: 6,
   },
-  goalMeta: {
+  amountsRow: {
     flexDirection:  'row',
     alignItems:     'center',
     justifyContent: 'space-between',
   },
-  datePill: {
-    paddingHorizontal: 10,
-    paddingVertical:    4,
+  actionRow: {
+    flexDirection:  'row',
+    alignItems:     'center',
+    justifyContent: 'space-between',
+    borderTopWidth: 1,
+    paddingTop:     12,
+    marginTop:      -2,
   },
-  goalActions: {
-    flexDirection:   'row',
-    alignItems:      'center',
-    justifyContent:  'space-between',
-    borderTopWidth:  1,
-    paddingTop:      12,
-    marginTop:       0,
-  },
-  ghostBtn: {
+  addSavingsBtn: {
     borderWidth:       1,
     paddingHorizontal: 14,
-    paddingVertical:    8,
+    paddingVertical:   8,
   },
-
 });

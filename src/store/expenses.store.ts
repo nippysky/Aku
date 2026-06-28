@@ -49,13 +49,15 @@ function buildSummary(expenses: Expense[], month: string): ExpenseSummary {
 
 interface ExpensesState {
   expenses:       Expense[];
+  allExpenses:    Expense[];  // all-time, unfiltered — for "All" view
   summary:        ExpenseSummary | null;
-  selectedMonth:  string; // 'YYYY-MM'
+  selectedMonth:  string; // 'YYYY-MM' | 'all'
   isLoading:      boolean;
   error:          string | null;
 
   // Actions
   load:           (userId: string) => Promise<void>;
+  loadAll:        (userId: string) => Promise<void>;  // loads all-time without month filter
   loadMonth:      (userId: string, month: string) => Promise<void>;
   add:            (input: ExpenseCreateInput, userId: string) => Promise<Expense>;
   update:         (input: ExpenseUpdateInput) => Promise<void>;
@@ -68,8 +70,9 @@ interface ExpensesState {
 
 export const useExpensesStore = create<ExpensesState>()((set, get) => ({
   expenses:      [],
+  allExpenses:   [],
   summary:       null,
-  selectedMonth: format(new Date(), 'yyyy-MM'),
+  selectedMonth: 'all',   // default to all-time view
   isLoading:     false,
   error:         null,
 
@@ -94,6 +97,27 @@ export const useExpensesStore = create<ExpensesState>()((set, get) => ({
       const expenses = rows.map(fromDb);
       const summary = buildSummary(expenses, month);
       set({ expenses, summary });
+    } catch (e: any) {
+      set({ error: e?.message ?? 'Failed to load expenses' });
+    } finally {
+      set({ isLoading: false });
+    }
+  },
+
+  loadAll: async (userId) => {
+    set({ isLoading: true, error: null });
+    try {
+      const db = getDatabase();
+      const rows = await db
+        .select()
+        .from(schema.expenses)
+        .where(eq(schema.expenses.userId, userId))
+        .orderBy(schema.expenses.date);
+
+      const allExpenses = rows.map(fromDb).sort((a, b) => b.date.localeCompare(a.date));
+      const currentMonth = format(new Date(), 'yyyy-MM');
+      const summary = buildSummary(allExpenses, currentMonth);
+      set({ allExpenses, expenses: allExpenses, summary });
     } catch (e: any) {
       set({ error: e?.message ?? 'Failed to load expenses' });
     } finally {
@@ -137,8 +161,13 @@ export const useExpensesStore = create<ExpensesState>()((set, get) => ({
       const expenses = [newExpense, ...get().expenses].sort((a, b) =>
         b.date.localeCompare(a.date)
       );
-      const summary = buildSummary(expenses, get().selectedMonth);
-      set({ expenses, summary });
+      const allExpenses = [newExpense, ...get().allExpenses].sort((a, b) =>
+        b.date.localeCompare(a.date)
+      );
+      const currentMonth = format(new Date(), 'yyyy-MM');
+      const summaryMonth = get().selectedMonth === 'all' ? currentMonth : get().selectedMonth;
+      const summary = buildSummary(expenses, summaryMonth);
+      set({ expenses, allExpenses, summary });
       return newExpense;
     } catch (e: any) {
       set({ error: e?.message ?? 'Failed to add expense' });
@@ -158,19 +187,20 @@ export const useExpensesStore = create<ExpensesState>()((set, get) => ({
       .set({ ...rest, updatedAt: now })
       .where(eq(schema.expenses.id, id));
 
-    const expenses = get().expenses.map((e) =>
-      e.id === id ? { ...e, ...rest, updatedAt: now } : e
-    );
+    const patch = { ...rest, updatedAt: now };
+    const expenses    = get().expenses.map((e)    => e.id === id ? { ...e, ...patch } : e);
+    const allExpenses = get().allExpenses.map((e) => e.id === id ? { ...e, ...patch } : e);
     const summary = buildSummary(expenses, get().selectedMonth);
-    set({ expenses, summary });
+    set({ expenses, allExpenses, summary });
   },
 
   remove: async (id) => {
     const db = getDatabase();
     await db.delete(schema.expenses).where(eq(schema.expenses.id, id));
-    const expenses = get().expenses.filter((e) => e.id !== id);
+    const expenses    = get().expenses.filter((e)    => e.id !== id);
+    const allExpenses = get().allExpenses.filter((e) => e.id !== id);
     const summary = buildSummary(expenses, get().selectedMonth);
-    set({ expenses, summary });
+    set({ expenses, allExpenses, summary });
   },
 
   setMonth: (month) => {

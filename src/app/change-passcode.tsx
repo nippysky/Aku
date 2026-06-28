@@ -10,6 +10,7 @@
  */
 import React, { useCallback, useRef, useState } from 'react';
 import {
+  StatusBar,
   StyleSheet,
   Text,
   View,
@@ -118,6 +119,8 @@ export default function ChangePasscodeScreen() {
   const { title, subtitle, onComplete } = config[phase];
 
   return (
+    <>
+      <StatusBar barStyle="light-content" />
     <View
       style={[
         styles.container,
@@ -209,6 +212,7 @@ export default function ChangePasscodeScreen() {
         )}
       </View>
     </View>
+    </>
   );
 }
 

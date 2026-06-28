@@ -22,8 +22,9 @@ export default function CurrencyScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
 
-  const currency    = useUIStore((s) => s.currency);
-  const setCurrency = useUIStore((s) => s.setCurrency);
+  const currency             = useUIStore((s) => s.currency);
+  const setCurrency          = useUIStore((s) => s.setCurrency);
+  const fetchExchangeRates   = useUIStore((s) => s.fetchExchangeRates);
 
   const [query, setQuery] = useState('');
 
@@ -40,6 +41,8 @@ export default function CurrencyScreen() {
 
   function handleSelect(item: CurrencyOption) {
     setCurrency(item);
+    // Kick off rate fetch in the background — no await, so UI stays responsive
+    void fetchExchangeRates();
     router.back();
   }
 

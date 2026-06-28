@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { eq, and, gte, lte, desc } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { getDatabase, schema } from '../lib/database/client';
 import { differenceInDays, parseISO, format } from 'date-fns';
 import { generateUUID } from '../lib/uuid';
@@ -115,6 +115,7 @@ export const useBillsStore = create<BillsState>()((set, get) => ({
         notes:       input.notes,
         isShared:    input.isShared,
         isPaid:      false,
+        notify30:    input.notify30,
         notify14:    input.notify14,
         notify7:     input.notify7,
         notify3:     input.notify3,

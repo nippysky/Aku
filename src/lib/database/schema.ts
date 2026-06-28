@@ -24,10 +24,11 @@ export const users = sqliteTable('users', {
 // ─── Households ───────────────────────────────────────────────────────────
 
 export const households = sqliteTable('households', {
-  id:        text('id').primaryKey(),
-  name:      text('name').notNull(),
-  ownerId:   text('owner_id').notNull(),
-  createdAt: text('created_at').notNull(),
+  id:         text('id').primaryKey(),
+  name:       text('name').notNull(),
+  ownerId:    text('owner_id').notNull(),
+  inviteCode: text('invite_code'),   // 8-char alphanumeric, unique per circle
+  createdAt:  text('created_at').notNull(),
 });
 
 export const householdMembers = sqliteTable('household_members', {
@@ -166,6 +167,44 @@ export const notifications = sqliteTable('notifications', {
   index('idx_notifications_reference').on(t.referenceId),
 ]);
 
+// ─── Circle Settings ──────────────────────────────────────────────────────
+// One-to-one extension of households for contribution-circle features.
+
+export const circleSettings = sqliteTable('circle_settings', {
+  id:               text('id').primaryKey(),         // = householdId
+  emoji:            text('emoji'),                   // circle emoji icon
+  targetAmount:     int('target_amount'),             // kobo; null = no target / open-ended
+  description:      text('description'),             // purpose / reason for the circle
+  frequency:        text('frequency'),               // 'weekly'|'biweekly'|'monthly'|'quarterly'|'yearly'|'one-time'
+  perMemberAmount:  int('per_member_amount'),         // kobo; null = auto (target/memberCount)
+  contributionType: text('contribution_type'),        // 'equal' | 'custom'
+  deadline:         text('deadline'),                 // ISO date; optional
+  accountName:      text('account_name'),             // optional payment details
+  accountNumber:    text('account_number'),
+  bankName:         text('bank_name'),
+  notes:            text('notes'),
+  updatedAt:        text('updated_at').notNull(),
+});
+
+// ─── Circle Contributions ─────────────────────────────────────────────────
+
+export const circleContributions = sqliteTable('circle_contributions', {
+  id:         text('id').primaryKey(),
+  circleId:   text('circle_id').notNull(),
+  userId:     text('user_id').notNull(),
+  amount:     int('amount').notNull(),             // in kobo
+  note:       text('note'),
+  status:     text('status', { enum: ['pending', 'verified'] })
+                .notNull().default('pending'),
+  createdAt:  text('created_at').notNull(),
+  verifiedAt: text('verified_at'),
+  verifiedBy: text('verified_by'),
+}, (t) => [
+  index('idx_circle_contributions_circle').on(t.circleId),
+  index('idx_circle_contributions_user').on(t.userId),
+  index('idx_circle_contributions_status').on(t.status),
+]);
+
 // ─── App State (persisted UI preferences) ────────────────────────────────
 
 export const appState = sqliteTable('app_state', {
@@ -185,5 +224,7 @@ export const schema = {
   goals,
   goalContributions,
   notifications,
+  circleSettings,
+  circleContributions,
   appState,
 };

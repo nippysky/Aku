@@ -33,7 +33,7 @@ import { EditExpenseSheet } from '../../components/expenses/EditExpenseSheet';
 import { useExpensesStore } from '../../store/expenses.store';
 import { useUIStore } from '../../store/ui.store';
 import { EXPENSE_CATEGORIES, type ExpenseCategory, type Expense } from '../../types';
-import { formatAmount } from '../../lib/format';
+import { useCurrencyFormat } from '../../hooks/useCurrencyFormat';
 
 // ─── Icon map ─────────────────────────────────────────────────────────────────
 
@@ -105,9 +105,9 @@ export default function ExpenseDetailScreen() {
 
   const { expenses, remove } = useExpensesStore();
   const { showToast }        = useUIStore();
+  const { fmt, fmtCompact }  = useCurrencyFormat();
 
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
-  const [isDeleting, setIsDeleting]         = useState(false);
 
   const expense = expenses.find((e) => e.id === id);
 
@@ -115,22 +115,20 @@ export default function ExpenseDetailScreen() {
     if (!expense) return;
     Alert.alert(
       'Delete Expense',
-      `Remove ${expense.description ?? EXPENSE_CATEGORIES[expense.category].label} of ${formatAmount(expense.amount)}?`,
+      `Remove ${expense.description ?? EXPENSE_CATEGORIES[expense.category].label} of ${fmt(expense.amount)}?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text:    'Delete',
-          style:   'destructive',
+          text:  'Delete',
+          style: 'destructive',
           onPress: async () => {
+            // Navigate first — avoids "not found" flash while store updates
+            router.back();
             try {
-              setIsDeleting(true);
               await remove(expense.id);
               showToast('success', 'Expense deleted');
-              router.back();
             } catch {
               showToast('error', 'Could not delete expense');
-            } finally {
-              setIsDeleting(false);
             }
           },
         },
@@ -184,7 +182,7 @@ export default function ExpenseDetailScreen() {
       >
         {/* ── Hero ── */}
         <Animated.View
-          entering={FadeInDown.delay(0).springify().damping(18)}
+          entering={FadeInDown.delay(0).duration(200)}
           style={styles.hero}
         >
           {/* Category icon */}
@@ -203,8 +201,10 @@ export default function ExpenseDetailScreen() {
               styles.amount,
               { fontFamily: font.displayLight, fontSize: fontSize['3xl'], color: colors.text },
             ]}
+            adjustsFontSizeToFit
+            numberOfLines={1}
           >
-            {formatAmount(expense.amount)}
+            {fmt(expense.amount)}
           </Text>
 
           {/* Category label */}
@@ -217,7 +217,7 @@ export default function ExpenseDetailScreen() {
 
         {/* ── Info rows ── */}
         <Animated.View
-          entering={FadeInDown.delay(80).springify().damping(18)}
+          entering={FadeInDown.delay(80).duration(200)}
           style={[styles.infoCard, { backgroundColor: colors.card, borderRadius: radius.xl }]}
         >
           <InfoRow
@@ -241,10 +241,9 @@ export default function ExpenseDetailScreen() {
         </Animated.View>
 
         {/* ── Delete button ── */}
-        <Animated.View entering={FadeInDown.delay(160).springify().damping(18)} style={{ marginTop: spacing[6] }}>
+        <Animated.View entering={FadeInDown.delay(160).duration(200)} style={{ marginTop: spacing[6] }}>
           <Pressable
             onPress={handleDelete}
-            disabled={isDeleting}
             style={[
               styles.deleteBtn,
               {
@@ -255,7 +254,7 @@ export default function ExpenseDetailScreen() {
           >
             <Trash2 size={16} color={colors.danger} strokeWidth={1.8} />
             <Text style={[{ fontFamily: font.sansMedium, fontSize: fontSize.sm, color: colors.danger }]}>
-              {isDeleting ? 'Deleting…' : 'Delete expense'}
+              Delete expense
             </Text>
           </Pressable>
         </Animated.View>

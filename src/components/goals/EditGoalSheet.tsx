@@ -22,6 +22,7 @@ import { Button } from '../ui/Button';
 import { AkuDatePicker } from '../ui/AkuDatePicker';
 import { useGoalsStore } from '../../store/goals.store';
 import { useUIStore } from '../../store/ui.store';
+import { useAuthStore } from '../../store/auth.store';
 import type { GoalWithProgress } from '../../types';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -104,9 +105,8 @@ export function EditGoalSheet({ goal, onClose, onSuccess }: EditGoalSheetProps) 
   const { colors, text, font, fontSize, radius } = useTheme();
   const { update }    = useGoalsStore();
   const { showToast } = useUIStore();
-
-  const [showDatePicker, setShowDatePicker] = useState(false);
-
+  const { user }      = useAuthStore();
+  const [showDatePicker,   setShowDatePicker]   = useState(false);
   const {
     control,
     handleSubmit,
@@ -160,8 +160,8 @@ export function EditGoalSheet({ goal, onClose, onSuccess }: EditGoalSheetProps) 
         notes:        data.notes.trim() || null,
         emoji:        data.emoji || null,
         color:        goal.color,
-        householdId:  goal.householdId,
-        isShared:     goal.isShared,
+        householdId:  null,
+        isShared:     false,
       });
       showToast('success', 'Goal updated!');
       handleClose();
@@ -318,6 +318,7 @@ export function EditGoalSheet({ goal, onClose, onSuccess }: EditGoalSheetProps) 
             />
           )}
         />
+
 
         {/* Submit */}
         <View style={styles.submit}>

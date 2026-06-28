@@ -3,6 +3,7 @@ import { Pressable, Text, View, ViewStyle } from 'react-native';
 import { useTheme } from '../../theme';
 import { Palette } from '../../theme/colors';
 import type { GoalWithProgress } from '../../types';
+import { useCurrencyFormat } from '../../hooks/useCurrencyFormat';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -17,6 +18,7 @@ interface GoalCardProps {
 
 export function GoalCard({ goal, size = 'md', style, onPress }: GoalCardProps) {
   const { colors, text, font, fontSize, radius, shadow } = useTheme();
+  const { fmt } = useCurrencyFormat();
 
   const percentage   = Math.round(goal.progress * 100);
   const accentColor  = goal.color ?? Palette.gold;
@@ -91,7 +93,7 @@ export function GoalCard({ goal, size = 'md', style, onPress }: GoalCardProps) {
           />
         </View>
         <Text style={[text.caption, { color: colors.textTertiary }]}>
-          ₦{(savedAmount / 100).toLocaleString()} of ₦{(goal.targetAmount / 100).toLocaleString()}
+          {fmt(savedAmount)} of {fmt(goal.targetAmount)}
         </Text>
       </View>
     </View>

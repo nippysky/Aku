@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect } from 'react';
 import {
+  StatusBar,
   StyleSheet,
   Text,
   View,
@@ -90,6 +91,8 @@ export default function AuthGateScreen() {
   }
 
   return (
+    <>
+      <StatusBar barStyle="light-content" />
     <View
       style={[
         styles.container,
@@ -137,6 +140,7 @@ export default function AuthGateScreen() {
         />
       </Animated.View>
     </View>
+    </>
   );
 }
 

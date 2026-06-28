@@ -2,7 +2,6 @@ import React, { useCallback, useState } from 'react';
 import {
   Pressable,
   StyleSheet,
-  Switch,
   Text,
   View,
 } from 'react-native';
@@ -22,7 +21,6 @@ import { AkuDatePicker } from '../ui/AkuDatePicker';
 import { useExpensesStore } from '../../store/expenses.store';
 import { useAuthStore } from '../../store/auth.store';
 import { useUIStore } from '../../store/ui.store';
-import { useHouseholdStore } from '../../store/household.store';
 import { EXPENSE_CATEGORIES, type ExpenseCategory } from '../../types';
 
 // ─── Icon map ─────────────────────────────────────────────────────────────────
@@ -52,7 +50,6 @@ interface FormData {
   description: string;
   category:    ExpenseCategory;
   date:        string;
-  isShared:    boolean;
 }
 
 function todayString(): string {
@@ -92,8 +89,6 @@ export function AddExpenseSheet({ isOpen, onClose, onSuccess }: AddExpenseSheetP
   const { add }       = useExpensesStore();
   const { user }      = useAuthStore();
   const { showToast } = useUIStore();
-  const { household } = useHouseholdStore();
-
   const [showDatePicker, setShowDatePicker] = useState(false);
 
   const {
@@ -110,7 +105,6 @@ export function AddExpenseSheet({ isOpen, onClose, onSuccess }: AddExpenseSheetP
       description: '',
       category:    'food',
       date:        todayString(),
-      isShared:    false,
     },
   });
 
@@ -138,8 +132,8 @@ export function AddExpenseSheet({ isOpen, onClose, onSuccess }: AddExpenseSheetP
             category:    data.category,
             description: data.description.trim() || null,
             date:        data.date,
-            isShared:    data.isShared,
-            householdId: data.isShared && household ? household.id : null,
+            isShared:    false,
+            householdId: null,
           },
           user.id,
         );
@@ -151,7 +145,7 @@ export function AddExpenseSheet({ isOpen, onClose, onSuccess }: AddExpenseSheetP
         showToast('error', 'Failed to add expense');
       }
     },
-    [user, add, household, showToast, reset, handleClose, onSuccess, setError],
+    [user, add, showToast, reset, handleClose, onSuccess, setError],
   );
 
   return (
@@ -284,31 +278,6 @@ export function AddExpenseSheet({ isOpen, onClose, onSuccess }: AddExpenseSheetP
           )}
         </View>
 
-        {/* Shared toggle — only when household exists */}
-        {household ? (
-          <Controller
-            control={control}
-            name="isShared"
-            render={({ field }) => (
-              <View style={[styles.toggleRow, { borderColor: colors.border }]}>
-                <View style={styles.toggleText}>
-                  <Text style={[text.bodyMedium, { color: colors.text }]}>
-                    Split with household
-                  </Text>
-                  <Text style={[text.caption, { color: colors.textSecondary, marginTop: 2 }]}>
-                    Visible to {household.name}
-                  </Text>
-                </View>
-                <Switch
-                  value={field.value}
-                  onValueChange={field.onChange}
-                  trackColor={{ false: colors.border, true: colors.primary }}
-                  thumbColor={colors.card}
-                />
-              </View>
-            )}
-          />
-        ) : null}
 
         {/* Submit */}
         <View style={styles.submit}>
@@ -327,6 +296,7 @@ export function AddExpenseSheet({ isOpen, onClose, onSuccess }: AddExpenseSheetP
         onChange={(iso) => { setValue('date', iso); setShowDatePicker(false); }}
         onClose={() => setShowDatePicker(false)}
         minDate="2020-01-01"
+        maxDate={todayString()}
         title="Select expense date"
       />
     </>
@@ -382,6 +352,46 @@ const styles = StyleSheet.create({
   toggleText: {
     flex: 1,
     marginRight: 12,
+  },
+  toggleLabelRow: {
+    flexDirection: 'row',
+    alignItems:    'center',
+    gap:           6,
+  },
+  infoBtn: {
+    padding: 2,
+  },
+  // Tooltip modal
+  tipOverlay: {
+    flex:            1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent:  'center',
+    alignItems:      'center',
+    paddingHorizontal: 24,
+  },
+  tipCard: {
+    width:        '100%',
+    borderRadius: 20,
+    borderWidth:  1,
+    padding:      20,
+  },
+  tipHeader: {
+    flexDirection:  'row',
+    alignItems:     'center',
+    justifyContent: 'space-between',
+  },
+  tipIconWrap: {
+    width:          40,
+    height:         40,
+    borderRadius:   12,
+    alignItems:     'center',
+    justifyContent: 'center',
+  },
+  tipClose: {
+    marginTop:      20,
+    borderRadius:   100,
+    paddingVertical: 12,
+    alignItems:     'center',
   },
   submit: {
     marginTop: 28,

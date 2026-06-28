@@ -4,7 +4,6 @@ export { AmountInput } from './AmountInput';
 export { PinPad } from './PinPad';
 export type { PinPadRef } from './PinPad';
 export { Card } from './Card';
-export { ProgressRing } from './ProgressRing';
 export { StatusBadge } from './StatusBadge';
 export { EmptyState } from './EmptyState';
 export { ToastContainer } from './ToastContainer';

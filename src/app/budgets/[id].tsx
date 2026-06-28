@@ -131,7 +131,6 @@ export default function BudgetDetailScreen() {
   const { showToast }       = useUIStore();
 
   const [editBudget, setEditBudget] = useState<BudgetWithSpent | null>(null);
-  const [isDeleting, setIsDeleting] = useState(false);
 
   const budget = budgets.find((b) => b.id === id);
 
@@ -151,15 +150,12 @@ export default function BudgetDetailScreen() {
           text:    'Delete',
           style:   'destructive',
           onPress: async () => {
+            router.back();
             try {
-              setIsDeleting(true);
               await remove(budget.id);
               showToast('success', 'Budget deleted');
-              router.back();
             } catch {
               showToast('error', 'Could not delete budget');
-            } finally {
-              setIsDeleting(false);
             }
           },
         },
@@ -221,7 +217,7 @@ export default function BudgetDetailScreen() {
           <View>
             {/* ── Hero ── */}
             <Animated.View
-              entering={FadeInDown.delay(0).springify().damping(18)}
+              entering={FadeInDown.delay(0).duration(200)}
               style={styles.hero}
             >
               <View
@@ -248,7 +244,7 @@ export default function BudgetDetailScreen() {
 
             {/* ── Progress card ── */}
             <Animated.View
-              entering={FadeInDown.delay(80).springify().damping(18)}
+              entering={FadeInDown.delay(80).duration(200)}
               style={[styles.progressCard, { backgroundColor: colors.card, borderRadius: radius.xl }]}
             >
               {/* Spent / limit row */}
@@ -288,12 +284,11 @@ export default function BudgetDetailScreen() {
 
             {/* ── Delete button ── */}
             <Animated.View
-              entering={FadeInDown.delay(160).springify().damping(18)}
+              entering={FadeInDown.delay(160).duration(200)}
               style={{ marginTop: spacing[4] }}
             >
               <Pressable
                 onPress={handleDelete}
-                disabled={isDeleting}
                 style={[
                   styles.deleteBtn,
                   { backgroundColor: colors.danger + '12', borderRadius: radius.full },
@@ -301,7 +296,7 @@ export default function BudgetDetailScreen() {
               >
                 <Trash2 size={16} color={colors.danger} strokeWidth={1.8} />
                 <Text style={[{ fontFamily: font.sansMedium, fontSize: fontSize.sm, color: colors.danger }]}>
-                  {isDeleting ? 'Deleting…' : 'Delete budget'}
+                  Delete budget
                 </Text>
               </Pressable>
             </Animated.View>
@@ -309,7 +304,7 @@ export default function BudgetDetailScreen() {
             {/* ── Transactions header ── */}
             {linkedExpenses.length > 0 && (
               <Animated.View
-                entering={FadeInDown.delay(200).springify().damping(18)}
+                entering={FadeInDown.delay(200).duration(200)}
                 style={{ marginTop: spacing[6], marginBottom: spacing[2] }}
               >
                 <Text style={[text.label, { color: colors.textSecondary }]}>
@@ -320,7 +315,7 @@ export default function BudgetDetailScreen() {
           </View>
         }
         renderItem={({ item, index }) => (
-          <Animated.View entering={FadeInDown.delay(220 + index * 40).springify().damping(18)}>
+          <Animated.View entering={FadeInDown.delay(220 + index * 40).duration(200)}>
             <LinkedExpenseRow
               date={item.date}
               description={item.description}
@@ -330,7 +325,7 @@ export default function BudgetDetailScreen() {
           </Animated.View>
         )}
         ListEmptyComponent={
-          <Animated.View entering={FadeInDown.delay(200).springify().damping(18)}>
+          <Animated.View entering={FadeInDown.delay(200).duration(200)}>
             <EmptyState
               icon={IconComp}
               title="No expenses yet"

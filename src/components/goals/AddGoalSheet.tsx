@@ -105,9 +105,7 @@ export function AddGoalSheet({ isOpen, onClose, onSuccess }: AddGoalSheetProps) 
   const { add }       = useGoalsStore();
   const { user }      = useAuthStore();
   const { showToast } = useUIStore();
-
-  const [showDatePicker, setShowDatePicker] = useState(false);
-
+  const [showDatePicker,   setShowDatePicker]   = useState(false);
   const {
     control,
     handleSubmit,
@@ -155,7 +153,7 @@ export function AddGoalSheet({ isOpen, onClose, onSuccess }: AddGoalSheetProps) 
       );
       showToast('success', 'Goal created!');
       reset();
-      handleClose();
+        handleClose();
       onSuccess?.();
     } catch {
       showToast('error', 'Failed to create goal');
@@ -312,6 +310,7 @@ export function AddGoalSheet({ isOpen, onClose, onSuccess }: AddGoalSheetProps) 
             />
           )}
         />
+
 
         {/* Submit */}
         <View style={styles.submit}>

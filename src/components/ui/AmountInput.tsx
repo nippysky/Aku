@@ -14,6 +14,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { useTheme } from '../../theme';
+import { useUIStore } from '../../store/ui.store';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -58,6 +59,7 @@ export function AmountInput({
   placeholder = '0',
 }: AmountInputProps) {
   const { colors, text, font, fontSize, spacing, radius, layout } = useTheme();
+  const currencySymbol = useUIStore((s) => s.currency.symbol);
   const [isFocused, setIsFocused] = useState(false);
   const inputRef = useRef<TextInput>(null);
 
@@ -160,7 +162,7 @@ export function AmountInput({
           },
         ]}
       >
-        {/* ₦ Prefix */}
+        {/* Currency symbol prefix */}
         <Text
           style={[
             styles.prefix,
@@ -174,7 +176,7 @@ export function AmountInput({
             },
           ]}
         >
-          ₦
+          {currencySymbol}
         </Text>
 
         {/* Amount input */}

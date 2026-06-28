@@ -11,6 +11,7 @@ import { useGoalsStore } from '../../store/goals.store';
 import { useAuthStore } from '../../store/auth.store';
 import { useUIStore } from '../../store/ui.store';
 import { useTheme } from '../../theme';
+import { useCurrencyFormat } from '../../hooks/useCurrencyFormat';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -20,10 +21,6 @@ interface AddContributionSheetProps {
   isOpen:    boolean;
   onClose:   () => void;
   onSuccess?: () => void;
-}
-
-function formatNGN(kobo: number): string {
-  return `₦${(kobo / 100).toLocaleString('en-NG')}`;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -36,6 +33,7 @@ export function AddContributionSheet({
   onSuccess,
 }: AddContributionSheetProps) {
   const { colors, text, font, fontSize } = useTheme();
+  const { fmt } = useCurrencyFormat();
 
   const { addContribution } = useGoalsStore();
   const { user }            = useAuthStore();
@@ -58,7 +56,7 @@ export function AddContributionSheet({
         { goalId, amount, note: null, date: today },
         user.id,
       );
-      showToast('success', `Added ${formatNGN(amount)} to ${goalName}`);
+      showToast('success', `Added ${fmt(amount)} to ${goalName}`);
       setAmount(0);
       handleClose();
       onSuccess?.();
@@ -98,7 +96,7 @@ export function AddContributionSheet({
 
       {/* Add button */}
       <Button
-        label={amount > 0 ? `Add ${formatNGN(amount)} to goal` : 'Add to goal'}
+        label={amount > 0 ? `Add ${fmt(amount)} to goal` : 'Add to goal'}
         onPress={handleAdd}
         loading={isLoading}
         disabled={amount <= 0}

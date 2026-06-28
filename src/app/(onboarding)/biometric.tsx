@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   Pressable,
+  StatusBar,
   StyleSheet,
   Text,
   View,
@@ -171,14 +172,16 @@ export default function BiometricScreen() {
   const handleEnable = useCallback(async () => {
     await setupBiometric();
     // Navigate regardless — if biometric fails it just stays disabled
-    router.push('/(onboarding)/household');
+    router.push('/(onboarding)/first-bill');
   }, [setupBiometric, router]);
 
   const handleSkip = useCallback(() => {
-    router.push('/(onboarding)/household');
+    router.push('/(onboarding)/first-bill');
   }, [router]);
 
   return (
+    <>
+      <StatusBar barStyle="light-content" />
     <View
       style={[
         styles.container,
@@ -220,6 +223,7 @@ export default function BiometricScreen() {
         <GhostButton label="Skip for now" onPress={handleSkip} />
       </Animated.View>
     </View>
+    </>
   );
 }
 

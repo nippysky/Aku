@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Pressable,
+  StatusBar,
   StyleSheet,
   Text,
   View,
@@ -123,6 +124,8 @@ export default function PinScreen() {
     biometric.type === 'faceId' ? ScanFace : Fingerprint;
 
   return (
+    <>
+      <StatusBar barStyle="light-content" />
     <View
       style={[
         styles.container,
@@ -176,6 +179,7 @@ export default function PinScreen() {
         </Pressable>
       </Animated.View>
     </View>
+    </>
   );
 }
 

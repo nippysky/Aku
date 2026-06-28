@@ -16,6 +16,7 @@ import { useTheme } from '../../theme';
 import { StatusBadge } from '../ui/StatusBadge';
 import { BILL_CATEGORIES } from '../../types';
 import type { Bill } from '../../types';
+import { useCurrencyFormat } from '../../hooks/useCurrencyFormat';
 
 // ─── Dynamic lucide icon renderer ────────────────────────────────────────────
 
@@ -54,20 +55,16 @@ const BILL_ICONS: Record<string, React.ComponentType<{ size?: number; color?: st
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface BillRowProps {
-  bill:       Bill;
-  onPress:    () => void;
-  showStatus?: boolean;
-  style?:     ViewStyle;
+  bill:         Bill;
+  onPress:      () => void;
+  onLongPress?: () => void;
+  showStatus?:  boolean;
+  style?:       ViewStyle;
 }
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function formatAmount(kobo: number): string {
-  const naira = kobo / 100;
-  return `₦${naira.toLocaleString('en-NG')}`;
-}
 
 function formatDueDate(dateStr: string): string {
   try {
@@ -79,8 +76,9 @@ function formatDueDate(dateStr: string): string {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function BillRow({ bill, onPress, showStatus = true, style }: BillRowProps) {
+export function BillRow({ bill, onPress, onLongPress, showStatus = true, style }: BillRowProps) {
   const { colors, text, font, fontSize, spacing, radius } = useTheme();
+  const { fmt } = useCurrencyFormat();
   const scale = useSharedValue(1);
 
   const animStyle = useAnimatedStyle(() => ({
@@ -93,6 +91,7 @@ export function BillRow({ bill, onPress, showStatus = true, style }: BillRowProp
   return (
     <AnimatedPressable
       onPress={onPress}
+      onLongPress={onLongPress}
       onPressIn={() => { scale.value = withSpring(0.98, { damping: 20, stiffness: 400 }); }}
       onPressOut={() => { scale.value = withSpring(1, { damping: 20, stiffness: 400 }); }}
       accessibilityRole="button"
@@ -127,7 +126,7 @@ export function BillRow({ bill, onPress, showStatus = true, style }: BillRowProp
       {/* Right: amount + badge */}
       <View style={styles.right}>
         <Text style={[text.amount, { color: colors.text }]}>
-          {formatAmount(bill.amount)}
+          {fmt(bill.amount)}
         </Text>
         {showStatus && (
           <StatusBadge status={bill.status} style={styles.badge} />

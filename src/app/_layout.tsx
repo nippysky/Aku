@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { View, StatusBar } from 'react-native';
-import { Slot, useRouter, useSegments } from 'expo-router';
+import { Stack, useRouter, useSegments } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -11,6 +11,7 @@ import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { useColorScheme } from 'react-native';
 import { initializeDatabase } from '../lib/database/client';
 import { useAuthStore } from '../store/auth.store';
+import { useUIStore } from '../store/ui.store';
 import { ToastContainer } from '../components/ui/ToastContainer';
 import { LightColors, DarkColors } from '../theme/colors';
 import { notificationService, useNotificationNavigation } from '../lib/notifications';
@@ -20,12 +21,19 @@ SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
   const scheme     = useColorScheme();
-  const isDark     = scheme === 'dark';
-  const colors     = isDark ? DarkColors : LightColors;
   const router     = useRouter();
   const segments   = useSegments();
 
   const { isInitialized, user, session, isLocked, hasOnboarded, initialize } = useAuthStore();
+  const { fetchExchangeRates, themeMode, loadSettings } = useUIStore();
+
+  // Resolve dark mode: respect in-app preference, then fall back to system
+  const isDark =
+    themeMode === 'dark'  ? true  :
+    themeMode === 'light' ? false :
+    scheme === 'dark';
+
+  const colors = isDark ? DarkColors : LightColors;
 
   // Wire up notification deep-link navigation
   useNotificationNavigation();
@@ -47,7 +55,15 @@ export default function RootLayout() {
   useEffect(() => {
     (async () => {
       await initializeDatabase();
+      // Load persisted theme + currency before auth so the correct theme
+      // is applied from the very first render after cold start.
+      await loadSettings();
       await initialize();
+
+      // Pre-fetch exchange rates so FX conversion is ready immediately.
+      // Safe to call unconditionally — the store caches for 1 h and
+      // silently no-ops on network failure.
+      void fetchExchangeRates();
 
       // Request notification permissions, set up Android channels, and
       // schedule the repeating daily digest. All three are safe to call
@@ -78,27 +94,21 @@ export default function RootLayout() {
     const hasSession = !!session && !!user;
 
     if (!hasOnboarded) {
-      // First-time user — must complete onboarding
-      if (!inOnboarding) {
-        router.replace('/(onboarding)');
-      }
+      // First-time user — force onboarding
+      if (!inOnboarding) router.replace('/(onboarding)');
+
     } else if (isLocked) {
-      // Returning user — hasOnboarded=true so onboarding is genuinely done.
-      // Always push to auth regardless of current route (removes the stale
-      // root-index redirect that used to land returning users in /(onboarding)).
-      if (!inAuth) {
-        router.replace('/(auth)');
-      }
+      // Locked — force PIN/biometric auth
+      if (!inAuth) router.replace('/(auth)');
+
     } else if (hasSession) {
-      // Authenticated + unlocked → go to app
-      if (!inTabs && !inOnboarding) {
-        router.replace('/(tabs)');
-      }
+      // Authenticated & unlocked — allow anywhere in the app.
+      // Only push back to tabs if we're stuck in an auth/onboarding shell.
+      if (inAuth || inOnboarding) router.replace('/(tabs)');
+
     } else {
-      // Onboarding was completed but session expired (edge case) — re-auth
-      if (!inAuth && !inOnboarding) {
-        router.replace('/(auth)');
-      }
+      // Onboarding complete but no active session — force re-auth
+      if (!inAuth && !inOnboarding) router.replace('/(auth)');
     }
   }, [isInitialized, fontsLoaded, user, session, isLocked, hasOnboarded, segments]);
 
@@ -118,10 +128,14 @@ export default function RootLayout() {
                 backgroundColor={colors.background}
                 translucent={false}
               />
-              <Slot />
+              <Stack screenOptions={{ headerShown: false }} />
               <ToastContainer />
-              {/* Global status bar shield — blends content scroll edge with status bar */}
-              <StatusBarShield backgroundColor={colors.background} />
+              {/* Status bar shield — only on tab screens where scrollable content can
+                  bleed behind the status bar. For auth/onboarding/standalone screens
+                  we use transparent so their own dark backgrounds show through. */}
+              <StatusBarShield
+                backgroundColor={segments[0] === '(tabs)' ? colors.background : 'transparent'}
+              />
             </View>
           </BottomSheetModalProvider>
         </KeyboardProvider>

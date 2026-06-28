@@ -23,6 +23,7 @@ import { Button } from '../ui/Button';
 import { AkuDatePicker } from '../ui/AkuDatePicker';
 import { useBillsStore } from '../../store/bills.store';
 import { useUIStore } from '../../store/ui.store';
+import { useAuthStore } from '../../store/auth.store';
 import {
   BILL_CATEGORIES,
   type Bill,
@@ -46,7 +47,6 @@ interface FormData {
   dueDate:   string;
   frequency: BillFrequency;
   notes:     string;
-  isShared:  boolean;
   notify14:  boolean;
   notify7:   boolean;
   notify3:   boolean;
@@ -92,8 +92,8 @@ export function EditBillSheet({ bill, onClose, onSuccess }: EditBillSheetProps) 
   const { colors, text, font, fontSize, radius } = useTheme();
   const { update } = useBillsStore();
   const { showToast } = useUIStore();
+  const { user } = useAuthStore();
   const [showDatePicker, setShowDatePicker] = useState(false);
-
   const { control, handleSubmit, reset, setError, watch, setValue, formState: { errors, isSubmitting } } = useForm<FormData>({
     defaultValues: {
       name:      '',
@@ -102,7 +102,6 @@ export function EditBillSheet({ bill, onClose, onSuccess }: EditBillSheetProps) 
       dueDate:   '',
       frequency: 'monthly',
       notes:     '',
-      isShared:  false,
       notify14:  true,
       notify7:   true,
       notify3:   true,
@@ -123,7 +122,6 @@ export function EditBillSheet({ bill, onClose, onSuccess }: EditBillSheetProps) 
         dueDate:   bill.dueDate,
         frequency: bill.frequency,
         notes:     bill.notes ?? '',
-        isShared:  bill.isShared,
         notify14:  bill.notify14,
         notify7:   bill.notify7,
         notify3:   bill.notify3,
@@ -155,8 +153,8 @@ export function EditBillSheet({ bill, onClose, onSuccess }: EditBillSheetProps) 
         dueDate:     data.dueDate,
         frequency:   data.frequency,
         notes:       data.notes ?? null,
-        isShared:    data.isShared,
-        householdId: bill.householdId,
+        isShared:    false,
+        householdId: null,
         notify30:    bill.notify30,
         notify14:    data.notify14,
         notify7:     data.notify7,
@@ -372,27 +370,6 @@ export function EditBillSheet({ bill, onClose, onSuccess }: EditBillSheetProps) 
           )}
         />
 
-        {/* Shared toggle */}
-        <Controller
-          control={control}
-          name="isShared"
-          render={({ field }) => (
-            <View style={[styles.toggleRow, { borderColor: colors.border }]}>
-              <View>
-                <Text style={[text.bodyMedium, { color: colors.text }]}>Shared bill</Text>
-                <Text style={[text.caption, { color: colors.textSecondary, marginTop: 2 }]}>
-                  Visible to all household members
-                </Text>
-              </View>
-              <Switch
-                value={field.value}
-                onValueChange={field.onChange}
-                trackColor={{ false: colors.border, true: colors.primary }}
-                thumbColor={colors.card}
-              />
-            </View>
-          )}
-        />
 
         {/* Notifications */}
         <Text style={[text.label, { color: colors.textSecondary, marginBottom: 10, marginTop: 8 }]}>

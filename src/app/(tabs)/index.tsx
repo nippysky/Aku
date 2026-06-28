@@ -20,13 +20,12 @@ import Animated, {
 } from 'react-native-reanimated';
 import { Palette } from '../../theme/colors';
 import { format } from 'date-fns';
-import { formatCompact } from '../../lib/format';
 import {
   Bell,
   Receipt,
-  Wallet,
   Target,
   TrendingUp,
+  BarChart2,
 } from 'lucide-react-native';
 import {
   UtensilsCrossed, Car, ShoppingBag, Tv, Home,
@@ -35,15 +34,15 @@ import {
 import { useTheme } from '../../theme';
 import { Card } from '../../components/ui/Card';
 import { StatusBadge } from '../../components/ui/StatusBadge';
-import { EmptyState } from '../../components/ui/EmptyState';
+import { BannerAmount, CompactAmountDisplay } from '../../components/ui/CompactAmountDisplay';
+import { SkeletonBanner, SkeletonCard, SkeletonGoalCard, SkeletonSummaryGrid } from '../../components/ui/Skeleton';
 import { BillRow } from '../../components/home/BillRow';
-import { BudgetBar } from '../../components/home/BudgetBar';
 import { GoalCard } from '../../components/home/GoalCard';
 import { useAuthStore } from '../../store/auth.store';
 import { useBillsStore } from '../../store/bills.store';
 import { useExpensesStore } from '../../store/expenses.store';
-import { useBudgetsStore } from '../../store/budgets.store';
 import { useGoalsStore } from '../../store/goals.store';
+import { useCurrencyFormat } from '../../hooks/useCurrencyFormat';
 import { EXPENSE_CATEGORIES } from '../../types';
 import type { Bill } from '../../types';
 
@@ -62,10 +61,6 @@ function getGreeting(): string {
   return 'Good evening';
 }
 
-function formatNaira(kobo: number): string {
-  return `₦${(kobo / 100).toLocaleString('en-NG')}`;
-}
-
 function formatDate(): string {
   return format(new Date(), 'EEEE, d MMMM yyyy');
 }
@@ -79,6 +74,10 @@ function billsDueThisWeek(bills: Bill[]): number {
     .reduce((sum, b) => sum + b.amount, 0);
 }
 
+function totalUnpaidBills(bills: Bill[]): number {
+  return bills.filter((b) => !b.isPaid).reduce((sum, b) => sum + b.amount, 0);
+}
+
 function todaySpend(expenses: { date: string; amount: number }[]): number {
   const today = format(new Date(), 'yyyy-MM-dd');
   return expenses.filter((e) => e.date === today).reduce((sum, e) => sum + e.amount, 0);
@@ -90,7 +89,7 @@ interface SummaryCardProps {
   icon:       React.ComponentType<{ size?: number; color?: string; strokeWidth?: number }>;
   iconColor:  string;
   label:      string;
-  value:      string;
+  value:      string | React.ReactNode;
   onPress:    () => void;
   entering:   typeof FadeInDown;
   delay:      number;
@@ -144,15 +143,19 @@ function SummaryCard({ icon: Icon, iconColor, label, value, onPress, delay }: Su
         <Text style={[text.caption, { color: colors.textSecondary, marginTop: 10 }]}>
           {label}
         </Text>
-        <Text
-          style={[
-            { fontFamily: font.sansSemiBold, fontSize: fontSize.md, color: colors.text, marginTop: 4 },
-          ]}
-          numberOfLines={1}
-          adjustsFontSizeToFit
-        >
-          {value}
-        </Text>
+        {typeof value === 'string' ? (
+          <Text
+            style={[
+              { fontFamily: font.sansSemiBold, fontSize: fontSize.md, color: colors.text, marginTop: 4 },
+            ]}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+          >
+            {value}
+          </Text>
+        ) : (
+          <View style={{ marginTop: 4 }}>{value}</View>
+        )}
       </Pressable>
       </Animated.View>
     </Animated.View>
@@ -183,14 +186,16 @@ function SectionHeader({
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function HomeScreen() {
-  const { colors, text, font, fontSize, spacing, layout, radius } = useTheme();
+  const { colors, text, font, fontSize, layout, radius } = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user } = useAuthStore();
-  const { bills, upcoming, overdue, dueToday, load: loadBills } = useBillsStore();
-  const { expenses, summary, load: loadExpenses } = useExpensesStore();
-  const { budgets, load: loadBudgets } = useBudgetsStore();
-  const { goals, load: loadGoals } = useGoalsStore();
+  const { bills, upcoming, overdue, dueToday, load: loadBills, isLoading: billsLoading } = useBillsStore();
+  const { expenses, load: loadExpenses, isLoading: expensesLoading } = useExpensesStore();
+  const { goals, load: loadGoals, isLoading: goalsLoading } = useGoalsStore();
+
+  const isLoading = billsLoading || expensesLoading || goalsLoading;
+  const { fmt, fmtCompact } = useCurrencyFormat();
 
   useEffect(() => {
     if (user) {
@@ -199,25 +204,17 @@ export default function HomeScreen() {
     }
   }, [user]);
 
-  // Load goals
   useEffect(() => {
     if (user) loadGoals(user.id);
   }, [user]);
-
-  // Load budgets when summary ready
-  useEffect(() => {
-    if (user && summary) {
-      loadBudgets(user.id, summary.byCategory as Record<string, number>);
-    }
-  }, [user, summary]);
 
   const firstName = user?.name?.split(' ')[0] ?? 'there';
   const greeting  = getGreeting();
 
   // Computed values
   const dueSoonTotal    = billsDueThisWeek(bills);
+  const allUnpaidTotal  = totalUnpaidBills(bills);
   const spentToday      = todaySpend(expenses);
-  const budgetRemaining = budgets.reduce((s, b) => s + b.remaining, 0);
   const avgGoalProgress = goals.length > 0
     ? goals.reduce((s, g) => s + g.progress, 0) / goals.length
     : 0;
@@ -227,7 +224,6 @@ export default function HomeScreen() {
     .slice(0, 3);
 
   const recentExpenses = [...expenses].slice(0, 5);
-  const displayBudgets = budgets.slice(0, 3);
   const displayGoals   = goals.filter((g) => !g.isCompleted).slice(0, 3);
 
   return (
@@ -270,7 +266,8 @@ export default function HomeScreen() {
         </Animated.View>
 
         {/* ── Wealth Snapshot Banner ── */}
-        <Animated.View
+        {isLoading && <SkeletonBanner style={{ marginBottom: 0 }} />}
+        {!isLoading && <Animated.View
           entering={FadeIn.duration(300)}
           style={[styles.snapshotBanner, { borderRadius: 20, overflow: 'hidden' }]}
         >
@@ -298,56 +295,50 @@ export default function HomeScreen() {
           {/* Content — sits above the overlay */}
           <View style={{ position: 'relative' }}>
             <Text style={[text.caption, { color: 'rgba(250,250,248,0.65)', letterSpacing: 1 }]}>
-              TOTAL BUDGET REMAINING
+              BILLS OUTSTANDING
             </Text>
-            <Text
-              style={[
-                {
-                  fontFamily:    font.displayLight,
-                  fontSize:      fontSize['3xl'],
-                  color:         Palette.linen,
-                  letterSpacing: -1,
-                  marginTop:     4,
-                },
-              ]}
-            >
-              {formatNaira(budgetRemaining)}
-            </Text>
+            <BannerAmount
+              kobo={allUnpaidTotal}
+              textStyle={{
+                fontFamily:    font.displayLight,
+                fontSize:      fontSize['3xl'],
+                color:         Palette.linen,
+                letterSpacing: -1,
+                marginTop:     4,
+              }}
+            />
             <View style={{ flexDirection: 'row', gap: 16, marginTop: 12 }}>
               <View>
-                <Text style={[text.caption, { color: 'rgba(250,250,248,0.55)' }]}>Bills due</Text>
-                <Text style={[text.bodyMedium, { color: Palette.gold, marginTop: 2 }]}>
-                  {formatNaira(dueSoonTotal)}
-                </Text>
+                <Text style={[text.caption, { color: 'rgba(250,250,248,0.55)' }]}>Due this week</Text>
+                <BannerAmount kobo={dueSoonTotal} textStyle={[text.bodyMedium, { color: Palette.gold }]} />
               </View>
               <View style={{ width: 1, backgroundColor: 'rgba(250,250,248,0.15)' }} />
               <View>
                 <Text style={[text.caption, { color: 'rgba(250,250,248,0.55)' }]}>Spent today</Text>
-                <Text style={[text.bodyMedium, { color: Palette.linen, marginTop: 2 }]}>
-                  {formatNaira(spentToday)}
-                </Text>
+                <BannerAmount kobo={spentToday} textStyle={[text.bodyMedium, { color: Palette.linen }]} />
               </View>
             </View>
           </View>
-        </Animated.View>
+        </Animated.View>}
 
         {/* ── SECTION 2: Quick Summary Cards ── */}
-        <View style={styles.summaryGrid}>
+        {isLoading && <SkeletonSummaryGrid style={{ marginTop: 16 }} />}
+        {!isLoading && <View style={styles.summaryGrid}>
           <SummaryCard
             icon={Receipt}
             iconColor={colors.statusDueToday}
             label="Due this week"
-            value={formatCompact(dueSoonTotal)}
+            value={<CompactAmountDisplay kobo={dueSoonTotal} textStyle={{ fontFamily: font.sansSemiBold, fontSize: fontSize.md, color: colors.text }} align="left" />}
             onPress={() => router.push('/(tabs)/bills' as never)}
             entering={FadeInDown}
             delay={40}
           />
           <SummaryCard
-            icon={Wallet}
+            icon={BarChart2}
             iconColor={colors.primary}
-            label="Budget left"
-            value={formatCompact(budgetRemaining)}
-            onPress={() => router.push('/(tabs)/expenses' as never)}
+            label="All bills"
+            value={<CompactAmountDisplay kobo={allUnpaidTotal} textStyle={{ fontFamily: font.sansSemiBold, fontSize: fontSize.md, color: colors.text }} align="left" />}
+            onPress={() => router.push('/(tabs)/bills' as never)}
             entering={FadeInDown}
             delay={70}
           />
@@ -364,12 +355,12 @@ export default function HomeScreen() {
             icon={TrendingUp}
             iconColor={colors.success}
             label="Spent today"
-            value={formatCompact(spentToday)}
+            value={<CompactAmountDisplay kobo={spentToday} textStyle={{ fontFamily: font.sansSemiBold, fontSize: fontSize.md, color: colors.text }} align="left" />}
             onPress={() => router.push('/(tabs)/expenses' as never)}
             entering={FadeInDown}
             delay={130}
           />
-        </View>
+        </View>}
 
         {/* ── SECTION 3: Upcoming Bills ── */}
         <Animated.View entering={FadeInDown.delay(120).duration(280)}>
@@ -377,62 +368,47 @@ export default function HomeScreen() {
             title="Upcoming"
             onSeeAll={() => router.push('/(tabs)/bills' as never)}
           />
-          <Card style={[styles.sectionCard, { borderRadius: 16 }]}>
-            {upcomingBills.length === 0 ? (
-              <View style={styles.emptySection}>
-                <Text style={[text.bodySm, { color: colors.textSecondary, textAlign: 'center' }]}>
-                  No upcoming bills
-                </Text>
-              </View>
-            ) : (
-              upcomingBills.map((bill, idx) => (
-                <BillRow
-                  key={bill.id}
-                  bill={bill}
-                  onPress={() => router.push(`/bills/${bill.id}` as never)}
-                  showStatus
-                  style={idx === upcomingBills.length - 1 ? { borderBottomWidth: 0 } : undefined}
-                />
-              ))
-            )}
-          </Card>
+          {isLoading ? (
+            <SkeletonCard rows={3} />
+          ) : (
+            <Card style={[styles.sectionCard, { borderRadius: 16 }]}>
+              {upcomingBills.length === 0 ? (
+                <View style={styles.emptySection}>
+                  <Text style={[text.bodySm, { color: colors.textSecondary, textAlign: 'center' }]}>
+                    No upcoming bills
+                  </Text>
+                </View>
+              ) : (
+                upcomingBills.map((bill, idx) => (
+                  <BillRow
+                    key={bill.id}
+                    bill={bill}
+                    onPress={() => router.push(`/bills/${bill.id}` as never)}
+                    showStatus
+                    style={idx === upcomingBills.length - 1 ? { borderBottomWidth: 0 } : undefined}
+                  />
+                ))
+              )}
+            </Card>
+          )}
         </Animated.View>
 
-        {/* ── SECTION 4: Budget Overview ── */}
-        <Animated.View entering={FadeInDown.delay(150).duration(280)}>
-          <SectionHeader
-            title="Budget"
-            onSeeAll={() => router.push('/(tabs)/expenses' as never)}
-          />
-          <Card style={[styles.sectionCard, { paddingBottom: 4, borderRadius: 16 }]}>
-            {displayBudgets.length === 0 ? (
-              <View style={styles.emptySection}>
-                <Text style={[text.bodySm, { color: colors.textSecondary, textAlign: 'center' }]}>
-                  No budgets set
-                </Text>
-              </View>
-            ) : (
-              displayBudgets.map((b) => (
-                <BudgetBar
-                  key={b.id}
-                  category={b.category}
-                  spent={b.spent}
-                  total={b.amount}
-                  status={b.status}
-                  onPress={() => router.push(`/budgets/${b.id}` as never)}
-                />
-              ))
-            )}
-          </Card>
-        </Animated.View>
-
-        {/* ── SECTION 5: Savings Goals ── */}
-        <Animated.View entering={FadeInDown.delay(180).duration(280)}>
+        {/* ── SECTION 4: Savings Goals ── */}
+        <Animated.View entering={FadeInDown.delay(160).duration(280)}>
           <SectionHeader
             title="Goals"
             onSeeAll={() => router.push('/(tabs)/goals' as never)}
           />
-          {displayGoals.length === 0 ? (
+          {isLoading ? (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.goalsScroll}
+              contentContainerStyle={styles.goalsRow}
+            >
+              {[0, 1].map((i) => <SkeletonGoalCard key={i} style={{ width: 200 }} />)}
+            </ScrollView>
+          ) : displayGoals.length === 0 ? (
             <View style={styles.emptySection}>
               <Text style={[text.bodySm, { color: colors.textSecondary, textAlign: 'center' }]}>
                 No active goals
@@ -442,6 +418,7 @@ export default function HomeScreen() {
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
+              style={styles.goalsScroll}
               contentContainerStyle={styles.goalsRow}
             >
               {displayGoals.map((goal) => (
@@ -456,9 +433,12 @@ export default function HomeScreen() {
           )}
         </Animated.View>
 
-        {/* ── SECTION 6: Recent Activity ── */}
+        {/* ── SECTION 5: Recent Activity ── */}
         <Animated.View entering={FadeInDown.delay(220).duration(280)}>
           <SectionHeader title="Recent" />
+          {isLoading ? (
+            <SkeletonCard rows={4} />
+          ) : (
           <Card style={[styles.sectionCard, { borderRadius: 16 }]}>
             {recentExpenses.length === 0 ? (
               <View style={styles.emptySection}>
@@ -498,13 +478,14 @@ export default function HomeScreen() {
                       </Text>
                     </View>
                     <Text style={[text.amount, { color: colors.text }]}>
-                      {formatNaira(exp.amount)}
+                      {fmt(exp.amount)}
                     </Text>
                   </View>
                 );
               })
             )}
           </Card>
+          )}
         </Animated.View>
       </ScrollView>
 
@@ -609,9 +590,14 @@ const styles = StyleSheet.create({
     marginRight: 10,
   },
 
-  // Goals
+  // Goals — bleed carousel to screen edge
+  goalsScroll: {
+    marginHorizontal: -24,  // escape parent scrollContent paddingHorizontal:24
+  },
   goalsRow: {
     gap:           12,
+    paddingLeft:   24,   // re-align first card with screen padding
+    paddingRight:  16,   // small trail so last card shows it's scrollable
     paddingBottom: 4,
   },
 

@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { Tabs } from 'expo-router';
 import { Platform, View, StyleSheet, type ColorValue } from 'react-native';
 import { BlurView } from 'expo-blur';
@@ -6,6 +7,8 @@ import { Home, Receipt, Wallet, Target, User } from 'lucide-react-native';
 import { useTheme } from '../../theme';
 import { Layout } from '../../theme/spacing';
 import { FontFamily, FontSize } from '../../theme/typography';
+import { useAuthStore } from '../../store/auth.store';
+import { useCirclesStore } from '../../store/circles.store';
 
 type TabIconProps = {
   color:   ColorValue;
@@ -33,37 +36,59 @@ function TabIcon({
 export default function TabsLayout() {
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
+  const isIOS  = Platform.OS === 'ios';
 
-  const isIOS = Platform.OS === 'ios';
+  // Eagerly load circles so the circle picker in AddBillSheet / AddGoalSheet
+  // is always populated regardless of which tab the user visits first.
+  const { user }       = useAuthStore();
+  const { load: loadCircles } = useCirclesStore();
+  useEffect(() => {
+    if (user?.id) loadCircles(user.id);
+  }, [user?.id]);
 
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
 
-        // ── iOS: transparent + glass background ──────────────────────────────
+        // ── iOS ──────────────────────────────────────────────────────────────
         ...(isIOS
-          ? {
-              tabBarBackground: () => (
-                <BlurView
-                  intensity={isDark ? 80 : 60}
-                  tint={isDark ? 'dark' : 'light'}
-                  style={StyleSheet.absoluteFill}
-                />
-              ),
-              tabBarStyle: {
-                backgroundColor: 'transparent',
-                borderTopColor:  isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
-                borderTopWidth:  0.5,
-                height:          Layout.tabBarHeight + insets.bottom,
-                paddingBottom:   insets.bottom,
-                paddingTop:      8,
-                elevation:       0,
-                shadowOpacity:   0,
-              },
-            }
+          ? isDark
+            ? {
+                // Dark mode iOS: clean solid surface — no blur artefacts
+                tabBarStyle: {
+                  backgroundColor: colors.tabBar,
+                  borderTopColor:  'rgba(255,255,255,0.07)',
+                  borderTopWidth:  0.5,
+                  height:          Layout.tabBarHeight + insets.bottom,
+                  paddingBottom:   insets.bottom,
+                  paddingTop:      8,
+                  elevation:       0,
+                  shadowOpacity:   0,
+                },
+              }
+            : {
+                // Light mode iOS: frosted glass
+                tabBarBackground: () => (
+                  <BlurView
+                    intensity={60}
+                    tint="light"
+                    style={StyleSheet.absoluteFill}
+                  />
+                ),
+                tabBarStyle: {
+                  backgroundColor: 'transparent',
+                  borderTopColor:  'rgba(0,0,0,0.06)',
+                  borderTopWidth:  0.5,
+                  height:          Layout.tabBarHeight + insets.bottom,
+                  paddingBottom:   insets.bottom,
+                  paddingTop:      8,
+                  elevation:       0,
+                  shadowOpacity:   0,
+                },
+              }
           : {
-              // ── Android: solid Material 3 elevation ───────────────────────
+              // ── Android: solid Material 3 ────────────────────────────────
               tabBarStyle: {
                 backgroundColor: colors.tabBar,
                 borderTopWidth:  0,
@@ -126,7 +151,7 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="profile"
         options={{
-          title: 'Profile',
+          title: 'More',
           tabBarIcon: ({ color, focused, size }) => (
             <TabIcon Icon={User} color={color} focused={focused} size={size} />
           ),

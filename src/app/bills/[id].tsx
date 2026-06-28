@@ -41,6 +41,7 @@ import { ScreenHeader } from '../../components/ui/ScreenHeader';
 import { EditBillSheet } from '../../components/bills/EditBillSheet';
 import { useBillsStore } from '../../store/bills.store';
 import { useUIStore } from '../../store/ui.store';
+import { useCurrencyFormat } from '../../hooks/useCurrencyFormat';
 import {
   BILL_CATEGORIES,
   BILL_FREQUENCY_LABELS,
@@ -55,10 +56,6 @@ const BILL_ICONS: Record<string, React.ComponentType<{ size?: number; color?: st
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function formatAmount(kobo: number): string {
-  return `₦${(kobo / 100).toLocaleString('en-NG')}`;
-}
 
 function formatDueDate(dateStr: string): string {
   try {
@@ -106,7 +103,7 @@ function DeleteConfirmSheet({ visible, billName, onConfirm, onCancel }: DeleteSh
   return (
     <View style={[styles.deleteOverlay, { backgroundColor: colors.overlay }]}>
       <Animated.View
-        entering={FadeInDown.springify().damping(18)}
+        entering={FadeInDown.duration(200)}
         style={[
           styles.deleteSheet,
           {
@@ -170,6 +167,7 @@ export default function BillDetailScreen() {
 
   const { bills, markPaid, markUnpaid, remove } = useBillsStore();
   const { showToast } = useUIStore();
+  const { fmt } = useCurrencyFormat();
 
   const bill = bills.find((b) => b.id === id) ?? null;
 
@@ -205,10 +203,10 @@ export default function BillDetailScreen() {
 
   const handleDelete = useCallback(async () => {
     if (!bill) return;
+    router.back();
     try {
       await remove(bill.id);
       showToast('success', 'Bill deleted');
-      router.back();
     } catch {
       showToast('error', 'Failed to delete bill');
     }
@@ -265,7 +263,7 @@ export default function BillDetailScreen() {
       >
         {/* ── Hero ── */}
         <Animated.View
-          entering={FadeInDown.delay(0).springify().damping(18)}
+          entering={FadeInDown.delay(0).duration(200)}
           style={styles.hero}
         >
           <View
@@ -291,20 +289,20 @@ export default function BillDetailScreen() {
               {
                 fontFamily:    font.displayLight,
                 fontSize:      fontSize['4xl'],
-                color:         colors.accent,
+                color:         colors.text,
                 letterSpacing: -1,
                 marginTop:     8,
               },
             ]}
           >
-            {formatAmount(bill.amount)}
+            {fmt(bill.amount)}
           </Text>
 
           <StatusBadge status={bill.status} style={{ marginTop: 12 }} />
         </Animated.View>
 
         {/* ── Details card ── */}
-        <Animated.View entering={FadeInDown.delay(80).springify().damping(18)}>
+        <Animated.View entering={FadeInDown.delay(80).duration(200)}>
           <Card style={styles.card}>
             <DetailRow
               icon={Calendar}
@@ -339,7 +337,7 @@ export default function BillDetailScreen() {
         </Animated.View>
 
         {/* ── Notifications card ── */}
-        <Animated.View entering={FadeInDown.delay(160).springify().damping(18)}>
+        <Animated.View entering={FadeInDown.delay(160).duration(200)}>
           <Text
             style={[
               styles.sectionLabel,
@@ -387,7 +385,7 @@ export default function BillDetailScreen() {
 
         {/* ── Actions ── */}
         <Animated.View
-          entering={FadeInDown.delay(240).springify().damping(18)}
+          entering={FadeInDown.delay(240).duration(200)}
           style={styles.actions}
         >
           {bill.isPaid ? (

@@ -1,6 +1,8 @@
 /**
  * Akù — Amount formatting utilities.
- * All stored amounts are in kobo (integer). Display in naira.
+ * All stored amounts are in the user's base currency minor unit (e.g. kobo for NGN,
+ * pesewas for GHS, cents for USD). When the user switches display currency,
+ * `convertKobo` applies the exchange-rate cross-rate before formatting.
  */
 
 export interface FormatOptions {
@@ -46,4 +48,24 @@ function trimDecimals(n: number, places: number): string {
  */
 export function formatPercent(ratio: number): string {
   return `${Math.round(ratio * 100)}%`;
+}
+
+/**
+ * Convert a minor-unit amount (kobo/pesewas/cents) from one currency to another
+ * using USD-based exchange rates (e.g. from exchangerate-api.com v4).
+ *
+ * fromCode / toCode must match the keys in `rates` (e.g. 'NGN', 'GHS').
+ * Returns the original amount unchanged if either rate is missing.
+ */
+export function convertKobo(
+  kobo: number,
+  fromCode: string,
+  toCode: string,
+  rates: Record<string, number>,
+): number {
+  if (!fromCode || !toCode || fromCode === toCode) return kobo;
+  const fromRate = rates[fromCode];
+  const toRate   = rates[toCode];
+  if (!fromRate || !toRate) return kobo;
+  return Math.round(kobo * (toRate / fromRate));
 }

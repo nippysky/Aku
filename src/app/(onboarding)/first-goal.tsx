@@ -15,7 +15,7 @@ import { Calendar } from 'lucide-react-native';
 import { format, parseISO } from 'date-fns';
 import { Button, Input, AmountInput, KeyboardWrapper, OnboardingHeader } from '../../components/ui';
 import { AkuDatePicker } from '../../components/ui/AkuDatePicker';
-import { useAuthStore, useHouseholdStore, useGoalsStore } from '../../store';
+import { useAuthStore, useGoalsStore } from '../../store';
 import { OnboardingStorage } from '../../lib/onboarding-storage';
 import { useTheme } from '../../theme';
 
@@ -37,7 +37,6 @@ export default function FirstGoalScreen() {
   const router = useRouter();
 
   const { user, unlock, markOnboardingComplete } = useAuthStore();
-  const { household }    = useHouseholdStore();
   const { add: addGoal } = useGoalsStore();
 
   async function finishOnboarding() {
@@ -69,13 +68,13 @@ export default function FirstGoalScreen() {
       setError('');
       await addGoal(
         {
-          householdId:  household?.id ?? null,
           name:         goalName.trim(),
           targetAmount: amount,
           targetDate:   targetDate.length > 0 ? targetDate : null,
           notes:        null,
           emoji:        selectedEmoji,
           color:        null,
+          householdId:  null,
           isShared:     false,
         },
         user.id,

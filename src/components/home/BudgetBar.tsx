@@ -8,6 +8,7 @@ import Animated, {
 import { useTheme } from '../../theme';
 import { EXPENSE_CATEGORIES } from '../../types';
 import type { ExpenseCategory, BudgetStatus } from '../../types';
+import { useCurrencyFormat } from '../../hooks/useCurrencyFormat';
 
 import {
   UtensilsCrossed,
@@ -50,17 +51,11 @@ interface BudgetBarProps {
   style?:   ViewStyle;
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function formatAmount(kobo: number): string {
-  const naira = kobo / 100;
-  return `₦${naira.toLocaleString('en-NG')}`;
-}
-
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function BudgetBar({ category, spent, total, status, onPress, style }: BudgetBarProps) {
   const { colors, text, font, radius } = useTheme();
+  const { fmt } = useCurrencyFormat();
 
   const meta = EXPENSE_CATEGORIES[category];
   const IconComp = EXPENSE_ICONS[meta.icon] ?? MoreHorizontal;
@@ -102,8 +97,8 @@ export function BudgetBar({ category, spent, total, status, onPress, style }: Bu
           </Text>
         </View>
         <Text style={[text.amountSm, { color: colors.textSecondary }]}>
-          {formatAmount(spent)}
-          <Text style={{ color: colors.textTertiary }}> / {formatAmount(total)}</Text>
+          {fmt(spent)}
+          <Text style={{ color: colors.textTertiary }}> / {fmt(total)}</Text>
         </Text>
       </View>
 

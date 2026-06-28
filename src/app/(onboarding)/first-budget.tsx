@@ -12,7 +12,7 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Button, AmountInput, KeyboardWrapper, OnboardingHeader } from '../../components/ui';
-import { useAuthStore, useHouseholdStore, useBudgetsStore } from '../../store';
+import { useAuthStore, useBudgetsStore } from '../../store';
 import { useTheme } from '../../theme';
 import type { BudgetPeriod, ExpenseCategory } from '../../types';
 
@@ -51,7 +51,7 @@ export default function FirstBudgetScreen() {
   const router = useRouter();
 
   const { user }           = useAuthStore();
-  const { household }      = useHouseholdStore();
+
   const { add: addBudget } = useBudgetsStore();
 
   const [category, setCategory]   = useState<ExpenseCategory>('food');
@@ -71,10 +71,10 @@ export default function FirstBudgetScreen() {
       setError('');
       await addBudget(
         {
-          householdId: household?.id ?? null,
           category,
           amount,
           period,
+          householdId: null,
           isShared:    false,
         },
         user.id,

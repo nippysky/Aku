@@ -18,6 +18,7 @@ import {
 import { useTheme } from '../../theme';
 import { EXPENSE_CATEGORIES, type ExpenseCategory } from '../../types';
 import type { Expense } from '../../types';
+import { useCurrencyFormat } from '../../hooks/useCurrencyFormat';
 
 // ─── Icon map ─────────────────────────────────────────────────────────────────
 
@@ -60,6 +61,7 @@ const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 export function ExpenseRow({ expense, onPress, onLongPress, style }: ExpenseRowProps) {
   const { colors, text, font, fontSize, radius } = useTheme();
+  const { fmt } = useCurrencyFormat();
 
   const scale = useSharedValue(1);
 
@@ -77,7 +79,7 @@ export function ExpenseRow({ expense, onPress, onLongPress, style }: ExpenseRowP
 
   const meta = EXPENSE_CATEGORIES[expense.category];
   const IconComp = EXPENSE_ICONS[expense.category] ?? MoreHorizontal;
-  const displayAmount = `−₦${(expense.amount / 100).toLocaleString('en-NG')}`;
+  const displayAmount = `−${fmt(expense.amount)}`;
 
   return (
     <AnimatedPressable

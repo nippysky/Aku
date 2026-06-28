@@ -1,120 +1,150 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect } from 'react';
 import {
+  Platform,
   Pressable,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { BlurView } from 'expo-blur';
 import Animated, {
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
-  withSpring,
   withTiming,
+  Easing,
 } from 'react-native-reanimated';
+import { CheckCircle, AlertCircle, AlertTriangle, Info, X } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useUIStore, Toast } from '../../store/ui.store';
+import { useUIStore, type Toast } from '../../store/ui.store';
 import { useTheme } from '../../theme';
+import { Palette } from '../../theme/colors';
 
-// ─── Single Toast Item ────────────────────────────────────────────────────────
+// ─── Config per type ──────────────────────────────────────────────────────────
 
-interface ToastItemProps {
-  toast: Toast;
-  onDismiss: (id: string) => void;
+type ToastConfig = {
+  icon:       React.ComponentType<{ size?: number; color?: string; strokeWidth?: number }>;
+  bg:         string;
+  blur:       boolean;
+  iconColor:  string;
+  textColor:  string;
+  borderColor: string;
+};
+
+function getConfig(type: Toast['type'], colors: ReturnType<typeof useTheme>['colors']): ToastConfig {
+  switch (type) {
+    case 'success':
+      return {
+        icon:        CheckCircle,
+        bg:          Palette.forest,
+        blur:        false,
+        iconColor:   Palette.gold,
+        textColor:   Palette.linen,
+        borderColor: 'rgba(201,169,106,0.3)',
+      };
+    case 'error':
+      return {
+        icon:        AlertCircle,
+        bg:          colors.danger,
+        blur:        false,
+        iconColor:   '#fff',
+        textColor:   '#fff',
+        borderColor: 'rgba(255,255,255,0.15)',
+      };
+    case 'warning':
+      return {
+        icon:        AlertTriangle,
+        bg:          Platform.OS === 'ios' ? 'rgba(255,248,230,0.92)' : colors.warningBg,
+        blur:        Platform.OS === 'ios',
+        iconColor:   colors.warning,
+        textColor:   colors.warning,
+        borderColor: colors.warning + '40',
+      };
+    case 'info':
+      return {
+        icon:        Info,
+        bg:          Platform.OS === 'ios' ? 'rgba(22,58,47,0.88)' : colors.primary,
+        blur:        Platform.OS === 'ios',
+        iconColor:   Palette.gold,
+        textColor:   Palette.linen,
+        borderColor: 'rgba(201,169,106,0.2)',
+      };
+  }
 }
 
-function ToastItem({ toast, onDismiss }: ToastItemProps) {
-  const { colors, text, font, radius, spacing } = useTheme();
-  const translateY = useSharedValue(-80);
-  const opacity = useSharedValue(0);
+// ─── Single toast ─────────────────────────────────────────────────────────────
 
-  // Slide in on mount
+function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string) => void }) {
+  const { text, font, fontSize } = useTheme();
+  const { colors }  = useTheme();
+  const cfg         = getConfig(toast.type, colors);
+  const IconComp    = cfg.icon;
+
+  const translateY = useSharedValue(-20);
+  const opacity    = useSharedValue(0);
+
   useEffect(() => {
-    translateY.value = withSpring(0, { damping: 18, stiffness: 200 });
-    opacity.value = withTiming(1, { duration: 200 });
-  }, [opacity, translateY]);
+    translateY.value = withTiming(0,   { duration: 280, easing: Easing.out(Easing.cubic) });
+    opacity.value    = withTiming(1,   { duration: 220 });
+  }, []);
 
   const dismiss = () => {
-    translateY.value = withTiming(-80, { duration: 250 });
-    opacity.value = withTiming(0, { duration: 200 }, (finished) => {
-      if (finished) {
-        runOnJS(onDismiss)(toast.id);
-      }
+    translateY.value = withTiming(-16, { duration: 200, easing: Easing.in(Easing.cubic) });
+    opacity.value    = withTiming(0,   { duration: 180 }, (done) => {
+      if (done) runOnJS(onDismiss)(toast.id);
     });
   };
 
-  const animatedStyle = useAnimatedStyle(() => ({
+  const animStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: translateY.value }],
-    opacity: opacity.value,
+    opacity:   opacity.value,
   }));
 
-  // Colors per type
-  const { bg, border: borderColor, textColor, dotColor } = (() => {
-    switch (toast.type) {
-      case 'success':
-        return {
-          bg:        colors.successBg,
-          border:    colors.success,
-          textColor: colors.success,
-          dotColor:  colors.success,
-        };
-      case 'error':
-        return {
-          bg:        colors.dangerBg,
-          border:    colors.danger,
-          textColor: colors.danger,
-          dotColor:  colors.danger,
-        };
-      case 'warning':
-        return {
-          bg:        colors.warningBg,
-          border:    colors.warning,
-          textColor: colors.warning,
-          dotColor:  colors.warning,
-        };
-      case 'info':
-        return {
-          bg:        colors.backgroundSecondary,
-          border:    colors.primary,
-          textColor: colors.text,
-          dotColor:  colors.primary,
-        };
-    }
-  })();
+  const inner = (
+    <Pressable
+      onPress={dismiss}
+      style={styles.row}
+      accessibilityRole="button"
+      accessibilityLabel="Dismiss"
+    >
+      <IconComp size={20} color={cfg.iconColor} strokeWidth={2} />
+      <Text
+        style={[
+          styles.msg,
+          { fontFamily: font.sansMedium, fontSize: fontSize.sm, color: cfg.textColor },
+        ]}
+        numberOfLines={3}
+      >
+        {toast.message}
+      </Text>
+      <X size={16} color={cfg.textColor} strokeWidth={2} style={{ opacity: 0.6 }} />
+    </Pressable>
+  );
 
   return (
     <Animated.View
       style={[
         styles.toast,
-        animatedStyle,
+        animStyle,
         {
-          backgroundColor: bg,
-          borderColor,
-          borderRadius: radius.md,
+          borderColor:  cfg.borderColor,
+          overflow:     'hidden',
+          borderRadius: 999,
         },
       ]}
     >
-      <Pressable
-        onPress={dismiss}
-        accessibilityRole="button"
-        accessibilityLabel="Dismiss notification"
-        style={styles.toastPressable}
-      >
-        {/* Accent bar */}
-        <View style={[styles.accentBar, { backgroundColor: dotColor }]} />
-
-        {/* Message */}
-        <Text
-          style={[
-            text.bodyMedium,
-            styles.message,
-            { color: textColor },
-          ]}
-          numberOfLines={3}
-        >
-          {toast.message}
-        </Text>
-      </Pressable>
+      {cfg.blur && Platform.OS === 'ios' ? (
+        <BlurView intensity={70} tint="light" style={[StyleSheet.absoluteFill, { borderRadius: 999 }]} />
+      ) : null}
+      <View
+        style={[
+          StyleSheet.absoluteFill,
+          { backgroundColor: cfg.bg, borderRadius: 999 },
+        ]}
+      />
+      <View style={{ position: 'relative' }}>
+        {inner}
+      </View>
     </Animated.View>
   );
 }
@@ -122,26 +152,19 @@ function ToastItem({ toast, onDismiss }: ToastItemProps) {
 // ─── Container ────────────────────────────────────────────────────────────────
 
 export function ToastContainer() {
-  const toasts = useUIStore((s) => s.toasts);
+  const toasts     = useUIStore((s) => s.toasts);
   const removeToast = useUIStore((s) => s.removeToast);
-  const insets = useSafeAreaInsets();
+  const insets     = useSafeAreaInsets();
 
   if (toasts.length === 0) return null;
 
   return (
     <View
-      style={[
-        styles.container,
-        { top: insets.top + 8 },
-      ]}
+      style={[styles.container, { top: insets.top + 12 }]}
       pointerEvents="box-none"
     >
-      {toasts.map((toast) => (
-        <ToastItem
-          key={toast.id}
-          toast={toast}
-          onDismiss={removeToast}
-        />
+      {toasts.map((t) => (
+        <ToastItem key={t.id} toast={t} onDismiss={removeToast} />
       ))}
     </View>
   );
@@ -152,37 +175,30 @@ export function ToastContainer() {
 const styles = StyleSheet.create({
   container: {
     position: 'absolute',
-    left: 16,
-    right: 16,
-    zIndex: 9999,
-    gap: 8,
+    left:     20,
+    right:    20,
+    zIndex:   9999,
+    gap:      8,
+    alignItems: 'stretch',
   },
   toast: {
-    width: '100%',
+    width:       '100%',
     borderWidth: 1,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.12,
-    shadowRadius: 12,
-    elevation: 8,
+    shadowColor:   '#000',
+    shadowOffset:  { width: 0, height: 4 },
+    shadowOpacity: 0.18,
+    shadowRadius:  16,
+    elevation:     10,
   },
-  toastPressable: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 14,
-    paddingLeft: 0,
+  row: {
+    flexDirection:  'row',
+    alignItems:     'center',
+    gap:            10,
+    paddingHorizontal: 18,
+    paddingVertical:   13,
   },
-  accentBar: {
-    width: 4,
-    alignSelf: 'stretch',
-    borderRadius: 2,
-    marginRight: 12,
-    marginLeft: 0,
-    minHeight: 20,
-  },
-  message: {
-    flex: 1,
+  msg: {
+    flex:       1,
     lineHeight: 20,
   },
 });

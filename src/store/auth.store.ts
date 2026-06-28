@@ -4,6 +4,26 @@ import * as LocalAuthentication from 'expo-local-authentication';
 import { generateUUID } from '../lib/uuid';
 import type { User, AuthSession, BiometricConfig } from '../types';
 
+// ─── Cross-store reset helper ─────────────────────────────────────────────────
+// Imported lazily to avoid circular dependencies at module parse time.
+// Called only from signOut(), which runs after the module graph is settled.
+function resetAllDataStores() {
+  // Lazy import avoids circular dep: auth → stores → auth
+  const { useBillsStore }    = require('./bills.store');
+  const { useExpensesStore } = require('./expenses.store');
+  const { useBudgetsStore }  = require('./budgets.store');
+  const { useGoalsStore }    = require('./goals.store');
+  const { useCirclesStore }  = require('./circles.store');
+  const { useCircleStore }   = require('./circle.store');
+
+  useBillsStore.setState({ bills: [], isLoading: false, error: null });
+  useExpensesStore.setState({ expenses: [], allExpenses: [], summary: null, isLoading: false, error: null });
+  useBudgetsStore.setState({ budgets: [], isLoading: false, error: null });
+  useGoalsStore.setState({ goals: [], contributions: {}, isLoading: false, error: null });
+  useCirclesStore.setState({ circles: [], activeCircle: null, members: [], isLoading: false, error: null });
+  useCircleStore.setState({ settings: null, contributions: [], leaderboard: [], members: [], memberStatuses: [], activeCircleId: null });
+}
+
 // ─── Keys ─────────────────────────────────────────────────────────────────
 const KEYS = {
   SESSION:   'aku_session',
@@ -154,13 +174,27 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     set({ session, isLocked: false });
   },
 
-  // ── Sign Out ───────────────────────────────────────────────────────────
+  // ── Sign Out — full wipe so nav guard lands on onboarding, not PIN loop ──
   signOut: async () => {
+    // Delete every persisted key so the app starts completely fresh
     await Promise.all([
       SecureStore.deleteItemAsync(KEYS.SESSION),
       SecureStore.deleteItemAsync(KEYS.USER),
+      SecureStore.deleteItemAsync(KEYS.PIN_HASH),
+      SecureStore.deleteItemAsync(KEYS.BIOMETRIC),
+      SecureStore.deleteItemAsync(KEYS.ONBOARDED),
     ]);
-    set({ user: null, session: null, isLocked: true });
+    // Reset all data stores so the next user sees a clean slate
+    resetAllDataStores();
+    // isLocked:false + hasOnboarded:false → nav guard routes to /(onboarding)
+    set({
+      user:          null,
+      session:       null,
+      isLocked:      false,
+      hasOnboarded:  false,
+      biometric:     { enabled: false, type: 'none' },
+      error:         null,
+    });
   },
 
   // ── Update User ────────────────────────────────────────────────────────

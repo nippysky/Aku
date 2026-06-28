@@ -22,6 +22,7 @@ import {
 import { useTheme } from '../../theme';
 import { useAuthStore } from '../../store/auth.store';
 import { useBudgetsStore } from '../../store/budgets.store';
+import { useCurrencyFormat } from '../../hooks/useCurrencyFormat';
 import { Card } from '../../components/ui/Card';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import { EmptyState } from '../../components/ui/EmptyState';
@@ -46,10 +47,6 @@ const MONTH_NAMES = [
 
 function formatMonth(date: Date): string {
   return `${MONTH_NAMES[date.getMonth()]} ${date.getFullYear()}`;
-}
-
-function formatNaira(kobo: number): string {
-  return `₦${(kobo / 100).toLocaleString('en-NG')}`;
 }
 
 function overallStatus(budgets: BudgetWithSpent[]): BudgetStatus {
@@ -113,6 +110,7 @@ interface BudgetCardProps {
 
 function BudgetCard({ budget, onPress }: BudgetCardProps) {
   const { colors, text, font, radius } = useTheme();
+  const { fmt } = useCurrencyFormat();
 
   const meta     = EXPENSE_CATEGORIES[budget.category];
   const IconComp = EXPENSE_ICONS[meta?.icon ?? 'MoreHorizontal'] ?? MoreHorizontal;
@@ -126,7 +124,7 @@ function BudgetCard({ budget, onPress }: BudgetCardProps) {
   })();
 
   return (
-    <Animated.View entering={FadeInDown.springify().damping(18)}>
+    <Animated.View entering={FadeInDown.duration(200)}>
       <Card onPress={onPress} style={styles.budgetCard}>
         <View style={styles.budgetCardInner}>
           {/* Row 1: icon + name + period badge + status badge */}
@@ -169,10 +167,10 @@ function BudgetCard({ budget, onPress }: BudgetCardProps) {
             {/* Amount labels */}
             <View style={styles.budgetAmountRow}>
               <Text style={[text.amountSm, { color: colors.textSecondary }]}>
-                {formatNaira(budget.spent)} spent
+                {fmt(budget.spent)} spent
               </Text>
               <Text style={[text.amountSm, { color: colors.textTertiary }]}>
-                of {formatNaira(budget.amount)}
+                of {fmt(budget.amount)}
               </Text>
             </View>
           </View>
@@ -190,6 +188,7 @@ interface SummaryCardProps {
 
 function SummaryCard({ budgets }: SummaryCardProps) {
   const { colors, text, font, fontSize, radius } = useTheme();
+  const { fmt } = useCurrencyFormat();
 
   if (budgets.length === 0) return null;
 
@@ -210,9 +209,9 @@ function SummaryCard({ budgets }: SummaryCardProps) {
             { fontFamily: font.displayLight, fontSize: fontSize['2xl'], color: colors.text },
           ]}
         >
-          {formatNaira(totalSpent)}{' '}
+          {fmt(totalSpent)}{' '}
           <Text style={[{ color: colors.textTertiary, fontSize: fontSize.md }]}>
-            of {formatNaira(totalBudget)}
+            of {fmt(totalBudget)}
           </Text>
         </Text>
 

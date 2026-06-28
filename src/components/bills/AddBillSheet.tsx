@@ -7,6 +7,7 @@ import {
   Text,
   View,
 } from 'react-native';
+// Switch is used by notification reminder toggles below
 import { useForm, Controller } from 'react-hook-form';
 import {
   Home, Zap, Car, UtensilsCrossed, Heart, BookOpen, Tv,
@@ -46,7 +47,6 @@ interface FormData {
   dueDate:   string;
   frequency: BillFrequency;
   notes:     string;
-  isShared:  boolean;
   notify14:  boolean;
   notify7:   boolean;
   notify3:   boolean;
@@ -104,7 +104,6 @@ export function AddBillSheet({ isOpen, onClose, onSuccess }: AddBillSheetProps) 
   const { user } = useAuthStore();
   const { showToast } = useUIStore();
   const [showDatePicker, setShowDatePicker] = useState(false);
-
   const { control, handleSubmit, reset, setError, watch, setValue, formState: { errors, isSubmitting } } = useForm<FormData>({
     defaultValues: {
       name:      '',
@@ -113,7 +112,6 @@ export function AddBillSheet({ isOpen, onClose, onSuccess }: AddBillSheetProps) 
       dueDate:   todayString(),
       frequency: 'monthly',
       notes:     '',
-      isShared:  false,
       notify14:  true,
       notify7:   true,
       notify3:   true,
@@ -146,7 +144,7 @@ export function AddBillSheet({ isOpen, onClose, onSuccess }: AddBillSheetProps) 
         dueDate:     data.dueDate,
         frequency:   data.frequency,
         notes:       data.notes ?? null,
-        isShared:    data.isShared,
+        isShared:    false,
         householdId: null,
         notify30:    false,
         notify14:    data.notify14,
@@ -157,7 +155,7 @@ export function AddBillSheet({ isOpen, onClose, onSuccess }: AddBillSheetProps) 
       }, user.id);
       showToast('success', 'Bill added successfully');
       reset();
-      handleClose();
+        handleClose();
       onSuccess?.();
     } catch {
       showToast('error', 'Failed to add bill');
@@ -364,27 +362,6 @@ export function AddBillSheet({ isOpen, onClose, onSuccess }: AddBillSheetProps) 
           )}
         />
 
-        {/* Shared toggle */}
-        <Controller
-          control={control}
-          name="isShared"
-          render={({ field }) => (
-            <View style={[styles.toggleRow, { borderColor: colors.border }]}>
-              <View>
-                <Text style={[text.bodyMedium, { color: colors.text }]}>Shared bill</Text>
-                <Text style={[text.caption, { color: colors.textSecondary, marginTop: 2 }]}>
-                  Visible to all household members
-                </Text>
-              </View>
-              <Switch
-                value={field.value}
-                onValueChange={field.onChange}
-                trackColor={{ false: colors.border, true: colors.primary }}
-                thumbColor={colors.card}
-              />
-            </View>
-          )}
-        />
 
         {/* Notifications */}
         <Text style={[text.label, { color: colors.textSecondary, marginBottom: 10, marginTop: 8 }]}>

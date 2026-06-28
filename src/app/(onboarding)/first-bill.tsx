@@ -17,7 +17,7 @@ import { format, parseISO } from 'date-fns';
 import { Button, AmountInput, KeyboardWrapper, OnboardingHeader } from '../../components/ui';
 import { AkuDatePicker } from '../../components/ui/AkuDatePicker';
 import { Input } from '../../components/ui/Input';
-import { useAuthStore, useHouseholdStore, useBillsStore } from '../../store';
+import { useAuthStore, useBillsStore } from '../../store';
 import { useTheme } from '../../theme';
 import { Palette } from '../../theme/colors';
 import type { BillCategory, BillFrequency } from '../../types';
@@ -77,7 +77,6 @@ export default function FirstBillScreen() {
   const router = useRouter();
 
   const { user }         = useAuthStore();
-  const { household }    = useHouseholdStore();
   const { add: addBill } = useBillsStore();
 
   const [name, setName]               = useState('');
@@ -100,13 +99,13 @@ export default function FirstBillScreen() {
       setError('');
       await addBill(
         {
-          householdId: household?.id ?? null,
           name:        name.trim(),
           amount,
           category,
           dueDate,
           frequency,
           notes:       null,
+          householdId: null,
           isShared:    false,
           notify30:    false,
           notify14:    true,

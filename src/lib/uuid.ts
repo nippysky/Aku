@@ -1,10 +1,14 @@
 /**
- * Pure-JS UUID v4 generator.
- * React Native's Hermes engine does not expose the Web Crypto API
- * (crypto.randomUUID), so we use Math.random()-based generation here.
- * For cryptographic purposes (e.g. server-side tokens) use a secure backend.
+ * UUID v4 generator.
+ * Expo SDK 52+ Hermes exposes globalThis.crypto.randomUUID(), so we use that
+ * when available (cryptographically secure). Falls back to Math.random()-based
+ * generation on older runtimes only.
  */
 export function generateUUID(): string {
+  if (typeof globalThis?.crypto?.randomUUID === 'function') {
+    return globalThis.crypto.randomUUID();
+  }
+  // Fallback (should not be reached on Expo SDK 52+)
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
     const r = (Math.random() * 16) | 0;
     const v = c === 'x' ? r : (r & 0x3) | 0x8;

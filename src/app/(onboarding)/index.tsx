@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect } from 'react';
 import {
   Pressable,
+  StatusBar,
   StyleSheet,
   Text,
   View,
@@ -115,6 +116,8 @@ export default function WelcomeScreen() {
   }, [scale]);
 
   return (
+    <>
+      <StatusBar barStyle="light-content" />
     <View
       style={[
         styles.container,
@@ -151,6 +154,7 @@ export default function WelcomeScreen() {
         </Animated.View>
       </Animated.View>
     </View>
+    </>
   );
 }
 

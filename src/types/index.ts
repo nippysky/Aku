@@ -38,10 +38,11 @@ export interface BiometricConfig {
 // ─── Household ────────────────────────────────────────────────────────────
 
 export interface Household {
-  id:        UUID;
-  name:      string;
-  ownerId:   UUID;
-  createdAt: ISO8601;
+  id:         UUID;
+  name:       string;
+  ownerId:    UUID;
+  inviteCode: string | null;
+  createdAt:  ISO8601;
 }
 
 export interface HouseholdMember {
@@ -50,6 +51,7 @@ export interface HouseholdMember {
   userId:      UUID;
   name:        string;
   email:       string;
+  avatarUrl:   string | null;
   role:        'owner' | 'member';
   joinedAt:    ISO8601;
 }
@@ -62,6 +64,72 @@ export interface HouseholdInvite {
   expiresAt:   ISO8601;
   usedAt:      ISO8601 | null;
   createdAt:   ISO8601;
+}
+
+// ─── Circle (contribution group) ─────────────────────────────────────────
+
+export type CircleFrequency =
+  | 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'yearly' | 'one-time';
+
+export type ContributionType = 'equal' | 'custom';
+
+export interface CircleSettings {
+  id:               UUID;          // = circleId
+  emoji:            string | null; // e.g. "💰", "🏠"
+  targetAmount:     number | null; // kobo; null = no fixed goal
+  description:      string | null;
+  frequency:        CircleFrequency | null; // contribution cadence
+  perMemberAmount:  number | null; // kobo per member per period; null = auto-split
+  contributionType: ContributionType;
+  deadline:         DateString | null; // optional end date
+  // Optional payment details (only if circle pools real money)
+  accountName:      string | null;
+  accountNumber:    string | null;
+  bankName:         string | null;
+  notes:            string | null;
+  updatedAt:        ISO8601;
+}
+
+/** Payment status of a member for the current period */
+export interface MemberPaymentStatus {
+  memberId:        UUID;
+  userId:          UUID;
+  name:            string;
+  email:           string;
+  avatarUrl:       string | null;
+  role:            'owner' | 'member';
+  expectedAmount:  number; // kobo — what they owe this period
+  verifiedAmount:  number; // kobo — what's been verified
+  pendingAmount:   number; // kobo — submitted but not yet verified
+  status:          'paid' | 'partial' | 'pending' | 'overdue';
+  shortfall:       number; // kobo — how much still needed
+}
+
+export interface CircleContribution {
+  id:         UUID;
+  circleId:   UUID;
+  userId:     UUID;
+  amount:     number;           // kobo
+  note:       string | null;
+  status:     'pending' | 'verified';
+  createdAt:  ISO8601;
+  verifiedAt: ISO8601 | null;
+  verifiedBy: UUID | null;
+  // Joined from users table:
+  userName:   string;
+  userEmail:  string;
+  avatarUrl:  string | null;
+}
+
+export interface CircleLeaderboardEntry {
+  userId:            UUID;
+  userName:          string;
+  avatarUrl:         string | null;
+  totalVerified:     number;    // kobo
+  totalPending:      number;    // kobo
+  contributionCount: number;
+  percentage:        number;    // 0–100 of verified total
+  rank:              number;
 }
 
 // ─── Bills ────────────────────────────────────────────────────────────────

@@ -1,12 +1,20 @@
+/**
+ * goals/[id].tsx — Goal detail screen.
+ *
+ * Award-winning UIUX: forest-green hero banner, unified stats strip,
+ * clean add-savings card, elegant contribution history.
+ */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   FlatList,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import Animated, {
@@ -17,50 +25,34 @@ import Animated, {
   withTiming,
   Easing,
 } from 'react-native-reanimated';
-import { ArrowLeft, Calendar, Pencil, Trash2 } from 'lucide-react-native';
+import { ArrowLeft, Calendar, Pencil, Plus, Trash2 } from 'lucide-react-native';
 import { format, parseISO } from 'date-fns';
 import { useTheme } from '../../theme';
 import { Button } from '../../components/ui/Button';
-import { ProgressRing } from '../../components/ui/ProgressRing';
 import { AmountInput } from '../../components/ui/AmountInput';
 import { ScreenHeader } from '../../components/ui/ScreenHeader';
 import { EditGoalSheet } from '../../components/goals/EditGoalSheet';
 import { useGoalsStore } from '../../store/goals.store';
 import { useAuthStore } from '../../store/auth.store';
 import { useUIStore } from '../../store/ui.store';
+import { useCurrencyFormat } from '../../hooks/useCurrencyFormat';
 import { Palette } from '../../theme/colors';
 import type { GoalContribution } from '../../types';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function formatNGN(kobo: number): string {
-  return `₦${(kobo / 100).toLocaleString('en-NG')}`;
+function fmtDate(dateStr: string): string {
+  try { return format(parseISO(dateStr), 'd MMM yyyy'); } catch { return dateStr; }
 }
 
-function formatDate(dateStr: string): string {
-  try {
-    return format(parseISO(dateStr), 'd MMM yyyy');
-  } catch {
-    return dateStr;
-  }
+function fmtShortDate(isoStr: string): string {
+  try { return format(parseISO(isoStr), 'd MMM'); } catch { return isoStr; }
 }
 
-function formatDateTime(isoStr: string): string {
-  try {
-    return format(parseISO(isoStr), 'd MMM yyyy');
-  } catch {
-    return isoStr;
-  }
-}
-
-// ─── Confetti particle ───────────────────────────────────────────────────────
+// ─── Confetti ─────────────────────────────────────────────────────────────────
 
 interface ParticleProps {
-  color:  string;
-  startX: number;
-  startY: number;
-  angle:  number;
-  delay:  number;
+  color: string; startX: number; startY: number; angle: number; delay: number;
 }
 
 function ConfettiParticle({ color, startX, startY, angle, delay }: ParticleProps) {
@@ -71,20 +63,16 @@ function ConfettiParticle({ color, startX, startY, angle, delay }: ParticleProps
 
   useEffect(() => {
     const dist = 80 + Math.random() * 80;
-    const dx   = Math.cos(angle) * dist;
-    const dy   = Math.sin(angle) * dist;
-
     const timer = setTimeout(() => {
-      opacity.value    = withTiming(1, { duration: 100 });
+      opacity.value    = withTiming(1,                         { duration: 100 });
       scale.value      = withSpring(1, { damping: 12, stiffness: 300 });
-      translateX.value = withTiming(dx, { duration: 600, easing: Easing.out(Easing.quad) });
-      translateY.value = withTiming(dy, { duration: 600, easing: Easing.out(Easing.quad) });
+      translateX.value = withTiming(Math.cos(angle) * dist,   { duration: 600, easing: Easing.out(Easing.quad) });
+      translateY.value = withTiming(Math.sin(angle) * dist,   { duration: 600, easing: Easing.out(Easing.quad) });
       setTimeout(() => {
         opacity.value = withTiming(0, { duration: 300 });
         scale.value   = withTiming(0, { duration: 300 });
       }, 600);
     }, delay);
-
     return () => clearTimeout(timer);
   }, []);
 
@@ -99,20 +87,10 @@ function ConfettiParticle({ color, startX, startY, angle, delay }: ParticleProps
 
   return (
     <Animated.View
-      style={[
-        styles.confettiDot,
-        { backgroundColor: color, left: startX, top: startY },
-        style,
-      ]}
+      style={[styles.confettiDot, { backgroundColor: color, left: startX, top: startY }, style]}
       pointerEvents="none"
     />
   );
-}
-
-// ─── Confetti burst ──────────────────────────────────────────────────────────
-
-interface ConfettiBurstProps {
-  visible: boolean;
 }
 
 const CONFETTI_COLORS = [
@@ -120,164 +98,268 @@ const CONFETTI_COLORS = [
   Palette.goldLight, '#34C47A', Palette.goldMuted,
 ];
 
-function ConfettiBurst({ visible }: ConfettiBurstProps) {
+function ConfettiBurst({ visible }: { visible: boolean }) {
   if (!visible) return null;
-
   const particles = Array.from({ length: 18 }, (_, i) => ({
-    id:     i,
-    color:  CONFETTI_COLORS[i % CONFETTI_COLORS.length],
-    angle:  (i / 18) * Math.PI * 2,
-    delay:  Math.floor(Math.random() * 120),
+    id: i, color: CONFETTI_COLORS[i % CONFETTI_COLORS.length]!,
+    angle: (i / 18) * Math.PI * 2, delay: Math.floor(Math.random() * 120),
   }));
-
   return (
     <View style={styles.confettiContainer} pointerEvents="none">
       {particles.map((p) => (
-        <ConfettiParticle
-          key={p.id}
-          color={p.color}
-          startX={-6}
-          startY={-6}
-          angle={p.angle}
-          delay={p.delay}
-        />
+        <ConfettiParticle key={p.id} {...p} startX={-6} startY={-6} />
       ))}
     </View>
   );
 }
 
-// ─── Quick stats row ─────────────────────────────────────────────────────────
+// ─── Hero banner ──────────────────────────────────────────────────────────────
 
-interface StatPillProps {
-  label: string;
-  value: string;
+interface HeroBannerProps {
+  goal: {
+    emoji?: string | null;
+    name: string;
+    progress: number;
+    savedAmount: number;
+    targetAmount: number;
+    isCompleted: boolean;
+    color?: string | null;
+  };
+  showConfetti: boolean;
 }
 
-function StatPill({ label, value }: StatPillProps) {
-  const { colors, text, radius } = useTheme();
+function HeroBanner({ goal, showConfetti }: HeroBannerProps) {
+  const { font, fontSize, text } = useTheme();
+  const { fmt } = useCurrencyFormat();
+  const barWidth = useSharedValue(0);
+  const barStyle = useAnimatedStyle(() => ({
+    width: `${barWidth.value * 100}%` as `${number}%`,
+  }));
+
+  useEffect(() => {
+    barWidth.value = withTiming(Math.min(goal.progress, 1), { duration: 800, easing: Easing.out(Easing.cubic) });
+  }, [goal.progress]);
+
+  const pct         = Math.round(goal.progress * 100);
+  const accentColor = goal.color ?? Palette.gold;
+  const greenAccent = '#34C47A';
+
   return (
-    <View
-      style={[
-        styles.statPill,
-        { backgroundColor: colors.backgroundSecondary, borderRadius: radius.md },
-      ]}
-    >
-      <Text style={[text.caption, { color: colors.textTertiary, textAlign: 'center' }]}>
-        {label}
-      </Text>
-      <Text
+    <Animated.View entering={FadeInDown.delay(0).duration(240)} style={styles.heroBanner}>
+      {Platform.OS === 'ios' && (
+        <BlurView intensity={85} tint="dark" style={StyleSheet.absoluteFill} />
+      )}
+      <View
         style={[
-          text.bodyMedium,
-          { color: colors.text, textAlign: 'center', marginTop: 4 },
+          StyleSheet.absoluteFill,
+          { backgroundColor: Platform.OS === 'ios' ? 'rgba(22,58,47,0.84)' : Palette.forest, borderRadius: 20 },
         ]}
-        numberOfLines={1}
-        adjustsFontSizeToFit
-      >
-        {value}
-      </Text>
+      />
+
+      <View style={styles.heroBannerContent}>
+        {/* Emoji circle */}
+        <View style={[styles.heroEmojiCircle, { backgroundColor: accentColor + '28' }]}>
+          <Text style={styles.heroEmoji}>{goal.emoji ?? '🎯'}</Text>
+        </View>
+
+        {/* Name */}
+        <Text style={[{ fontFamily: font.displayLight, fontSize: fontSize['2xl'], color: Palette.linen, letterSpacing: -0.3, textAlign: 'center' }]}>
+          {goal.name}
+        </Text>
+
+        {/* Amounts — big and clear */}
+        <Text style={[{ fontFamily: font.displayLight, fontSize: fontSize['3xl'], color: Palette.linen, letterSpacing: -1, marginTop: 2 }]}>
+          {fmt(goal.savedAmount)}
+        </Text>
+        <Text style={[text.caption, { color: 'rgba(250,250,248,0.5)', marginTop: 2 }]}>
+          of {fmt(goal.targetAmount)}
+        </Text>
+
+        {/* Progress bar */}
+        <View style={[styles.heroBar, { backgroundColor: 'rgba(250,250,248,0.12)', marginTop: 16 }]}>
+          <Animated.View
+            style={[
+              styles.heroBarFill,
+              { backgroundColor: goal.isCompleted ? greenAccent : accentColor },
+              barStyle,
+            ]}
+          />
+        </View>
+
+        {/* % badge */}
+        <View
+          style={[
+            styles.pctBadge,
+            { backgroundColor: goal.isCompleted ? greenAccent + '30' : accentColor + '25', marginTop: 10 },
+          ]}
+        >
+          <Text style={[{ fontFamily: font.sansSemiBold, fontSize: fontSize.sm, color: goal.isCompleted ? greenAccent : accentColor }]}>
+            {goal.isCompleted ? '✓ Goal complete!' : `${pct}% saved`}
+          </Text>
+        </View>
+      </View>
+
+      <ConfettiBurst visible={showConfetti} />
+    </Animated.View>
+  );
+}
+
+// ─── Stats strip ──────────────────────────────────────────────────────────────
+
+interface StatItem { label: string; value: string }
+
+function StatsStrip({ items }: { items: StatItem[] }) {
+  const { colors, text, font, fontSize, radius } = useTheme();
+  return (
+    <View style={[styles.statsStrip, { backgroundColor: colors.card, borderRadius: radius.xl }]}>
+      {items.map((item, idx) => (
+        <React.Fragment key={item.label}>
+          {idx > 0 && <View style={[styles.statDivider, { backgroundColor: colors.borderLight }]} />}
+          <View style={styles.statCell}>
+            <Text style={[text.caption, { color: colors.textTertiary, marginBottom: 5, textAlign: 'center' }]}>
+              {item.label}
+            </Text>
+            <Text
+              style={[{ fontFamily: font.sansMedium, fontSize: fontSize.sm, color: colors.text, textAlign: 'center' }]}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+            >
+              {item.value}
+            </Text>
+          </View>
+        </React.Fragment>
+      ))}
+    </View>
+  );
+}
+
+// ─── Add savings card ─────────────────────────────────────────────────────────
+
+function AddSavingsCard({
+  addAmount,
+  setAddAmount,
+  isAdding,
+  goalName,
+  onAdd,
+}: {
+  addAmount: number;
+  setAddAmount: (v: number) => void;
+  isAdding: boolean;
+  goalName: string;
+  onAdd: () => void;
+}) {
+  const { colors, font, fontSize, radius, shadow } = useTheme();
+  const { fmt } = useCurrencyFormat();
+  return (
+    <View style={[styles.addSavingsCard, { backgroundColor: colors.card, borderRadius: radius.xl, ...shadow.sm }]}>
+      {/* Accent bar */}
+      <View style={[styles.addSavingsAccent, { backgroundColor: Palette.forest, borderRadius: 999 }]} />
+
+      <View style={styles.addSavingsInner}>
+        <View style={styles.addSavingsHeader}>
+          <View style={[styles.addSavingsIconWrap, { backgroundColor: Palette.forest + '18', borderRadius: radius.md }]}>
+            <Plus size={18} color={Palette.forest} strokeWidth={2} />
+          </View>
+          <Text style={[{ fontFamily: font.displayLight, fontSize: fontSize.lg, color: colors.text, letterSpacing: -0.3 }]}>
+            Add savings
+          </Text>
+        </View>
+
+        <AmountInput
+          value={addAmount}
+          onChange={setAddAmount}
+          label="Amount"
+          size="lg"
+          style={styles.amountInput}
+        />
+
+        <Button
+          label={addAmount > 0 ? `Add ${fmt(addAmount)}` : 'Add to goal'}
+          onPress={onAdd}
+          loading={isAdding}
+          disabled={addAmount <= 0}
+          size="lg"
+        />
+      </View>
     </View>
   );
 }
 
 // ─── Contribution row ─────────────────────────────────────────────────────────
 
-interface ContribRowProps {
+function ContribRow({
+  contribution,
+  runningTotal,
+  onDelete,
+}: {
   contribution: GoalContribution;
   runningTotal: number;
-  onDelete:     (id: string) => void;
-}
-
-function ContribRow({ contribution, runningTotal, onDelete }: ContribRowProps) {
-  const { colors, text } = useTheme();
-
+  onDelete: (id: string) => void;
+}) {
+  const { colors, text, font, fontSize, radius } = useTheme();
+  const { fmt, fmtCompact } = useCurrencyFormat();
   return (
-    <Animated.View
-      entering={FadeInDown.springify().damping(18)}
-      style={[styles.contribRow, { borderBottomColor: colors.borderLight }]}
-    >
-      <View style={styles.contribIcon}>
-        <Calendar size={16} color={colors.textTertiary} strokeWidth={1.8} />
+    <View style={[styles.contribRow, { borderBottomColor: colors.borderLight }]}>
+      {/* Date badge */}
+      <View style={[styles.contribDateBadge, { backgroundColor: colors.backgroundSecondary, borderRadius: radius.md }]}>
+        <Calendar size={14} color={colors.textTertiary} strokeWidth={1.8} />
+        <Text style={[{ fontFamily: font.sansMedium, fontSize: fontSize.xs, color: colors.textSecondary }]}>
+          {fmtShortDate(contribution.date)}
+        </Text>
       </View>
+
+      {/* Info */}
       <View style={styles.contribInfo}>
-        <Text style={[text.bodyMedium, { color: colors.text }]}>
-          Added {formatNGN(contribution.amount)}
+        <Text style={[{ fontFamily: font.sansSemiBold, fontSize: fontSize.sm, color: colors.text }]}>
+          {fmt(contribution.amount)}
         </Text>
-        <Text style={[text.caption, { color: colors.textTertiary, marginTop: 2 }]}>
-          {formatDateTime(contribution.date)}
-          {contribution.note ? ` · ${contribution.note}` : ''}
-        </Text>
+        {contribution.note ? (
+          <Text style={[text.caption, { color: colors.textTertiary, marginTop: 1 }]} numberOfLines={1}>
+            {contribution.note}
+          </Text>
+        ) : (
+          <Text style={[text.caption, { color: colors.textTertiary, marginTop: 1 }]}>
+            Running total: {fmtCompact(runningTotal)}
+          </Text>
+        )}
       </View>
-      <View style={styles.contribRight}>
-        <Text style={[text.amountSm, { color: colors.textSecondary }]}>
-          {formatNGN(runningTotal)}
-        </Text>
-        <Pressable
-          onPress={() => onDelete(contribution.id)}
-          hitSlop={10}
-          accessibilityRole="button"
-          accessibilityLabel="Delete contribution"
-          style={styles.contribDelete}
-        >
-          <Trash2 size={14} color={colors.textTertiary} strokeWidth={1.8} />
-        </Pressable>
-      </View>
-    </Animated.View>
+
+      {/* Delete */}
+      <Pressable onPress={() => onDelete(contribution.id)} hitSlop={12} style={styles.contribDelete}>
+        <Trash2 size={15} color={colors.textTertiary} strokeWidth={1.6} />
+      </Pressable>
+    </View>
   );
 }
 
-// ─── Delete confirm ───────────────────────────────────────────────────────────
+// ─── Delete confirm sheet ─────────────────────────────────────────────────────
 
-interface DeleteConfirmProps {
-  visible:   boolean;
-  title:     string;
-  message:   string;
-  onConfirm: () => void;
-  onCancel:  () => void;
-}
-
-function DeleteConfirmSheet({
-  visible, title, message, onConfirm, onCancel,
-}: DeleteConfirmProps) {
+function DeleteConfirmSheet({ visible, title, message, onConfirm, onCancel }: {
+  visible: boolean; title: string; message: string;
+  onConfirm: () => void; onCancel: () => void;
+}) {
   const { colors, text, font, fontSize, radius, shadow } = useTheme();
-
   if (!visible) return null;
-
   return (
     <View style={[styles.deleteOverlay, { backgroundColor: colors.overlay }]}>
       <Animated.View
-        entering={FadeInDown.springify().damping(18)}
-        style={[
-          styles.deleteSheet,
-          { backgroundColor: colors.card, borderRadius: radius['2xl'], ...shadow.lg },
-        ]}
+        entering={FadeInDown.duration(200)}
+        style={[styles.deleteSheet, { backgroundColor: colors.card, borderRadius: radius['2xl'], ...shadow.lg }]}
       >
-        <Text
-          style={[
-            { fontFamily: font.displayLight, fontSize: fontSize.xl, color: colors.text },
-            styles.deleteTitle,
-          ]}
-        >
+        <Text style={[{ fontFamily: font.displayLight, fontSize: fontSize.xl, color: colors.text, letterSpacing: -0.3 }]}>
           {title}
         </Text>
-        <Text style={[text.body, { color: colors.textSecondary, marginTop: 8 }]}>
-          {message}
-        </Text>
+        <Text style={[text.body, { color: colors.textSecondary, marginTop: 8 }]}>{message}</Text>
         <View style={styles.deleteActions}>
           <Pressable
             onPress={onCancel}
-            style={[
-              styles.deleteBtn,
-              { backgroundColor: colors.backgroundSecondary, borderRadius: radius.full, flex: 1 },
-            ]}
+            style={[styles.deleteBtn, { backgroundColor: colors.backgroundSecondary, borderRadius: radius.full, flex: 1 }]}
           >
             <Text style={[text.buttonLabel, { color: colors.text }]}>Cancel</Text>
           </Pressable>
           <Pressable
             onPress={onConfirm}
-            style={[
-              styles.deleteBtn,
-              { backgroundColor: colors.danger, borderRadius: radius.full, flex: 1 },
-            ]}
+            style={[styles.deleteBtn, { backgroundColor: colors.danger, borderRadius: radius.full, flex: 1 }]}
           >
             <Text style={[text.buttonLabel, { color: colors.textInverse }]}>Delete</Text>
           </Pressable>
@@ -287,45 +369,44 @@ function DeleteConfirmSheet({
   );
 }
 
-// ─── Main screen ─────────────────────────────────────────────────────────────
+// ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function GoalDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { colors, text, font, fontSize, radius, shadow, layout } = useTheme();
+  const { colors, text, font, fontSize, radius, layout } = useTheme();
   const insets = useSafeAreaInsets();
-  const router = useRouter();
+  const router  = useRouter();
 
   const { goals, contributions, loadContributions, addContribution, removeContribution, remove } =
     useGoalsStore();
-  const { user }      = useAuthStore();
+  const { user }               = useAuthStore();
   const { showToast } = useUIStore();
+  const { fmt, fmtCompact } = useCurrencyFormat();
 
   const goal = goals.find((g) => g.id === id) ?? null;
 
-  const [editOpen,        setEditOpen]        = useState(false);
-  const [addAmount,       setAddAmount]       = useState(0);
-  const [isAdding,        setIsAdding]        = useState(false);
-  const [deleteGoalOpen,  setDeleteGoalOpen]  = useState(false);
-  const [showConfetti,    setShowConfetti]    = useState(false);
+  const [editOpen,       setEditOpen]       = useState(false);
+  const [addAmount,      setAddAmount]      = useState(0);
+  const [isAdding,       setIsAdding]       = useState(false);
+  const [deleteGoalOpen, setDeleteGoalOpen] = useState(false);
+  const [showConfetti,   setShowConfetti]   = useState(false);
   const prevCompleted = useRef(goal?.isCompleted ?? false);
 
   useEffect(() => {
     if (id) loadContributions(id);
   }, [id]);
 
-  // Watch for goal completion transition
   useEffect(() => {
     if (!prevCompleted.current && goal?.isCompleted) {
       setShowConfetti(true);
-      const timer = setTimeout(() => setShowConfetti(false), 1200);
-      return () => clearTimeout(timer);
+      const t = setTimeout(() => setShowConfetti(false), 1200);
+      return () => clearTimeout(t);
     }
     prevCompleted.current = goal?.isCompleted ?? false;
   }, [goal?.isCompleted]);
 
   const goalContribs = id ? (contributions[id] ?? []) : [];
 
-  // Build running totals
   const contribsWithTotals = goalContribs.reduce<
     { contribution: GoalContribution; runningTotal: number }[]
   >((acc, c) => {
@@ -339,18 +420,15 @@ export default function GoalDetailScreen() {
     setIsAdding(true);
     try {
       const today = new Date().toISOString().split('T')[0] ?? new Date().toISOString();
-      await addContribution(
-        { goalId: goal.id, amount: addAmount, note: null, date: today },
-        user.id,
-      );
+      await addContribution({ goalId: goal.id, amount: addAmount, note: null, date: today }, user.id);
       setAddAmount(0);
-      showToast('success', `Added ${formatNGN(addAmount)} to ${goal.name}`);
+      showToast('success', `Added ${fmt(addAmount)} to ${goal.name}`);
     } catch {
       showToast('error', 'Failed to add savings');
     } finally {
       setIsAdding(false);
     }
-  }, [user, goal, addAmount, addContribution, showToast]);
+  }, [user, goal, addAmount, addContribution, showToast, fmt]);
 
   const handleDeleteContrib = useCallback(
     (contribId: string) => {
@@ -359,33 +437,32 @@ export default function GoalDetailScreen() {
       if (!contrib) return;
       Alert.alert(
         'Remove contribution?',
-        `${formatNGN(contrib.amount)} will be removed from your goal.`,
+        `${fmt(contrib.amount)} will be removed.`,
         [
           { text: 'Cancel', style: 'cancel' },
           {
-            text:    'Remove',
-            style:   'destructive',
+            text: 'Remove', style: 'destructive',
             onPress: async () => {
               try {
                 await removeContribution(contribId, goal.id, contrib.amount);
                 showToast('success', 'Contribution removed');
               } catch {
-                showToast('error', 'Failed to remove contribution');
+                showToast('error', 'Failed to remove');
               }
             },
           },
         ],
       );
     },
-    [goal, goalContribs, removeContribution, showToast],
+    [goal, goalContribs, removeContribution, showToast, fmt],
   );
 
   const handleDeleteGoal = useCallback(async () => {
     if (!goal) return;
+    router.back();
     try {
       await remove(goal.id);
       showToast('success', 'Goal deleted');
-      router.back();
     } catch {
       showToast('error', 'Failed to delete goal');
     }
@@ -406,24 +483,30 @@ export default function GoalDetailScreen() {
     );
   }
 
-  const percentage    = Math.round(goal.progress * 100);
-  const ringColor     = goal.color ?? Palette.gold;
   const goalContribsSorted = [...contribsWithTotals].reverse();
+
+  const statsItems: StatItem[] = [
+    {
+      label: 'Remaining',
+      value: goal.isCompleted ? '—' : fmtCompact(goal.remaining),
+    },
+    {
+      label: 'Monthly target',
+      value: goal.monthlyRequired && goal.monthlyRequired > 0
+        ? fmtCompact(goal.monthlyRequired) : '—',
+    },
+    {
+      label: 'Target date',
+      value: goal.targetDate ? fmtDate(goal.targetDate) : 'No deadline',
+    },
+  ];
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
       <ScreenHeader
         title={goal.name}
-        leftAction={{
-          icon:               ArrowLeft,
-          onPress:            () => router.back(),
-          accessibilityLabel: 'Back',
-        }}
-        rightAction={{
-          icon:               Pencil,
-          onPress:            () => setEditOpen(true),
-          accessibilityLabel: 'Edit goal',
-        }}
+        leftAction={{ icon: ArrowLeft, onPress: () => router.back(), accessibilityLabel: 'Back' }}
+        rightAction={{ icon: Pencil, onPress: () => setEditOpen(true), accessibilityLabel: 'Edit goal' }}
         style={{ paddingTop: insets.top + 4 }}
       />
 
@@ -438,227 +521,80 @@ export default function GoalDetailScreen() {
           />
         )}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={[
-          styles.scrollContent,
-          { paddingBottom: insets.bottom + 40 },
-        ]}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 40 }]}
         ListHeaderComponent={
-          <View>
-            {/* ── Hero ── */}
-            <Animated.View
-              entering={FadeInDown.delay(0).springify().damping(18)}
-              style={styles.hero}
-            >
-              <Text style={styles.heroEmoji}>{goal.emoji ?? '🎯'}</Text>
-              <Text
-                style={[
-                  styles.heroName,
-                  {
-                    fontFamily:    font.displayLight,
-                    fontSize:      fontSize['2xl'],
-                    color:         colors.text,
-                    letterSpacing: -0.5,
-                  },
-                ]}
-              >
-                {goal.name}
-              </Text>
+          <View style={styles.headerContent}>
+            {/* Hero */}
+            <HeroBanner goal={goal} showConfetti={showConfetti} />
 
-              {/* Confetti container */}
-              <View style={styles.ringWrap}>
-                <ProgressRing
-                  progress={goal.progress}
-                  size={120}
-                  strokeWidth={10}
-                  color={goal.isCompleted ? colors.success : ringColor}
-                  backgroundColor={colors.border}
-                >
-                  <View style={styles.ringCenter}>
-                    <Text
-                      style={[
-                        {
-                          fontFamily:         font.displayLight,
-                          fontSize:           fontSize['2xl'],
-                          color:              colors.text,
-                          includeFontPadding: false,
-                        } as object,
-                      ]}
-                    >
-                      {percentage}%
-                    </Text>
-                  </View>
-                </ProgressRing>
-                <ConfettiBurst visible={showConfetti} />
-              </View>
-
-              <Text
-                style={[
-                  { fontFamily: font.displayLight, fontSize: fontSize.xl, color: colors.accent },
-                  styles.heroTarget,
-                ]}
-              >
-                {formatNGN(goal.targetAmount)}
-              </Text>
-
-              <Text style={[text.bodySm, { color: colors.textSecondary, marginTop: 4 }]}>
-                {formatNGN(goal.savedAmount)} saved of {formatNGN(goal.targetAmount)}
-              </Text>
-
-              {goal.isCompleted && (
-                <Text style={[text.body, { color: colors.success, marginTop: 8 }]}>
-                  Goal reached! 🎉
-                </Text>
-              )}
+            {/* Stats strip */}
+            <Animated.View entering={FadeInDown.delay(80).duration(240)}>
+              <StatsStrip items={statsItems} />
             </Animated.View>
 
-            {/* ── Quick stats ── */}
-            <Animated.View
-              entering={FadeInDown.delay(80).springify().damping(18)}
-              style={styles.statsRow}
-            >
-              <StatPill
-                label="Remaining"
-                value={goal.isCompleted ? '₦0' : formatNGN(goal.remaining)}
-              />
-              <StatPill
-                label="Monthly target"
-                value={
-                  goal.monthlyRequired && goal.monthlyRequired > 0
-                    ? formatNGN(goal.monthlyRequired)
-                    : '—'
-                }
-              />
-              <StatPill
-                label="Target date"
-                value={goal.targetDate ? formatDate(goal.targetDate) : 'No deadline'}
-              />
-            </Animated.View>
-
-            {/* ── Add savings card ── */}
+            {/* Add savings */}
             {!goal.isCompleted && (
-              <Animated.View entering={FadeInDown.delay(160).springify().damping(18)}>
-                <View
-                  style={[
-                    styles.addSavingsCard,
-                    {
-                      backgroundColor: colors.card,
-                      borderColor:     colors.primary,
-                      borderRadius:    radius.lg,
-                      ...shadow.sm,
-                    },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      {
-                        fontFamily:    font.displayLight,
-                        fontSize:      fontSize.lg,
-                        color:         colors.text,
-                        letterSpacing: -0.3,
-                        marginBottom:  16,
-                      },
-                    ]}
-                  >
-                    Add savings
+              <Animated.View entering={FadeInDown.delay(140).duration(240)}>
+                <AddSavingsCard
+                  addAmount={addAmount}
+                  setAddAmount={setAddAmount}
+                  isAdding={isAdding}
+                  goalName={goal.name}
+                  onAdd={handleAddContribution}
+                />
+              </Animated.View>
+            )}
+
+            {/* History header */}
+            {goalContribsSorted.length > 0 && (
+              <Animated.View entering={FadeInDown.delay(180).duration(240)}>
+                <View style={styles.historyHeader}>
+                  <Text style={[{ fontFamily: font.sansSemiBold, fontSize: fontSize.xs, color: colors.textTertiary, letterSpacing: 1.2, textTransform: 'uppercase' as const }]}>
+                    Savings history · {goalContribsSorted.length}
                   </Text>
-                  <AmountInput
-                    value={addAmount}
-                    onChange={setAddAmount}
-                    label="Amount"
-                    size="lg"
-                    style={styles.amountInput}
-                  />
-                  <Button
-                    label={
-                      addAmount > 0
-                        ? `Add ${formatNGN(addAmount)} to goal`
-                        : 'Add to goal'
-                    }
-                    onPress={handleAddContribution}
-                    loading={isAdding}
-                    disabled={addAmount <= 0}
-                    size="lg"
-                  />
                 </View>
               </Animated.View>
             )}
-
-            {/* ── History header ── */}
-            {goalContribsSorted.length > 0 && (
-              <Animated.View
-                entering={FadeInDown.delay(240).springify().damping(18)}
-                style={styles.historyHeader}
-              >
-                <Text
-                  style={[
-                    {
-                      fontFamily:    font.sansSemiBold,
-                      fontSize:      fontSize.sm,
-                      color:         colors.textSecondary,
-                      letterSpacing: 1.2,
-                      textTransform: 'uppercase' as const,
-                    },
-                  ]}
-                >
-                  History
-                </Text>
-              </Animated.View>
-            )}
+          </View>
+        }
+        ListEmptyComponent={
+          <View style={styles.emptyHistory}>
+            <Text style={[text.body, { color: colors.textTertiary, textAlign: 'center' }]}>
+              No contributions yet.{'\n'}Add your first savings above.
+            </Text>
           </View>
         }
         ListFooterComponent={
-          <View>
-            {goalContribsSorted.length === 0 && (
-              <Animated.View
-                entering={FadeInDown.delay(240).springify().damping(18)}
-                style={styles.emptyHistory}
-              >
-                <Text style={[text.body, { color: colors.textTertiary, textAlign: 'center' }]}>
-                  No contributions yet.{'\n'}Add your first savings above.
-                </Text>
-              </Animated.View>
-            )}
-
-            {/* ── Bottom actions ── */}
-            <Animated.View
-              entering={FadeInDown.delay(320).springify().damping(18)}
-              style={styles.bottomActions}
-            >
-              <Button
-                label="Edit goal"
-                variant="ghost"
-                size="md"
-                onPress={() => setEditOpen(true)}
-                iconLeft={Pencil}
-              />
-              <Button
-                label="Delete goal"
-                variant="ghost"
-                size="md"
-                onPress={() => setDeleteGoalOpen(true)}
-                iconLeft={Trash2}
-              />
-            </Animated.View>
-          </View>
+          <Animated.View entering={FadeInDown.delay(220).duration(240)} style={styles.bottomActions}>
+            <Button
+              label="Edit goal"
+              variant="ghost"
+              size="md"
+              onPress={() => setEditOpen(true)}
+              iconLeft={Pencil}
+            />
+            <Button
+              label="Delete goal"
+              variant="dangerGhost"
+              size="md"
+              onPress={() => setDeleteGoalOpen(true)}
+              iconLeft={Trash2}
+            />
+          </Animated.View>
         }
       />
 
-      {/* ── Edit sheet ── */}
       <EditGoalSheet
         goal={editOpen ? goal : null}
         onClose={() => setEditOpen(false)}
         onSuccess={() => setEditOpen(false)}
       />
 
-      {/* ── Delete goal confirm ── */}
       <DeleteConfirmSheet
         visible={deleteGoalOpen}
         title="Delete goal?"
         message={`"${goal.name}" and all its contributions will be permanently removed.`}
-        onConfirm={() => {
-          setDeleteGoalOpen(false);
-          handleDeleteGoal();
-        }}
+        onConfirm={() => { setDeleteGoalOpen(false); handleDeleteGoal(); }}
         onCancel={() => setDeleteGoalOpen(false)}
       />
     </View>
@@ -668,45 +604,57 @@ export default function GoalDetailScreen() {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-  },
-  notFound: {
-    flex:           1,
-    alignItems:     'center',
-    justifyContent: 'center',
-  },
+  screen:   { flex: 1 },
+  notFound: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+
   scrollContent: {
-    paddingHorizontal: 24,
-    paddingTop:        8,
+    paddingHorizontal: 20,
+    paddingTop: 8,
   },
 
-  // Hero
-  hero: {
+  headerContent: {
+    gap: 14,
+    paddingBottom: 4,
+  },
+
+  // Hero banner
+  heroBanner: {
+    borderRadius: 20,
+    overflow:     'hidden',
+  },
+  heroBannerContent: {
+    position:   'relative',
+    alignItems: 'center',
+    padding:    24,
+    gap:        4,
+  },
+  heroEmojiCircle: {
+    width:          72,
+    height:         72,
+    borderRadius:   36,
     alignItems:     'center',
-    paddingVertical: 20,
-    gap:             8,
+    justifyContent: 'center',
+    marginBottom:   8,
   },
   heroEmoji: {
-    fontSize:   48,
-    lineHeight: 56,
+    fontSize:   36,
+    lineHeight: 44,
   },
-  heroName: {
-    textAlign: 'center',
+  heroBar: {
+    width:        '100%',
+    maxWidth:     280,
+    height:       5,
+    borderRadius: 999,
+    overflow:     'hidden',
   },
-  ringWrap: {
-    position: 'relative',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginVertical: 8,
+  heroBarFill: {
+    height:       5,
+    borderRadius: 999,
   },
-  ringCenter: {
-    alignItems:     'center',
-    justifyContent: 'center',
-  },
-  heroTarget: {
-    letterSpacing: -0.5,
-    marginTop:     4,
+  pctBadge: {
+    paddingHorizontal: 14,
+    paddingVertical:   5,
+    borderRadius:      999,
   },
 
   // Confetti
@@ -717,97 +665,103 @@ const styles = StyleSheet.create({
   },
   confettiDot: {
     position:     'absolute',
-    width:         12,
-    height:        12,
-    borderRadius:  6,
+    width:        12,
+    height:       12,
+    borderRadius: 6,
   },
 
-  // Stats row
-  statsRow: {
-    flexDirection: 'row',
-    gap:           10,
-    marginBottom:  16,
+  // Stats strip
+  statsStrip: {
+    flexDirection:  'row',
+    alignItems:     'stretch',
+    paddingVertical: 16,
   },
-  statPill: {
+  statCell: {
     flex:    1,
-    padding: 12,
+    alignItems: 'center',
+    paddingHorizontal: 8,
+  },
+  statDivider: {
+    width: 1,
+    marginVertical: 4,
   },
 
-  // Add savings card
+  // Add savings
   addSavingsCard: {
-    borderWidth:  1.5,
-    padding:      20,
-    marginBottom: 20,
+    flexDirection: 'row',
+    overflow:      'hidden',
   },
-  amountInput: {
-    marginBottom: 16,
+  addSavingsAccent: {
+    width:   4,
+    alignSelf: 'stretch',
   },
-
-  // History
-  historyHeader: {
-    marginBottom:  12,
-    marginTop:     4,
+  addSavingsInner: {
+    flex:    1,
+    padding: 20,
+    gap:     14,
   },
-  emptyHistory: {
-    paddingVertical: 32,
+  addSavingsHeader: {
+    flexDirection: 'row',
+    alignItems:    'center',
+    gap:           10,
   },
+  addSavingsIconWrap: {
+    width:          36,
+    height:         36,
+    alignItems:     'center',
+    justifyContent: 'center',
+  },
+  amountInput: {},
 
   // Contribution rows
   contribRow: {
-    flexDirection:    'row',
-    alignItems:       'center',
-    paddingVertical:  14,
-    borderBottomWidth: 1,
-    gap:              12,
+    flexDirection:     'row',
+    alignItems:        'center',
+    paddingVertical:   14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    gap:               12,
   },
-  contribIcon: {
-    width:          32,
-    height:         32,
+  contribDateBadge: {
+    flexDirection:  'row',
     alignItems:     'center',
-    justifyContent: 'center',
+    gap:            5,
+    paddingHorizontal: 8,
+    paddingVertical:   6,
+    flexShrink:     0,
   },
   contribInfo: {
     flex: 1,
   },
-  contribRight: {
-    alignItems: 'flex-end',
-    gap:         4,
-  },
   contribDelete: {
-    padding: 4,
+    padding:   4,
+    flexShrink: 0,
+  },
+
+  // History
+  historyHeader: {
+    marginTop: 6,
+    marginBottom: 2,
+    paddingHorizontal: 2,
+  },
+  emptyHistory: {
+    paddingVertical:   40,
+    paddingHorizontal: 20,
   },
 
   // Bottom actions
   bottomActions: {
-    gap:       8,
-    marginTop: 24,
-    marginBottom: 16,
+    marginTop:    16,
+    marginBottom: 8,
+    gap:          4,
   },
 
   // Delete confirm
   deleteOverlay: {
     position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-    alignItems:     'center',
-    justifyContent: 'flex-end',
-    zIndex:         999,
-    paddingHorizontal: 24,
-    paddingBottom:  40,
+    alignItems: 'center', justifyContent: 'flex-end',
+    zIndex: 999, paddingHorizontal: 24, paddingBottom: 40,
   },
-  deleteSheet: {
-    width:   '100%',
-    padding: 28,
-  },
-  deleteTitle: {
-    letterSpacing: -0.3,
-  },
-  deleteActions: {
-    flexDirection: 'row',
-    gap:           12,
-    marginTop:     28,
-  },
-  deleteBtn: {
-    height:         52,
-    alignItems:     'center',
-    justifyContent: 'center',
-  },
+  deleteSheet:   { width: '100%', padding: 28 },
+  deleteActions: { flexDirection: 'row', gap: 12, marginTop: 28 },
+  deleteBtn:     { height: 52, alignItems: 'center', justifyContent: 'center' },
 });

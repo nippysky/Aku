@@ -16,8 +16,6 @@ import Svg, { Path, Circle } from 'react-native-svg';
 import { Button, OnboardingHeader } from '../../components/ui';
 import { useTheme } from '../../theme';
 import { Palette } from '../../theme/colors';
-import { OnboardingStorage } from '../../lib/onboarding-storage';
-import { useAuthStore } from '../../store';
 
 // ─── Envelope + Check SVG ──────────────────────────────────────────────────
 
@@ -64,27 +62,11 @@ export default function VerifyScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
 
-  const { createLocalUser } = useAuthStore();
-
   const params = useLocalSearchParams<{ email: string }>();
   const email  = params.email ?? 'your inbox';
 
   const [resent, setResent]       = useState(false);
   const [resending, setResending] = useState(false);
-  const [skipping, setSkipping]   = useState(false);
-
-  const handleDevSkip = useCallback(async () => {
-    if (skipping) return;
-    setSkipping(true);
-    try {
-      const name        = OnboardingStorage.getName();
-      const storedEmail = OnboardingStorage.getEmail();
-      await createLocalUser(name || 'User', storedEmail || 'dev@aku.app');
-      router.push('/(onboarding)/pin-setup');
-    } finally {
-      setSkipping(false);
-    }
-  }, [skipping, createLocalUser, router]);
 
   const handleResend = useCallback(async () => {
     if (resending) return;
@@ -178,18 +160,6 @@ export default function VerifyScreen() {
             <Text style={{ color: colors.primary }}>Go back</Text>
           </Text>
         </Pressable>
-
-        {/* Dev shortcut */}
-        <Pressable
-          onPress={handleDevSkip}
-          accessibilityRole="button"
-          disabled={skipping}
-          style={[styles.devSkipBtn, { borderColor: Palette.gold, opacity: skipping ? 0.6 : 1 }]}
-        >
-          <Text style={[text.bodySm, { color: Palette.gold, fontFamily: 'PlusJakartaSans_500Medium' }]}>
-            {skipping ? 'Creating account…' : '⚡ Continue without email (Dev)'}
-          </Text>
-        </Pressable>
       </Animated.View>
     </View>
   );
@@ -220,12 +190,5 @@ const styles = StyleSheet.create({
   },
   backLink: {
     paddingVertical: 4,
-  },
-  devSkipBtn: {
-    paddingVertical:   10,
-    paddingHorizontal: 20,
-    borderRadius:      10,
-    borderWidth:       1.5,
-    alignItems:        'center',
   },
 });

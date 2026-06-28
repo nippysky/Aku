@@ -120,7 +120,9 @@ export const useGoalsStore = create<GoalsState>()((set, get) => ({
           [goalId]: rows.map(contributionFromDb),
         },
       }));
-    } catch {}
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : 'Failed to load contributions' });
+    }
   },
 
   add: async (input, userId) => {
@@ -249,16 +251,17 @@ export const useGoalsStore = create<GoalsState>()((set, get) => ({
     const goal = get().goals.find((g) => g.id === goalId);
     if (!goal) return;
 
-    const newSaved = Math.max(goal.savedAmount - amount, 0);
+    const newSaved      = Math.max(goal.savedAmount - amount, 0);
+    const stillComplete = newSaved >= goal.targetAmount && goal.targetAmount > 0;
     await db
       .update(schema.goals)
-      .set({ savedAmount: newSaved, isCompleted: false, updatedAt: now })
+      .set({ savedAmount: newSaved, isCompleted: stillComplete, updatedAt: now })
       .where(eq(schema.goals.id, goalId));
 
     set((s) => ({
       goals: s.goals.map((g) =>
         g.id === goalId
-          ? withProgress({ ...g, savedAmount: newSaved, isCompleted: false, updatedAt: now })
+          ? withProgress({ ...g, savedAmount: newSaved, isCompleted: stillComplete, updatedAt: now })
           : g
       ),
       contributions: {

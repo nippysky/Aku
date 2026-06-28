@@ -17,7 +17,7 @@ import { IS_IOS } from '../../lib/platform';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
+type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'dangerGhost';
 type ButtonSize = 'lg' | 'md' | 'sm';
 
 interface LucideIconProps {
@@ -114,6 +114,12 @@ export function Button({
           borderWidth: 0,
           borderColor: 'transparent' as const,
         };
+      case 'dangerGhost':
+        return {
+          backgroundColor: 'transparent' as const,
+          borderWidth: 0,
+          borderColor: 'transparent' as const,
+        };
       case 'danger':
         return {
           backgroundColor: isDisabled ? colors.borderStrong : colors.danger,
@@ -130,10 +136,11 @@ export function Button({
         : colors.textTertiary;
     }
     switch (variant) {
-      case 'primary':   return colors.textOnForest;
-      case 'secondary': return colors.primary;
-      case 'ghost':     return colors.primary;
-      case 'danger':    return colors.textInverse;
+      case 'primary':     return colors.textOnForest;
+      case 'secondary':   return colors.primary;
+      case 'ghost':       return colors.primary;
+      case 'dangerGhost': return colors.danger;
+      case 'danger':      return colors.textInverse;
     }
   })();
 

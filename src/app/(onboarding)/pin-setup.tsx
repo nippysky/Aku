@@ -1,5 +1,6 @@
 import React, { useCallback, useRef, useState } from 'react';
 import {
+  StatusBar,
   StyleSheet,
   Text,
   View,
@@ -76,6 +77,8 @@ export default function PinSetupScreen() {
     : 'Enter the same 6 digits to confirm.';
 
   return (
+    <>
+      <StatusBar barStyle="light-content" />
     <View
       style={[
         styles.container,
@@ -137,6 +140,7 @@ export default function PinSetupScreen() {
         )}
       </Animated.View>
     </View>
+    </>
   );
 }
 

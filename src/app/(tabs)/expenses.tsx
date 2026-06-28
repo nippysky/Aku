@@ -1,34 +1,37 @@
-import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   FlatList,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
   FadeInDown,
-  FadeOutUp,
 } from 'react-native-reanimated';
 import {
   Plus,
   Wallet,
   UtensilsCrossed, Car, ShoppingBag, Tv, Home, Zap,
   Heart, Users, BookOpen, PiggyBank, Gift, MoreHorizontal,
-  X,
 } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../theme';
+import { Palette } from '../../theme/colors';
+import { BannerAmount } from '../../components/ui/CompactAmountDisplay';
+import { SkeletonBanner, SkeletonExpenseRow } from '../../components/ui/Skeleton';
 import { Card } from '../../components/ui/Card';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { AddExpenseSheet } from '../../components/expenses/AddExpenseSheet';
 import { EditExpenseSheet } from '../../components/expenses/EditExpenseSheet';
 import { ExpenseRow } from '../../components/expenses/ExpenseRow';
 import { useExpensesStore } from '../../store/expenses.store';
-import { useBudgetsStore } from '../../store/budgets.store';
 import { useAuthStore } from '../../store/auth.store';
+import { useCurrencyFormat } from '../../hooks/useCurrencyFormat';
 import { EXPENSE_CATEGORIES, type ExpenseCategory, type Expense } from '../../types';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -36,19 +39,18 @@ import { EXPENSE_CATEGORIES, type ExpenseCategory, type Expense } from '../../ty
 type CategoryFilter = 'all' | ExpenseCategory;
 
 interface MonthOption {
-  label:  string; // 'Jun 2026'
-  value:  string; // 'YYYY-MM'
+  label: string;
+  value: string;
 }
 
 interface DateGroup {
-  dateKey:   string; // 'Today' | 'Yesterday' | 'Mon 23 Jun'
-  dateValue: string; // YYYY-MM-DD
+  dateKey:   string;
+  dateValue: string;
   items:     Expense[];
 }
 
-type ListItem =
-  | { type: 'dateHeader'; dateKey: string }
-  | { type: 'expense'; expense: Expense };
+// FlatList renders each item as one of these:
+type ListItem = { type: 'dateGroup'; group: DateGroup };
 
 // ─── Icon map ─────────────────────────────────────────────────────────────────
 
@@ -74,44 +76,40 @@ const EXPENSE_ICONS: Record<
 
 function buildMonthOptions(): MonthOption[] {
   const now = new Date();
-  const options: MonthOption[] = [];
-  const monthNames = [
-    'Jan','Feb','Mar','Apr','May','Jun',
-    'Jul','Aug','Sep','Oct','Nov','Dec',
-  ];
+  const opts: MonthOption[] = [];
+  const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   for (let i = 5; i >= 0; i--) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
     const y = d.getFullYear();
     const m = d.getMonth();
-    const value = `${y}-${String(m + 1).padStart(2, '0')}`;
-    options.push({ label: `${monthNames[m]} ${y}`, value });
+    opts.push({
+      label: `${monthNames[m]} ${y}`,
+      value: `${y}-${String(m + 1).padStart(2, '0')}`,
+    });
   }
-  return options;
+  return opts;
 }
 
 function currentMonthLabel(): string {
   const now = new Date();
-  const monthNames = [
-    'January','February','March','April','May','June',
-    'July','August','September','October','November','December',
-  ];
-  return `${monthNames[now.getMonth()]} ${now.getFullYear()}`;
+  const names = ['January','February','March','April','May','June',
+                 'July','August','September','October','November','December'];
+  return `${names[now.getMonth()]} ${now.getFullYear()}`;
 }
 
 function formatDateHeader(dateStr: string): string {
   const today = new Date();
-  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
   const yesterday = new Date(today);
   yesterday.setDate(yesterday.getDate() - 1);
-  const yesterdayStr = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${String(yesterday.getDate()).padStart(2, '0')}`;
+  const yStr = `${yesterday.getFullYear()}-${String(yesterday.getMonth()+1).padStart(2,'0')}-${String(yesterday.getDate()).padStart(2,'0')}`;
 
   if (dateStr === todayStr) return 'Today';
-  if (dateStr === yesterdayStr) return 'Yesterday';
+  if (dateStr === yStr)     return 'Yesterday';
 
   const [, m, d] = dateStr.split('-');
   const date = new Date(dateStr + 'T00:00:00');
-  const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const dayNames   = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
   const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   return `${dayNames[date.getDay()]} ${parseInt(d, 10)} ${monthNames[parseInt(m, 10) - 1]}`;
 }
@@ -119,22 +117,20 @@ function formatDateHeader(dateStr: string): string {
 function groupExpensesByDate(expenses: Expense[]): DateGroup[] {
   const map = new Map<string, Expense[]>();
   for (const e of expenses) {
-    const existing = map.get(e.date) ?? [];
-    existing.push(e);
-    map.set(e.date, existing);
+    const arr = map.get(e.date) ?? [];
+    arr.push(e);
+    map.set(e.date, arr);
   }
-
-  const sorted = Array.from(map.entries()).sort(([a], [b]) => b.localeCompare(a));
-  return sorted.map(([dateValue, items]) => ({
-    dateKey:   formatDateHeader(dateValue),
-    dateValue,
-    items,
-  }));
+  return Array.from(map.entries())
+    .sort(([a], [b]) => b.localeCompare(a))
+    .map(([dateValue, items]) => ({
+      dateKey:   formatDateHeader(dateValue),
+      dateValue,
+      items,
+    }));
 }
 
-function getTop3Categories(
-  byCategory: Record<ExpenseCategory, number>
-): Array<{ cat: ExpenseCategory; amount: number }> {
+function getTop3(byCategory: Record<ExpenseCategory, number>) {
   return (Object.entries(byCategory) as Array<[ExpenseCategory, number]>)
     .filter(([, amt]) => amt > 0)
     .sort(([, a], [, b]) => b - a)
@@ -142,34 +138,45 @@ function getTop3Categories(
     .map(([cat, amount]) => ({ cat, amount }));
 }
 
-// ─── Budget alert banner ──────────────────────────────────────────────────────
+// ─── Date group card ──────────────────────────────────────────────────────────
 
-interface BudgetBannerProps {
-  category: ExpenseCategory;
-  onDismiss: () => void;
-}
-
-function BudgetBanner({ category, onDismiss }: BudgetBannerProps) {
-  const { colors, text } = useTheme();
-  const meta = EXPENSE_CATEGORIES[category];
+function DateGroupCard({ group, onPressExpense, onLongPressExpense }: {
+  group:               DateGroup;
+  onPressExpense:      (id: string) => void;
+  onLongPressExpense:  (exp: Expense) => void;
+}) {
+  const { colors, text, font, fontSize, radius } = useTheme();
 
   return (
-    <Animated.View
-      entering={FadeInDown.springify().damping(18)}
-      exiting={FadeOutUp.springify()}
-      style={[styles.banner, { backgroundColor: colors.warningBg, borderColor: colors.warning }]}
-    >
-      <Text style={[text.bodySm, styles.bannerText, { color: colors.warning }]}>
-        You&apos;ve exceeded your <Text style={{ fontFamily: 'PlusJakartaSans_600SemiBold' }}>{meta.label}</Text> budget this month.
+    <View>
+      {/* Date label */}
+      <Text style={[styles.dateLabel, text.labelCaps, { color: colors.textSecondary }]}>
+        {group.dateKey}
       </Text>
-      <Pressable onPress={onDismiss} hitSlop={8} accessibilityRole="button" accessibilityLabel="Dismiss">
-        <X size={16} color={colors.warning} strokeWidth={2} />
-      </Pressable>
-    </Animated.View>
+
+      {/* Card per date group */}
+      <Card style={styles.dateCard}>
+        {group.items.map((exp, idx) => (
+          <View
+            key={exp.id}
+            style={[
+              idx < group.items.length - 1 && {
+                borderBottomWidth: 1,
+                borderBottomColor: colors.borderLight,
+              },
+            ]}
+          >
+            <ExpenseRow
+              expense={exp}
+              onPress={() => onPressExpense(exp.id)}
+              onLongPress={() => onLongPressExpense(exp)}
+            />
+          </View>
+        ))}
+      </Card>
+    </View>
   );
 }
-
-// ─── Constants ────────────────────────────────────────────────────────────────
 
 const EXPENSE_CATEGORIES_KEYS = Object.keys(EXPENSE_CATEGORIES) as ExpenseCategory[];
 
@@ -177,201 +184,168 @@ const EXPENSE_CATEGORIES_KEYS = Object.keys(EXPENSE_CATEGORIES) as ExpenseCatego
 
 export default function ExpensesScreen() {
   const { colors, text, font, fontSize, radius, layout } = useTheme();
-  const insets = useSafeAreaInsets();
-  const router  = useRouter();
+  const insets   = useSafeAreaInsets();
+  const router   = useRouter();
 
   const {
-    expenses,
-    summary,
-    selectedMonth,
-    isLoading,
-    load,
-    loadMonth,
-    setMonth,
+    expenses, allExpenses, summary, selectedMonth, isLoading,
+    load, loadAll, loadMonth, setMonth,
   } = useExpensesStore();
 
-  const { budgets } = useBudgetsStore();
-  const { user }    = useAuthStore();
+  const { user } = useAuthStore();
+  const { fmt, fmtCompact } = useCurrencyFormat();
 
-  const [addOpen,          setAddOpen]          = useState(false);
-  const [editExpense,      setEditExpense]       = useState<Expense | null>(null);
-  const [categoryFilter,   setCategoryFilter]    = useState<CategoryFilter>('all');
-  const [dismissedBudgets, setDismissedBudgets] = useState<Set<string>>(new Set());
+  // viewMode: 'all' shows all-time; 'month' filters by selectedMonth
+  const [viewMode,       setViewMode]       = useState<'all' | 'month'>('all');
+  const [addOpen,        setAddOpen]        = useState(false);
+  const [editExpense,    setEditExpense]     = useState<Expense | null>(null);
+  const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('all');
 
   const monthOptions = useMemo(() => buildMonthOptions(), []);
 
-  // Load on mount and when selectedMonth changes
+  // On mount and whenever user changes, load all expenses
   useEffect(() => {
-    if (user) load(user.id);
-  }, [user, selectedMonth]);
+    if (!user) return;
+    if (viewMode === 'all') {
+      loadAll(user.id);
+    } else {
+      load(user.id);
+    }
+  }, [user, viewMode]);
 
-  const handleMonthSelect = useCallback(
-    (monthValue: string) => {
-      if (!user) return;
-      setMonth(monthValue);
-      loadMonth(user.id, monthValue);
-      setCategoryFilter('all');
-    },
-    [user, setMonth, loadMonth],
-  );
+  const handleMonthSelect = useCallback((monthValue: string) => {
+    if (!user) return;
+    setViewMode('month');
+    setMonth(monthValue);
+    loadMonth(user.id, monthValue);
+    setCategoryFilter('all');
+  }, [user, setMonth, loadMonth]);
+
+  const handleViewAll = useCallback(() => {
+    if (!user) return;
+    setViewMode('all');
+    setCategoryFilter('all');
+    loadAll(user.id);
+  }, [user, loadAll]);
 
   const handleSuccess = useCallback(() => {
-    if (user) load(user.id);
-  }, [user, load]);
+    if (!user) return;
+    if (viewMode === 'all') loadAll(user.id);
+    else load(user.id);
+  }, [user, viewMode, load, loadAll]);
 
-  // Exceeded budgets not yet dismissed
-  const exceededBudgets = useMemo(
-    () => budgets.filter((b) => b.status === 'exceeded' && !dismissedBudgets.has(b.id)),
-    [budgets, dismissedBudgets],
-  );
+  // Source: all-time in 'all' mode, month-filtered otherwise
+  const sourceExpenses = viewMode === 'all' ? allExpenses : expenses;
 
-  const dismissBudget = useCallback((id: string) => {
-    setDismissedBudgets((prev) => new Set(prev).add(id));
-  }, []);
-
-  // Filtered + grouped expenses
   const filteredExpenses = useMemo(() => {
-    if (categoryFilter === 'all') return expenses;
-    return expenses.filter((e) => e.category === categoryFilter);
-  }, [expenses, categoryFilter]);
+    if (categoryFilter === 'all') return sourceExpenses;
+    return sourceExpenses.filter((e) => e.category === categoryFilter);
+  }, [sourceExpenses, categoryFilter]);
+
+  // "Recently added" = expenses with createdAt within last 48h, by creation time
+  const recentlyAdded = useMemo(() => {
+    const cutoff = Date.now() - 48 * 60 * 60 * 1000;
+    return [...allExpenses]
+      .filter((e) => new Date(e.createdAt).getTime() > cutoff)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, 5);
+  }, [allExpenses]);
 
   const dateGroups = useMemo(
     () => groupExpensesByDate(filteredExpenses),
     [filteredExpenses],
   );
 
-  const top3 = useMemo(
-    () => (summary ? getTop3Categories(summary.byCategory) : []),
-    [summary],
-  );
+  const top3       = useMemo(() => (summary ? getTop3(summary.byCategory) : []), [summary]);
+  const totalSpent = summary?.totalAmount ?? 0;
+  const txCount    = sourceExpenses.length;
 
-  const totalSpent  = summary?.totalAmount ?? 0;
-  const txCount     = expenses.length;
-
-  // FlatList data: flatten groups into header + row items
+  // FlatList data: one item per date group
   const listData = useMemo((): ListItem[] => {
-    const items: ListItem[] = [];
-    for (const group of dateGroups) {
-      items.push({ type: 'dateHeader', dateKey: group.dateKey });
-      for (const exp of group.items) {
-        items.push({ type: 'expense', expense: exp });
-      }
-    }
-    return items;
+    return [
+      ...dateGroups.map((group): ListItem => ({ type: 'dateGroup', group })),
+    ];
   }, [dateGroups]);
 
   const renderItem = useCallback(
-    ({ item }: { item: ListItem }) => {
-      if (item.type === 'dateHeader') {
-        return (
-          <Text
-            style={[
-              text.labelCaps,
-              styles.dateHeader,
-              { color: colors.textSecondary },
-            ]}
-          >
-            {item.dateKey}
-          </Text>
-        );
-      }
-      return (
-        <ExpenseRow
-          expense={item.expense}
-          onPress={() => router.push(`/expenses/${item.expense.id}` as never)}
-          onLongPress={() => setEditExpense(item.expense)}
-          style={styles.expenseRow}
-        />
-      );
-    },
-    [colors, text, router, setEditExpense],
+    ({ item }: { item: ListItem }) => (
+      <DateGroupCard
+        group={item.group}
+        onPressExpense={(id) => router.push(`/expenses/${id}` as never)}
+        onLongPressExpense={(exp) => setEditExpense(exp)}
+      />
+    ),
+    [router],
   );
 
-  const keyExtractor = useCallback((item: ListItem, index: number): string => {
-    if (item.type === 'dateHeader') return `header-${item.dateKey}-${index}`;
-    return `expense-${item.expense.id}`;
+  const keyExtractor = useCallback((item: ListItem): string => {
+    return `group-${item.group.dateValue}`;
   }, []);
 
-  // ── Header component for FlatList ──
-  // Must be a function (not a JSX element) so FlatList instantiates it
-  // correctly and horizontal ScrollViews inside receive proper touch events.
+  // Header is a function so FlatList instantiates it correctly
   const ListHeader = useCallback(
     () => (
       <>
-        {/* Budget alert banners */}
-        {exceededBudgets.slice(0, 1).map((b) => (
-          <BudgetBanner
-            key={b.id}
-            category={b.category}
-            onDismiss={() => dismissBudget(b.id)}
+        {/* Summary banner — skeleton while loading */}
+        {isLoading && <SkeletonBanner style={{ marginBottom: 8 }} />}
+
+        {/* Summary banner — forest-green, matches bills + goals */}
+        {!isLoading && <View style={styles.summaryBanner}>
+          {Platform.OS === 'ios' && (
+            <BlurView intensity={85} tint="dark" style={StyleSheet.absoluteFill} />
+          )}
+          <View
+            style={[
+              StyleSheet.absoluteFill,
+              {
+                backgroundColor:
+                  Platform.OS === 'ios' ? 'rgba(22,58,47,0.82)' : colors.primary,
+                borderRadius: 20,
+              },
+            ]}
           />
-        ))}
-
-        {/* Summary card */}
-        <Card style={styles.summaryCard}>
-          <View style={styles.summaryInner}>
-            {/* Total spent */}
-            <Text
-              style={[
-                styles.totalLabel,
-                text.labelCaps,
-                { color: colors.textSecondary },
-              ]}
-            >
-              Total spent
+          <View style={{ position: 'relative' }}>
+            <Text style={[text.caption, { color: 'rgba(250,250,248,0.65)', letterSpacing: 1 }]}>
+              {viewMode === 'all' ? 'ALL TIME SPENT' : 'TOTAL SPENT'}
             </Text>
-            <Text
-              style={[
-                styles.totalAmount,
-                {
-                  fontFamily: font.displayLight,
-                  fontSize:   fontSize['4xl'],
-                  color:      colors.accent,
-                  letterSpacing: -1,
-                },
-              ]}
-            >
-              ₦{(totalSpent / 100).toLocaleString('en-NG')}
-            </Text>
-            <Text style={[text.bodySm, { color: colors.textSecondary, marginTop: 4 }]}>
-              {txCount} {txCount === 1 ? 'transaction' : 'transactions'}
-            </Text>
-
-            {/* Top 3 categories */}
-            {top3.length > 0 && (
-              <View style={styles.top3Row}>
-                {top3.map(({ cat, amount }) => {
-                  const meta = EXPENSE_CATEGORIES[cat];
-                  const IconComp = EXPENSE_ICONS[cat] ?? MoreHorizontal;
-                  return (
-                    <View key={cat} style={styles.top3Item}>
-                      <View
-                        style={[
-                          styles.top3Icon,
-                          { backgroundColor: meta.color + '22', borderRadius: radius.full },
-                        ]}
-                      >
-                        <IconComp size={16} color={meta.color} strokeWidth={1.8} />
-                      </View>
-                      <Text style={[text.caption, { color: colors.textSecondary, marginTop: 4 }]} numberOfLines={1}>
-                        {meta.label}
-                      </Text>
-                      <Text
-                        style={[
-                          text.amountSm,
-                          { color: colors.text },
-                        ]}
-                        numberOfLines={1}
-                      >
-                        ₦{(amount / 100).toLocaleString('en-NG')}
-                      </Text>
-                    </View>
-                  );
-                })}
+            <BannerAmount
+              kobo={totalSpent}
+              textStyle={{
+                fontFamily:    font.displayLight,
+                fontSize:      fontSize['3xl'],
+                color:         Palette.linen,
+                letterSpacing: -1,
+                marginTop:     4,
+              }}
+            />
+            <View style={{ flexDirection: 'row', gap: 16, marginTop: 12 }}>
+              <View>
+                <Text style={[text.caption, { color: 'rgba(250,250,248,0.55)' }]}>Transactions</Text>
+                <Text style={[text.bodyMedium, { color: Palette.linen, marginTop: 2 }]}>
+                  {txCount} {txCount === 1 ? 'entry' : 'entries'}
+                </Text>
               </View>
-            )}
+              {top3[0] && (
+                <>
+                  <View style={{ width: 1, backgroundColor: 'rgba(250,250,248,0.15)' }} />
+                  <View>
+                    <Text style={[text.caption, { color: 'rgba(250,250,248,0.55)' }]}>Top category</Text>
+                    <Text style={[text.bodyMedium, { color: Palette.gold, marginTop: 2 }]}>
+                      {EXPENSE_CATEGORIES[top3[0].cat].label}
+                    </Text>
+                  </View>
+                  <View style={{ width: 1, backgroundColor: 'rgba(250,250,248,0.15)' }} />
+                  <View>
+                    <Text style={[text.caption, { color: 'rgba(250,250,248,0.55)' }]}>Amount</Text>
+                    <Text style={[text.bodyMedium, { color: Palette.linen, marginTop: 2 }]}>
+                      {fmtCompact(top3[0].amount)}
+                    </Text>
+                  </View>
+                </>
+              )}
+            </View>
           </View>
-        </Card>
+        </View>}
 
         {/* Category filter pills */}
         <ScrollView
@@ -381,7 +355,6 @@ export default function ExpensesScreen() {
           contentContainerStyle={styles.filterRow}
           style={styles.filterScroll}
         >
-          {/* "All" pill */}
           <Pressable
             onPress={() => setCategoryFilter('all')}
             style={[
@@ -431,67 +404,116 @@ export default function ExpensesScreen() {
             );
           })}
         </ScrollView>
+
+        {/* Recently added — expenses created in last 48h */}
+        {recentlyAdded.length > 0 && (
+          <View style={styles.recentSection}>
+            <View style={styles.recentHeader}>
+              <Text style={[text.labelCaps, { color: colors.textSecondary }]}>Recently Added</Text>
+            </View>
+            <ScrollView
+              horizontal
+              nestedScrollEnabled
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.recentRow}
+            >
+              {recentlyAdded.map((exp) => {
+                const meta = EXPENSE_CATEGORIES[exp.category];
+                return (
+                  <Pressable
+                    key={exp.id}
+                    onPress={() => router.push(`/expenses/${exp.id}` as never)}
+                    style={[styles.recentCard, { backgroundColor: colors.card, borderRadius: radius.lg }]}
+                  >
+                    <View style={[styles.recentDot, { backgroundColor: meta.color }]} />
+                    <Text
+                      style={{ fontFamily: font.sansMedium, fontSize: 12, color: colors.text, lineHeight: 16 }}
+                      numberOfLines={1}
+                    >
+                      {exp.description ?? meta.label}
+                    </Text>
+                    <Text style={{ fontFamily: font.sansSemiBold, fontSize: 11, color: colors.textSecondary, marginTop: 3 }} numberOfLines={1}>
+                      {fmtCompact(exp.amount)}
+                    </Text>
+                    <Text style={{ fontFamily: font.sansRegular, fontSize: 10, color: colors.textTertiary, marginTop: 4 }}>
+                      {exp.date}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </View>
+        )}
       </>
     ),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [exceededBudgets, top3, txCount, totalSpent, categoryFilter, colors, text, font, fontSize, radius, dismissBudget],
+    [top3, txCount, totalSpent, categoryFilter, recentlyAdded, viewMode, isLoading, colors, text, font, fontSize, radius, fmt, fmtCompact, router],
   );
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
-        {/* ── Header ── */}
-        <View
+      {/* ── Header ── */}
+      <View
+        style={[
+          styles.header,
+          { paddingTop: insets.top + 12, borderBottomColor: colors.borderLight },
+        ]}
+      >
+        <Text
           style={[
-            styles.header,
-            {
-              paddingTop:      insets.top + 12,
-              borderBottomColor: colors.borderLight,
-            },
+            styles.headerTitle,
+            { fontFamily: font.displayLight, fontSize: fontSize['2xl'], color: colors.text },
           ]}
         >
-          {/* Left: title */}
-          <Text
-            style={[
-              styles.headerTitle,
-              {
-                fontFamily: font.displayLight,
-                fontSize:   fontSize['2xl'],
-                color:      colors.text,
-              },
-            ]}
-          >
-            Expenses
+          Expenses
+        </Text>
+        <View style={styles.headerRight}>
+          <Text style={[text.bodySm, { color: colors.textSecondary }]}>
+            {currentMonthLabel()}
           </Text>
-
-          {/* Right: month label + add button */}
-          <View style={styles.headerRight}>
-            <Text style={[text.bodySm, { color: colors.textSecondary }]}>
-              {currentMonthLabel()}
-            </Text>
-            <Pressable
-              onPress={() => setAddOpen(true)}
-              style={[styles.headerIconBtn, { backgroundColor: colors.backgroundSecondary }]}
-              hitSlop={6}
-              accessibilityRole="button"
-              accessibilityLabel="Add expense"
-            >
-              <Plus size={20} color={colors.text} strokeWidth={2} />
-            </Pressable>
-          </View>
+          <Pressable
+            onPress={() => setAddOpen(true)}
+            style={[styles.headerIconBtn, { backgroundColor: colors.backgroundSecondary }]}
+            hitSlop={6}
+            accessibilityRole="button"
+            accessibilityLabel="Add expense"
+          >
+            <Plus size={20} color={colors.text} strokeWidth={2} />
+          </Pressable>
         </View>
+      </View>
 
-        {/* ── Month chips ── */}
-        {/* Outer View owns the bottom border so the ScrollView is unconstrained
-            vertically — prevents Android from clipping the pill borders. */}
-        <View style={[styles.monthScrollWrap, { borderBottomColor: colors.borderLight }]}>
+      {/* ── Month chips ── */}
+      <View style={[styles.monthScrollWrap, { borderBottomColor: colors.borderLight }]}>
         <ScrollView
           horizontal
           nestedScrollEnabled
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.monthRow}
         >
+          {/* "All" pill — default, shows everything */}
+          <Pressable
+            onPress={handleViewAll}
+            style={[
+              styles.monthChip,
+              {
+                backgroundColor: viewMode === 'all' ? colors.primary : colors.backgroundSecondary,
+                borderColor:     viewMode === 'all' ? colors.primary : colors.border,
+                borderRadius:    100,
+              },
+            ]}
+          >
+            <Text
+              style={[
+                text.buttonLabelSm,
+                { color: viewMode === 'all' ? colors.textOnForest : colors.textSecondary },
+              ]}
+            >
+              All time
+            </Text>
+          </Pressable>
+
           {monthOptions.map((opt) => {
-            const selected = selectedMonth === opt.value;
+            const selected = viewMode === 'month' && selectedMonth === opt.value;
             return (
               <Pressable
                 key={opt.value}
@@ -517,16 +539,30 @@ export default function ExpensesScreen() {
             );
           })}
         </ScrollView>
-        </View>
+      </View>
 
-        {/* ── List ── */}
-        <FlatList
-          data={listData}
-          keyExtractor={keyExtractor}
-          renderItem={renderItem}
-          style={{ flex: 1 }}
-          ListHeaderComponent={ListHeader}
-          ListEmptyComponent={
+      {/* ── List ── */}
+      <FlatList
+        data={listData}
+        keyExtractor={keyExtractor}
+        renderItem={renderItem}
+        style={{ flex: 1 }}
+        ListHeaderComponent={ListHeader}
+        ListEmptyComponent={
+          isLoading ? (
+            <View style={{ gap: 0 }}>
+              {[0, 1, 2, 3, 4].map((i) => (
+                <SkeletonExpenseRow
+                  key={i}
+                  style={{
+                    paddingHorizontal: 0,
+                    borderBottomWidth: i < 4 ? 1 : 0,
+                    borderBottomColor: 'rgba(0,0,0,0.06)',
+                  }}
+                />
+              ))}
+            </View>
+          ) : (
             <EmptyState
               icon={Wallet}
               title="No expenses yet"
@@ -534,35 +570,34 @@ export default function ExpensesScreen() {
               action={{ label: 'Add Expense', onPress: () => setAddOpen(true) }}
               style={{ marginTop: 24 }}
             />
-          }
-          contentContainerStyle={[
-            styles.listContent,
-            { paddingBottom: insets.bottom + layout.tabBarHeight + 24 },
-          ]}
-          showsVerticalScrollIndicator={false}
-        />
+          )
+        }
+        contentContainerStyle={[
+          styles.listContent,
+          { paddingBottom: insets.bottom + layout.tabBarHeight + 24 },
+        ]}
+        showsVerticalScrollIndicator={false}
+      />
 
-        {/* ── Sheets ── */}
-        <AddExpenseSheet
-          isOpen={addOpen}
-          onClose={() => setAddOpen(false)}
-          onSuccess={handleSuccess}
-        />
-        <EditExpenseSheet
-          expense={editExpense}
-          onClose={() => setEditExpense(null)}
-          onSuccess={handleSuccess}
-        />
-      </View>
+      {/* ── Sheets ── */}
+      <AddExpenseSheet
+        isOpen={addOpen}
+        onClose={() => setAddOpen(false)}
+        onSuccess={handleSuccess}
+      />
+      <EditExpenseSheet
+        expense={editExpense}
+        onClose={() => setEditExpense(null)}
+        onSuccess={handleSuccess}
+      />
+    </View>
   );
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-  },
+  screen: { flex: 1 },
 
   // Header
   header: {
@@ -573,9 +608,7 @@ const styles = StyleSheet.create({
     paddingBottom:     12,
     borderBottomWidth: 1,
   },
-  headerTitle: {
-    letterSpacing: -0.5,
-  },
+  headerTitle:   { letterSpacing: -0.5 },
   headerRight: {
     flexDirection: 'row',
     alignItems:    'center',
@@ -590,18 +623,17 @@ const styles = StyleSheet.create({
   },
 
   // Month chips
-  // Outer View owns the border so ScrollView height is unconstrained (no clipping)
   monthScrollWrap: {
     borderBottomWidth: 1,
-    flexShrink:        0,     // don't compress in flex parent
-    overflow:          'visible', // never clip pill borders
+    flexShrink:        0,
+    overflow:          'visible',
   },
   monthRow: {
     flexDirection: 'row',
     gap:           8,
-    paddingLeft:   16,
+    paddingLeft:   24,
     paddingRight:  24,
-    paddingTop:    14,   // extra top room so pill border isn't clipped on Android
+    paddingTop:    14,
     paddingBottom: 14,
   },
   monthChip: {
@@ -610,67 +642,24 @@ const styles = StyleSheet.create({
     borderWidth:       1.5,
   },
 
-  // Banner
-  banner: {
-    flexDirection:     'row',
-    alignItems:        'center',
-    justifyContent:    'space-between',
-    marginHorizontal:  16,
-    marginTop:         12,
-    paddingHorizontal: 14,
-    paddingVertical:   10,
-    borderRadius:      10,
-    borderWidth:       1,
-    gap:               8,
-  },
-  bannerText: {
-    flex: 1,
+  // Summary banner — forest-green, matches bills + goals
+  summaryBanner: {
+    marginTop:    16,
+    marginBottom: 8,
+    borderRadius: 20,
+    padding:      20,
+    overflow:     'hidden',
   },
 
-  // Summary card
-  summaryCard: {
-    marginHorizontal: 16,
-    marginTop:        16,
-    marginBottom:     8,
-  },
-  summaryInner: {
-    padding: 20,
-  },
-  totalLabel: {
-    marginBottom: 4,
-  },
-  totalAmount: {
-    includeFontPadding: false,
-  } as object,
-  top3Row: {
-    flexDirection:  'row',
-    gap:            12,
-    marginTop:      16,
-    paddingTop:     16,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(0,0,0,0.06)',
-  },
-  top3Item: {
-    flex:       1,
-    alignItems: 'center',
-    gap:        2,
-  },
-  top3Icon: {
-    width:          32,
-    height:         32,
-    alignItems:     'center',
-    justifyContent: 'center',
-  },
-
-  // Filter pills
+  // Category filter pills
   filterScroll: {
     marginTop: 4,
+    flexShrink: 0,
   },
   filterRow: {
-    flexDirection:     'row',
-    gap:               8,
-    paddingHorizontal: 16,
-    paddingVertical:   10,
+    flexDirection: 'row',
+    gap:           8,
+    paddingVertical: 10,
   },
   filterPill: {
     paddingHorizontal: 16,
@@ -678,18 +667,46 @@ const styles = StyleSheet.create({
     borderWidth:       1.5,
   },
 
-  // List
-  listContent: {
-    paddingTop: 4,
+  // Recently added section
+  recentSection: {
+    marginTop:    16,
+    marginBottom: 4,
   },
-  dateHeader: {
-    marginTop:         16,
-    marginBottom:      4,
-    paddingHorizontal: 16,
-    fontSize:          13,
+  recentHeader: {
+    flexDirection: 'row',
+    alignItems:    'center',
+    gap:           8,
+    marginBottom:  10,
   },
-  expenseRow: {
-    paddingHorizontal: 16,
+  recentRow: {
+    flexDirection: 'row',
+    gap:           10,
+  },
+  recentCard: {
+    padding:   12,
+    minWidth:  130,
+    maxWidth:  170,
+  },
+  recentDot: {
+    width:        8,
+    height:       8,
+    borderRadius: 4,
+    marginBottom: 6,
   },
 
+  // List
+  listContent: {
+    paddingTop:        8,
+    paddingHorizontal: 24,
+    gap:               16,
+  },
+  dateLabel: {
+    fontSize:     12,
+    marginBottom: 8,
+    marginTop:    4,
+  },
+  dateCard: {
+    paddingHorizontal: 16,
+    paddingVertical:   8,
+  },
 });

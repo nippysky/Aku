@@ -1,12 +1,18 @@
 /**
  * AkuDatePicker — branded calendar date picker.
- * Uses React Native's built-in Modal so it works anywhere in the tree
- * (onboarding, bottom sheets, tabs) without needing a BottomSheetModalProvider.
+ *
+ * Features:
+ * - Standard month-by-month calendar navigation
+ * - Tap the "Month Year" header → jump to year/month quick-pick mode
+ *   so users can reach any month in seconds without tapping 24 times
+ * - minDate / maxDate support
+ * - Haptics on selection
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Modal,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -24,27 +30,36 @@ import {
   parseISO,
   startOfMonth,
   subMonths,
+  getYear,
+  getMonth,
+  setMonth,
+  setYear,
+  startOfYear,
 } from 'date-fns';
-import { ChevronLeft, ChevronRight } from 'lucide-react-native';
+import { ChevronLeft, ChevronRight, ChevronDown } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { useTheme } from '../../theme';
 import { Palette } from '../../theme/colors';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
+type PickerMode = 'calendar' | 'monthYear';
+
 interface AkuDatePickerProps {
   isOpen:   boolean;
   value:    string;             // 'YYYY-MM-DD'
   onChange: (iso: string) => void;
   onClose:  () => void;
-  minDate?: string;             // 'YYYY-MM-DD' — dates before this are disabled
+  minDate?: string;             // 'YYYY-MM-DD'
+  maxDate?: string;             // 'YYYY-MM-DD'
   title?:   string;
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
-const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-const CELL_SIZE  = 42;
+const DAY_LABELS   = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const CELL_SIZE    = 42;
 
 function parseISOSafe(iso: string): Date | null {
   if (!iso) return null;
@@ -64,6 +79,12 @@ function mondayBased(d: Date): number {
   return dow === 0 ? 6 : dow - 1;
 }
 
+/** Year range to display in year/month picker — 10 years before/after current view. */
+function buildYearRange(centreYear: number): number[] {
+  const start = centreYear - 6;
+  return Array.from({ length: 15 }, (_, i) => start + i);
+}
+
 // ─── Component ─────────────────────────────────────────────────────────────
 
 export function AkuDatePicker({
@@ -72,50 +93,84 @@ export function AkuDatePicker({
   onChange,
   onClose,
   minDate,
+  maxDate,
   title = 'Select date',
 }: AkuDatePickerProps) {
   const { colors, font, fontSize, radius } = useTheme();
 
   const today      = useMemo(() => new Date(), []);
   const minDateObj = useMemo(() => (minDate ? parseISOSafe(minDate) : null), [minDate]);
+  const maxDateObj = useMemo(() => (maxDate ? parseISOSafe(maxDate) : null), [maxDate]);
 
+  const [mode,      setMode]      = useState<PickerMode>('calendar');
   const [viewMonth, setViewMonth] = useState<Date>(() => {
     const d = parseISOSafe(value);
     return startOfMonth(d ?? today);
   });
+  const [selected,  setSelected]  = useState<Date | null>(() => parseISOSafe(value));
 
-  const [selected, setSelected] = useState<Date | null>(() => parseISOSafe(value));
+  // Year displayed in the year/month picker
+  const [pickYear, setPickYear] = useState<number>(() => {
+    const d = parseISOSafe(value);
+    return getYear(d ?? today);
+  });
 
-  // Sync when parent value changes while picker is open
+  // Sync when parent value changes while open
   useEffect(() => {
     const d = parseISOSafe(value);
     if (d) {
       setSelected(d);
       setViewMonth(startOfMonth(d));
+      setPickYear(getYear(d));
     }
   }, [value]);
 
-  const days = useMemo(() => {
-    return eachDayOfInterval({
-      start: startOfMonth(viewMonth),
-      end:   endOfMonth(viewMonth),
-    });
-  }, [viewMonth]);
+  // Reset to calendar mode when picker opens
+  useEffect(() => {
+    if (isOpen) setMode('calendar');
+  }, [isOpen]);
 
-  const leadingBlanks = useMemo(() => {
-    return days.length > 0 ? mondayBased(days[0]!) : 0;
-  }, [days]);
+  // ── Calendar helpers ──────────────────────────────────────────────────────
+  const days = useMemo(() => eachDayOfInterval({
+    start: startOfMonth(viewMonth),
+    end:   endOfMonth(viewMonth),
+  }), [viewMonth]);
 
-  const isDisabled = useCallback((d: Date) => {
-    if (!minDateObj) return false;
-    return isBefore(d, minDateObj) && !isSameDay(d, minDateObj);
-  }, [minDateObj]);
+  const leadingBlanks = useMemo(
+    () => (days.length > 0 ? mondayBased(days[0]!) : 0),
+    [days],
+  );
 
+  const isDayDisabled = useCallback((d: Date) => {
+    if (minDateObj && isBefore(d, minDateObj) && !isSameDay(d, minDateObj)) return true;
+    if (maxDateObj && isBefore(maxDateObj, d) && !isSameDay(d, maxDateObj)) return true;
+    return false;
+  }, [minDateObj, maxDateObj]);
+
+  // ── Month/year picker helpers ─────────────────────────────────────────────
+  const isMonthDisabled = useCallback((year: number, monthIdx: number): boolean => {
+    // All days in that month would be disabled
+    const firstOfMonth = new Date(year, monthIdx, 1);
+    const lastOfMonth  = endOfMonth(firstOfMonth);
+    if (minDateObj && isBefore(lastOfMonth, minDateObj)) return true;
+    if (maxDateObj && isBefore(maxDateObj, firstOfMonth)) return true;
+    return false;
+  }, [minDateObj, maxDateObj]);
+
+  const isYearDisabled = useCallback((year: number): boolean => {
+    const jan1 = new Date(year, 0, 1);
+    const dec31 = new Date(year, 11, 31);
+    if (minDateObj && isBefore(dec31, minDateObj)) return true;
+    if (maxDateObj && isBefore(maxDateObj, jan1)) return true;
+    return false;
+  }, [minDateObj, maxDateObj]);
+
+  // ── Handlers ─────────────────────────────────────────────────────────────
   const handleDayPress = useCallback((d: Date) => {
-    if (isDisabled(d)) return;
+    if (isDayDisabled(d)) return;
     Haptics.selectionAsync();
     setSelected(d);
-  }, [isDisabled]);
+  }, [isDayDisabled]);
 
   const handleConfirm = useCallback(() => {
     if (!selected) return;
@@ -134,6 +189,35 @@ export function AkuDatePicker({
     setViewMonth(m => addMonths(m, 1));
   }, []);
 
+  const openMonthYearPicker = useCallback(() => {
+    Haptics.selectionAsync();
+    setPickYear(getYear(viewMonth));
+    setMode('monthYear');
+  }, [viewMonth]);
+
+  const selectMonth = useCallback((monthIdx: number) => {
+    if (isMonthDisabled(pickYear, monthIdx)) return;
+    Haptics.selectionAsync();
+    const newMonth = startOfMonth(setMonth(setYear(today, pickYear), monthIdx));
+    setViewMonth(newMonth);
+    setMode('calendar');
+  }, [pickYear, today, isMonthDisabled]);
+
+  const prevPickYear = useCallback(() => {
+    Haptics.selectionAsync();
+    setPickYear(y => y - 1);
+  }, []);
+
+  const nextPickYear = useCallback(() => {
+    Haptics.selectionAsync();
+    setPickYear(y => y + 1);
+  }, []);
+
+  // ── Colours ───────────────────────────────────────────────────────────────
+  const viewMonthIdx = getMonth(viewMonth);
+  const viewMonthYear = getYear(viewMonth);
+
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <Modal
       visible={isOpen}
@@ -142,126 +226,165 @@ export function AkuDatePicker({
       statusBarTranslucent
       onRequestClose={onClose}
     >
-      {/* Backdrop — tap to dismiss */}
       <Pressable style={styles.overlay} onPress={onClose}>
-        {/* Sheet — stop propagation so tapping inside doesn't close */}
-        <Pressable
-          style={[styles.sheet, { backgroundColor: colors.card }]}
-          onPress={() => {/* absorb */}}
-        >
-          {/* Handle bar */}
+        <Pressable style={[styles.sheet, { backgroundColor: colors.card }]} onPress={() => {}}>
+          {/* Handle */}
           <View style={[styles.handle, { backgroundColor: colors.border }]} />
 
           {/* Title */}
-          <Text
-            style={[
-              styles.title,
-              { fontFamily: font.displayLight, fontSize: fontSize.xl, color: colors.text },
-            ]}
-          >
+          <Text style={[styles.title, { fontFamily: font.displayLight, fontSize: fontSize.xl, color: colors.text }]}>
             {title}
           </Text>
 
-          {/* Month navigation */}
-          <View style={styles.monthRow}>
-            <Pressable onPress={prevMonth} style={styles.navBtn} hitSlop={12}>
-              <ChevronLeft size={22} color={colors.text} strokeWidth={1.8} />
-            </Pressable>
+          {/* ── Month navigation (calendar mode) ── */}
+          {mode === 'calendar' && (
+            <>
+              <View style={styles.monthRow}>
+                <Pressable onPress={prevMonth} style={styles.navBtn} hitSlop={12}>
+                  <ChevronLeft size={22} color={colors.text} strokeWidth={1.8} />
+                </Pressable>
 
-            <Text style={[styles.monthLabel, { fontFamily: font.sansSemiBold, fontSize: fontSize.base, color: colors.text }]}>
-              {format(viewMonth, 'MMMM yyyy')}
-            </Text>
+                {/* Tapping the month/year label jumps to month-year picker */}
+                <Pressable onPress={openMonthYearPicker} style={styles.monthLabelBtn} hitSlop={8}>
+                  <Text style={[styles.monthLabel, { fontFamily: font.sansSemiBold, fontSize: fontSize.base, color: colors.text }]}>
+                    {format(viewMonth, 'MMMM yyyy')}
+                  </Text>
+                  <ChevronDown size={14} color={colors.textTertiary} strokeWidth={2} />
+                </Pressable>
 
-            <Pressable onPress={nextMonth} style={styles.navBtn} hitSlop={12}>
-              <ChevronRight size={22} color={colors.text} strokeWidth={1.8} />
-            </Pressable>
-          </View>
+                <Pressable onPress={nextMonth} style={styles.navBtn} hitSlop={12}>
+                  <ChevronRight size={22} color={colors.text} strokeWidth={1.8} />
+                </Pressable>
+              </View>
 
-          {/* Day-of-week header */}
-          <View style={styles.weekRow}>
-            {DAY_LABELS.map((h) => (
-              <Text
-                key={h}
-                style={[styles.weekLabel, { fontFamily: font.sansMedium, fontSize: fontSize.xs, color: colors.textTertiary }]}
+              {/* Day-of-week header */}
+              <View style={styles.weekRow}>
+                {DAY_LABELS.map((h) => (
+                  <Text key={h} style={[styles.weekLabel, { fontFamily: font.sansMedium, fontSize: fontSize.xs, color: colors.textTertiary }]}>
+                    {h}
+                  </Text>
+                ))}
+              </View>
+
+              {/* Day grid */}
+              <View style={styles.grid}>
+                {Array.from({ length: leadingBlanks }).map((_, i) => (
+                  <View key={`b${i}`} style={styles.cell} />
+                ))}
+                {days.map((d) => {
+                  const isToday  = isSameDay(d, today);
+                  const isSel    = selected !== null && isSameDay(d, selected);
+                  const disabled = isDayDisabled(d);
+                  return (
+                    <Pressable
+                      key={d.toISOString()}
+                      onPress={() => handleDayPress(d)}
+                      disabled={disabled}
+                      style={styles.cell}
+                    >
+                      <View style={[styles.cellInner, isSel && { backgroundColor: Palette.forest }]}>
+                        <Text
+                          style={[
+                            styles.cellText,
+                            {
+                              fontFamily: font.sansRegular,
+                              fontSize:   fontSize.sm,
+                              color:      disabled ? colors.textTertiary : isSel ? Palette.linen : colors.text,
+                              opacity:    disabled ? 0.35 : 1,
+                            },
+                          ]}
+                        >
+                          {format(d, 'd')}
+                        </Text>
+                        {isToday && !isSel && (
+                          <View style={styles.todayDot} />
+                        )}
+                      </View>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              {/* Confirm */}
+              <Pressable
+                onPress={handleConfirm}
+                disabled={selected === null}
+                style={[styles.confirmBtn, { backgroundColor: selected ? Palette.forest : colors.backgroundSecondary, borderRadius: radius.full }]}
               >
-                {h}
-              </Text>
-            ))}
-          </View>
+                <Text style={[styles.confirmLabel, { fontFamily: font.sansSemiBold, fontSize: fontSize.base, color: selected ? Palette.linen : colors.textTertiary }]}>
+                  {selected ? `Confirm — ${format(selected, 'd MMM yyyy')}` : 'Confirm date'}
+                </Text>
+              </Pressable>
+            </>
+          )}
 
-          {/* Day grid */}
-          <View style={styles.grid}>
-            {/* Monday-aligned leading blanks */}
-            {Array.from({ length: leadingBlanks }).map((_, i) => (
-              <View key={`b${i}`} style={styles.cell} />
-            ))}
-
-            {days.map((d) => {
-              const isToday    = isSameDay(d, today);
-              const isSel      = selected !== null && isSameDay(d, selected);
-              const disabled   = isDisabled(d);
-
-              return (
+          {/* ── Year / Month picker mode ── */}
+          {mode === 'monthYear' && (
+            <View style={styles.monthYearPicker}>
+              {/* Year row */}
+              <View style={styles.yearRow}>
                 <Pressable
-                  key={d.toISOString()}
-                  onPress={() => handleDayPress(d)}
-                  disabled={disabled}
-                  style={styles.cell}
+                  onPress={prevPickYear}
+                  disabled={isYearDisabled(pickYear - 1)}
+                  style={[styles.navBtn, { opacity: isYearDisabled(pickYear - 1) ? 0.3 : 1 }]}
+                  hitSlop={12}
                 >
-                  <View style={[styles.cellInner, isSel && styles.cellSelected]}>
-                    <Text
+                  <ChevronLeft size={22} color={colors.text} strokeWidth={1.8} />
+                </Pressable>
+
+                <Text style={[{ fontFamily: font.sansSemiBold, fontSize: fontSize.lg, color: colors.text }]}>
+                  {pickYear}
+                </Text>
+
+                <Pressable
+                  onPress={nextPickYear}
+                  disabled={isYearDisabled(pickYear + 1)}
+                  style={[styles.navBtn, { opacity: isYearDisabled(pickYear + 1) ? 0.3 : 1 }]}
+                  hitSlop={12}
+                >
+                  <ChevronRight size={22} color={colors.text} strokeWidth={1.8} />
+                </Pressable>
+              </View>
+
+              {/* Month grid — 3 × 4 */}
+              <View style={styles.monthGrid}>
+                {MONTH_LABELS.map((label, idx) => {
+                  const disabled  = isMonthDisabled(pickYear, idx);
+                  const isCurrent = pickYear === viewMonthYear && idx === viewMonthIdx;
+                  return (
+                    <Pressable
+                      key={label}
+                      onPress={() => selectMonth(idx)}
+                      disabled={disabled}
                       style={[
-                        styles.cellText,
+                        styles.monthCell,
                         {
-                          fontFamily: font.sansRegular,
-                          fontSize:   fontSize.sm,
-                          color:      disabled
-                            ? colors.textTertiary
-                            : isSel
-                            ? Palette.linen
-                            : colors.text,
-                          opacity: disabled ? 0.35 : 1,
+                          backgroundColor: isCurrent ? Palette.forest : colors.backgroundSecondary,
+                          borderRadius:    radius.md,
+                          opacity:         disabled ? 0.3 : 1,
                         },
                       ]}
                     >
-                      {format(d, 'd')}
-                    </Text>
+                      <Text
+                        style={[
+                          { fontFamily: font.sansMedium, fontSize: fontSize.sm, color: isCurrent ? Palette.linen : colors.text },
+                        ]}
+                      >
+                        {label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
 
-                    {/* Today indicator dot */}
-                    {isToday && !isSel && (
-                      <View style={styles.todayDot} />
-                    )}
-                  </View>
-                </Pressable>
-              );
-            })}
-          </View>
-
-          {/* Confirm */}
-          <Pressable
-            onPress={handleConfirm}
-            disabled={selected === null}
-            style={[
-              styles.confirmBtn,
-              {
-                backgroundColor: selected ? Palette.forest : colors.backgroundSecondary,
-                borderRadius: radius.full,
-              },
-            ]}
-          >
-            <Text
-              style={[
-                styles.confirmLabel,
-                {
-                  fontFamily: font.sansSemiBold,
-                  fontSize:   fontSize.base,
-                  color: selected ? Palette.linen : colors.textTertiary,
-                },
-              ]}
-            >
-              Confirm date
-            </Text>
-          </Pressable>
+              {/* Back to calendar hint */}
+              <Pressable onPress={() => setMode('calendar')} style={styles.backToCalBtn}>
+                <Text style={[{ fontFamily: font.sansMedium, fontSize: fontSize.sm, color: colors.textSecondary }]}>
+                  ← Back to calendar
+                </Text>
+              </Pressable>
+            </View>
+          )}
         </Pressable>
       </Pressable>
     </Modal>
@@ -295,6 +418,8 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     letterSpacing: -0.3,
   },
+
+  // ── Calendar mode ──
   monthRow: {
     flexDirection:   'row',
     alignItems:      'center',
@@ -306,6 +431,13 @@ const styles = StyleSheet.create({
     height:         40,
     alignItems:     'center',
     justifyContent: 'center',
+  },
+  monthLabelBtn: {
+    flexDirection: 'row',
+    alignItems:    'center',
+    gap:           5,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
   },
   monthLabel: {
     letterSpacing: 0,
@@ -336,9 +468,6 @@ const styles = StyleSheet.create({
     alignItems:     'center',
     justifyContent: 'center',
   },
-  cellSelected: {
-    backgroundColor: Palette.forest,
-  },
   cellText: {
     textAlign: 'center',
   },
@@ -358,5 +487,34 @@ const styles = StyleSheet.create({
   },
   confirmLabel: {
     letterSpacing: 0.1,
+  },
+
+  // ── Month/Year picker mode ──
+  monthYearPicker: {
+    gap: 16,
+  },
+  yearRow: {
+    flexDirection:  'row',
+    alignItems:     'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 4,
+  },
+  monthGrid: {
+    flexDirection:  'row',
+    flexWrap:       'wrap',
+    gap:            10,
+    paddingHorizontal: 4,
+  },
+  monthCell: {
+    width:          '30%',
+    flexGrow:       1,
+    height:         44,
+    alignItems:     'center',
+    justifyContent: 'center',
+  },
+  backToCalBtn: {
+    alignSelf:  'center',
+    paddingVertical: 10,
+    marginBottom: Platform.OS === 'ios' ? 0 : 4,
   },
 });

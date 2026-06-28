@@ -11,7 +11,7 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Button, Input, KeyboardWrapper, OnboardingHeader } from '../../components/ui';
-import { useAuthStore, useHouseholdStore } from '../../store';
+import { useAuthStore, useCirclesStore } from '../../store';
 import { useTheme } from '../../theme';
 
 // ─── Screen ────────────────────────────────────────────────────────────────
@@ -22,7 +22,7 @@ export default function HouseholdScreen() {
   const router = useRouter();
 
   const { user }   = useAuthStore();
-  const { create } = useHouseholdStore();
+  const { create } = useCirclesStore();
 
   const [householdName, setHouseholdName] = useState('');
   const [isLoading, setIsLoading]         = useState(false);
@@ -77,13 +77,13 @@ export default function HouseholdScreen() {
         <View style={styles.content}>
           <Animated.View entering={FadeInDown.delay(60).duration(500)}>
             <Text style={[text.onboardingTitle, { color: colors.text }]}>
-              Name your{'\n'}household
+              Name your{'\n'}Circle
             </Text>
           </Animated.View>
 
           <Animated.View entering={FadeInDown.delay(140).duration(500)}>
             <Text style={[text.body, { color: colors.textSecondary, marginTop: spacing[3] }]}>
-              Give your home a name so family members can join. You can skip this and set it up later.
+              Give your Circle a name so members can find and join it. You can skip this and set it up later.
             </Text>
           </Animated.View>
 
@@ -92,8 +92,8 @@ export default function HouseholdScreen() {
             style={{ marginTop: spacing[8] }}
           >
             <Input
-              label="Household name"
-              placeholder="Your household name"
+              label="Circle name"
+              placeholder="Your Circle name"
               value={householdName}
               onChangeText={(v) => {
                 setHouseholdName(v);

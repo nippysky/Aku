@@ -50,6 +50,7 @@ const CREATE_TABLES_SQL = `
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     owner_id TEXT NOT NULL,
+    invite_code TEXT,
     created_at TEXT NOT NULL
   );
 
@@ -149,10 +150,42 @@ const CREATE_TABLES_SQL = `
     created_at TEXT NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS circle_settings (
+    id TEXT PRIMARY KEY,
+    emoji TEXT,
+    target_amount INTEGER,
+    description TEXT,
+    frequency TEXT,
+    per_member_amount INTEGER,
+    contribution_type TEXT DEFAULT 'equal',
+    deadline TEXT,
+    account_name TEXT,
+    account_number TEXT,
+    bank_name TEXT,
+    notes TEXT,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS circle_contributions (
+    id TEXT PRIMARY KEY,
+    circle_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    amount INTEGER NOT NULL,
+    note TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT NOT NULL,
+    verified_at TEXT,
+    verified_by TEXT
+  );
+
   CREATE TABLE IF NOT EXISTS app_state (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
   );
+
+  CREATE INDEX IF NOT EXISTS idx_circle_contributions_circle ON circle_contributions(circle_id);
+  CREATE INDEX IF NOT EXISTS idx_circle_contributions_user ON circle_contributions(user_id);
+  CREATE INDEX IF NOT EXISTS idx_circle_contributions_status ON circle_contributions(status);
 
   CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
   CREATE INDEX IF NOT EXISTS idx_users_household ON users(household_id);
@@ -166,10 +199,27 @@ const CREATE_TABLES_SQL = `
   CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);
 `;
 
+// ─── Column migrations (safe to run on every boot) ────────────────────────
+// ALTER TABLE IF NOT EXISTS COLUMN ... is not supported in older SQLite.
+// We catch "duplicate column name" errors and continue.
+
+const MIGRATIONS_SQL = [
+  "ALTER TABLE circle_settings ADD COLUMN emoji TEXT",
+  "ALTER TABLE circle_settings ADD COLUMN frequency TEXT",
+  "ALTER TABLE circle_settings ADD COLUMN per_member_amount INTEGER",
+  "ALTER TABLE circle_settings ADD COLUMN contribution_type TEXT DEFAULT 'equal'",
+  "ALTER TABLE circle_settings ADD COLUMN deadline TEXT",
+  "ALTER TABLE households ADD COLUMN invite_code TEXT",
+];
+
 export async function initializeDatabase(): Promise<void> {
   const sqlite = getSQLiteDatabase();
   // execSync runs multiple statements separated by semicolons
   sqlite.execSync(CREATE_TABLES_SQL);
+  // Run column migrations; ignore "duplicate column" errors on fresh installs
+  for (const sql of MIGRATIONS_SQL) {
+    try { sqlite.execSync(sql); } catch { /* column already exists */ }
+  }
 }
 
 export { schema };
