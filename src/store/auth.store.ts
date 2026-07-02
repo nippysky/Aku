@@ -2,6 +2,12 @@ import { create } from 'zustand';
 import * as SecureStore from 'expo-secure-store';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { generateUUID } from '../lib/uuid';
+import {
+  requestMagicLink,
+  validateSession,
+  revokeSession,
+  type UserProfile,
+} from '../lib/api-client';
 import type { User, AuthSession, BiometricConfig } from '../types';
 
 // ─── Cross-store reset helper ─────────────────────────────────────────────────
@@ -51,7 +57,8 @@ interface AuthState {
   // Actions — Auth
   initialize:              () => Promise<void>;
   createLocalUser:         (name: string, email: string) => Promise<void>;
-  signIn:                  (email: string) => Promise<void>;
+  signIn:                  (email: string, name?: string) => Promise<void>;
+  handleAuthCallback:      (jwt: string, user: UserProfile) => Promise<void>;
   signOut:                 () => Promise<void>;
   updateUser:              (patch: Partial<User>) => void;
   markOnboardingComplete:  () => Promise<void>;
@@ -105,18 +112,53 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
         : { enabled: false, type: 'none' };
       const hasOnboarded = onboardedStr === 'true';
 
-      // Check if session is still valid
-      const isSessionValid = session
-        ? new Date(session.expiresAt) > new Date()
-        : false;
+      // Local expiry check first (avoids a network round-trip on every cold start)
+      const locallyValid = session ? new Date(session.expiresAt) > new Date() : false;
+
+      if (!locallyValid) {
+        set({ user: null, session: null, biometric, hasOnboarded, isLocked: false, isInitialized: true });
+        return;
+      }
+
+      // For non-local sessions (real JWT from server) validate against the API
+      // to catch server-side revocations. Local dev sessions skip this.
+      const isLocalSession = session?.accessToken?.startsWith('local_') ?? false;
+      let validatedUser = user;
+
+      if (!isLocalSession) {
+        try {
+          const profile = await validateSession();
+          if (!profile) {
+            // Server says session is invalid — clear it
+            await Promise.all([
+              SecureStore.deleteItemAsync(KEYS.SESSION),
+              SecureStore.deleteItemAsync(KEYS.USER),
+            ]);
+            set({ user: null, session: null, biometric, hasOnboarded, isLocked: false, isInitialized: true });
+            return;
+          }
+          // Sync latest profile from server
+          validatedUser = {
+            id:          profile.id,
+            name:        profile.name,
+            email:       profile.email,
+            avatarUrl:   profile.avatarUrl,
+            householdId: user?.householdId ?? null,
+            createdAt:   user?.createdAt ?? new Date().toISOString(),
+            updatedAt:   new Date().toISOString(),
+          };
+          await SecureStore.setItemAsync(KEYS.USER, JSON.stringify(validatedUser));
+        } catch {
+          // Network unavailable — trust the local cache
+        }
+      }
 
       set({
-        user:          isSessionValid ? user : null,
-        session:       isSessionValid ? session : null,
+        user:          validatedUser,
+        session,
         biometric,
         hasOnboarded,
-        // Locked only if onboarding is done and there's a valid session to protect
-        isLocked:      hasOnboarded && isSessionValid,
+        isLocked:      hasOnboarded && locallyValid,
         isInitialized: true,
       });
     } catch {
@@ -157,25 +199,65 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     set({ user, session, isLocked: true });
   },
 
-  // ── Sign In: store session + user ──────────────────────────────────────
-  signIn: async (email: string) => {
-    // In MVP: create a local session (no server round-trip)
-    // Full integration: call Better Auth API here
-    const now = new Date();
-    const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000); // 30 days
+  // ── Sign In: request a magic link email via the server ────────────────
+  signIn: async (email: string, name?: string) => {
+    set({ isLoading: true, error: null });
+    try {
+      await requestMagicLink(email, name);
+      // After this, the user checks their email and taps the magic link.
+      // The deep link opens the app and calls handleAuthCallback().
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to send magic link';
+      set({ error: msg });
+      throw err;
+    } finally {
+      set({ isLoading: false });
+    }
+  },
 
-    const session: AuthSession = {
-      userId:      get().user?.id ?? '',
-      accessToken: `local_${Date.now()}`,
-      expiresAt:   expiresAt.toISOString(),
+  // ── Handle Auth Callback: called when the magic link deep link arrives ─
+  // jwt      — the signed JWT from the server
+  // profile  — user data decoded from the deep link
+  handleAuthCallback: async (jwt: string, profile: UserProfile) => {
+    const now       = new Date();
+    // Parse expiry from JWT header (or default to 30 days)
+    let expiresAt   = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    try {
+      const parts  = jwt.split('.');
+      const claims = JSON.parse(atob(parts[1])) as { exp?: number };
+      if (claims.exp) expiresAt = new Date(claims.exp * 1000).toISOString();
+    } catch { /* use default */ }
+
+    const user: User = {
+      id:          profile.id,
+      name:        profile.name,
+      email:       profile.email,
+      avatarUrl:   profile.avatarUrl,
+      householdId: null,
+      createdAt:   now.toISOString(),
+      updatedAt:   now.toISOString(),
     };
 
-    await SecureStore.setItemAsync(KEYS.SESSION, JSON.stringify(session));
-    set({ session, isLocked: false });
+    const session: AuthSession = {
+      userId:      profile.id,
+      accessToken: jwt,
+      expiresAt,
+    };
+
+    await Promise.all([
+      SecureStore.setItemAsync(KEYS.USER,    JSON.stringify(user)),
+      SecureStore.setItemAsync(KEYS.SESSION, JSON.stringify(session)),
+    ]);
+
+    // Locked = true so PIN screen shows before entering the app
+    set({ user, session, isLocked: true });
   },
 
   // ── Sign Out — full wipe so nav guard lands on onboarding, not PIN loop ──
   signOut: async () => {
+    // Tell the server to revoke the session (best-effort — don't block sign-out)
+    void revokeSession();
+
     // Delete every persisted key so the app starts completely fresh
     await Promise.all([
       SecureStore.deleteItemAsync(KEYS.SESSION),

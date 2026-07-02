@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   StyleSheet,
   Text,
@@ -17,6 +17,7 @@ import { z } from 'zod';
 import { Button, Input, KeyboardWrapper, OnboardingHeader } from '../../components/ui';
 import { useTheme } from '../../theme';
 import { OnboardingStorage } from '../../lib/onboarding-storage';
+import { useAuthStore } from '../../store/auth.store';
 
 // ─── Schema ────────────────────────────────────────────────────────────────
 
@@ -33,8 +34,11 @@ type FormValues = z.infer<typeof schema>;
 
 export default function EmailScreen() {
   const { colors, spacing, text, layout } = useTheme();
-  const insets = useSafeAreaInsets();
-  const router = useRouter();
+  const insets   = useSafeAreaInsets();
+  const router   = useRouter();
+  const { signIn, isLoading, error } = useAuthStore();
+
+  const [sendError, setSendError] = useState<string | null>(null);
 
   const {
     control,
@@ -46,9 +50,27 @@ export default function EmailScreen() {
     mode:          'onChange',
   });
 
-  function onSubmit({ email }: FormValues) {
+  async function onSubmit({ email }: FormValues) {
     const normalised = email.trim().toLowerCase();
+    const name       = OnboardingStorage.getName() ?? undefined;
     OnboardingStorage.setEmail(normalised);
+    setSendError(null);
+
+    try {
+      // In production: sends a real magic link email via the server
+      // In __DEV__: the server call still fires but the dev-skip button in
+      // verify.tsx lets you bypass it without opening the email.
+      await signIn(normalised, name);
+    } catch (err) {
+      // Non-fatal if the server is unreachable during local dev
+      if (__DEV__) {
+        console.warn('[email] signIn failed (dev mode — use skip button):', err);
+      } else {
+        setSendError(err instanceof Error ? err.message : 'Could not send email. Please try again.');
+        return;
+      }
+    }
+
     router.push({ pathname: '/(onboarding)/verify', params: { email: normalised } });
   }
 
@@ -122,12 +144,18 @@ export default function EmailScreen() {
 
         {/* Continue */}
         <Animated.View entering={FadeInUp.delay(350).duration(500)}>
+          {sendError ? (
+            <Text style={[text.bodySm, { color: colors.danger, textAlign: 'center', marginBottom: 12 }]}>
+              {sendError}
+            </Text>
+          ) : null}
           <Button
             label="Continue"
             variant="primary"
             size="lg"
             fullWidth
-            disabled={!isValid}
+            disabled={!isValid || isLoading}
+            loading={isLoading}
             onPress={handleSubmit(onSubmit)}
           />
         </Animated.View>

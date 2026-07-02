@@ -18,6 +18,7 @@ import * as Haptics from 'expo-haptics';
 import * as WebBrowser from 'expo-web-browser';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
+import { uploadAvatarFile } from '../../lib/api-client';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system';
@@ -426,15 +427,26 @@ export default function ProfileScreen() {
 
       if (result.canceled || !result.assets[0]) return;
 
-      // Crop to square 400×400, compress
+      // Crop to square 400×400, compress locally first
       const manipulated = await ImageManipulator.manipulateAsync(
         result.assets[0].uri,
         [{ resize: { width: 400, height: 400 } }],
         { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG },
       );
 
-      await updateUser({ avatarUrl: manipulated.uri });
-      showToast('success', 'Profile photo updated');
+      // Show optimistic local preview immediately
+      updateUser({ avatarUrl: manipulated.uri });
+
+      try {
+        // Upload to Cloudinary via the API and get the permanent CDN URL
+        const cloudUrl = await uploadAvatarFile(manipulated.uri);
+        // Replace the local URI with the permanent Cloudinary URL
+        updateUser({ avatarUrl: cloudUrl });
+        showToast('success', 'Profile photo updated');
+      } catch {
+        // Upload failed — keep the local preview but warn the user
+        showToast('error', 'Photo saved locally but upload failed. It will sync next time.');
+      }
     } catch {
       showToast('error', 'Failed to update photo');
     }
