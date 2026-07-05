@@ -13,7 +13,9 @@
 import { create } from 'zustand';
 import { eq } from 'drizzle-orm';
 import { getDatabase, schema } from '../lib/database/client';
+import { sendCircleNotification } from '../lib/api-client';
 import { generateUUID } from '../lib/uuid';
+import { trackReviewEvent } from '../lib/review';
 
 // ─── Ensure user exists in SQLite ────────────────────────────────────────────
 // auth.store persists users in SecureStore only; circle queries LEFT JOIN users,
@@ -211,11 +213,12 @@ interface CircleState {
   isSaving:       boolean;
   error:          string | null;
 
-  loadCircle:         (circleId: string, currentUser?: { id: string; name: string; email: string; avatarUrl?: string | null }) => Promise<void>;
+  loadCircle:         (circleId: string) => Promise<void>;
   saveSettings:       (circleId: string, data: Partial<Omit<CircleSettings, 'id' | 'updatedAt'>>) => Promise<void>;
   logContribution:    (circleId: string, userId: string, amount: number, note?: string, userInfo?: { name: string; email: string; avatarUrl?: string | null }) => Promise<void>;
   verifyContribution: (id: string, verifiedBy: string) => Promise<void>;
   deleteContribution: (id: string) => Promise<void>;
+  removeMember:       (memberId: string) => Promise<void>;
   clearError:         () => void;
 }
 
@@ -233,12 +236,8 @@ export const useCircleStore = create<CircleState>()((set, get) => ({
   error:          null,
 
   // ── Load ──────────────────────────────────────────────────────────────────
-  loadCircle: async (circleId, currentUser?) => {
+  loadCircle: async (circleId) => {
     set({ isLoading: true, error: null, activeCircleId: circleId });
-    // Ensure the current user is in SQLite so their name resolves in joins
-    if (currentUser) {
-      await ensureUserInSQLite(currentUser).catch(() => {});
-    }
     try {
       const db = getDatabase();
 
@@ -412,6 +411,26 @@ export const useCircleStore = create<CircleState>()((set, get) => ({
         verifiedBy: null,
       });
       await get().loadCircle(circleId);
+
+      // Notify: tell all OTHER members someone logged a contribution.
+      // We look up circle owner from the households table and notify them to verify.
+      try {
+        const { members } = get();
+        const contributorName = userInfo?.name ?? 'A member';
+        // Notify all members except the contributor themselves
+        const recipientIds = members
+          .filter((m) => m.userId !== userId)
+          .map((m) => m.userId);
+        const fmt = (n: number) => `${Math.round(n / 100).toLocaleString()}`;
+        if (recipientIds.length > 0) {
+          sendCircleNotification(
+            recipientIds,
+            'New contribution 💰',
+            `${contributorName} logged ${fmt(amount)} — awaiting verification.`,
+            { screen: 'circle', circleId },
+          ).catch(() => {});
+        }
+      } catch { /* non-critical */ }
     } catch (e: any) {
       set({ error: e?.message ?? 'Failed to log contribution' });
     } finally {
@@ -440,6 +459,29 @@ export const useCircleStore = create<CircleState>()((set, get) => ({
         leaderboard:    buildLeaderboard(contributions),
         memberStatuses: buildMemberStatuses(members, contributions, settings, members.length),
       });
+
+      // Notify: tell the contributor their contribution was verified.
+      // Also notify all other members so everyone sees the progress.
+      try {
+        const verified = get().contributions.find((c) => c.id === id);
+        if (verified) {
+          const fmt = (n: number) => `${Math.round(n / 100).toLocaleString()}`;
+          const recipientIds = members
+            .filter((m) => m.userId !== verifiedBy)
+            .map((m) => m.userId);
+          if (recipientIds.length > 0) {
+            sendCircleNotification(
+              recipientIds,
+              'Contribution verified ✅',
+              `${fmt(verified.amount)} from ${verified.userName} has been verified!`,
+              { screen: 'circle', circleId: verified.circleId },
+            ).catch(() => {});
+          }
+        }
+      } catch { /* non-critical */ }
+
+      // Track for app review prompt (fire-and-forget)
+      trackReviewEvent().catch(() => {});
     } catch (e: any) {
       set({ error: e?.message ?? 'Failed to verify' });
     } finally {
@@ -463,6 +505,29 @@ export const useCircleStore = create<CircleState>()((set, get) => ({
       });
     } catch (e: any) {
       set({ error: e?.message ?? 'Failed to delete' });
+    } finally {
+      set({ isSaving: false });
+    }
+  },
+
+  // ── Remove member (admin only) ──────────────────────────────────────────────
+  removeMember: async (memberId) => {
+    set({ isSaving: true, error: null });
+    try {
+      const db = getDatabase();
+      await db
+        .delete(schema.householdMembers)
+        .where(eq(schema.householdMembers.id, memberId));
+
+      const members = get().members.filter((m) => m.id !== memberId);
+      const { contributions, settings } = get();
+      set({
+        members,
+        memberStatuses: buildMemberStatuses(members, contributions, settings, members.length),
+        leaderboard:    buildLeaderboard(contributions),
+      });
+    } catch (e: any) {
+      set({ error: e?.message ?? 'Failed to remove member' });
     } finally {
       set({ isSaving: false });
     }

@@ -12,14 +12,13 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import Animated, { FadeInDown } from 'react-native-reanimated';
@@ -271,10 +270,7 @@ export default function JoinCircleScreen() {
 
   // ── Code input mode ───────────────────────────────────────────────────────
   return (
-    <KeyboardAvoidingView
-      style={[styles.screen, { backgroundColor: colors.background }]}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
+    <View style={[styles.screen, { backgroundColor: colors.background }]}>
       <View style={[styles.header, { paddingTop: insets.top + 12, borderBottomColor: colors.borderLight }]}>
         <Pressable onPress={() => router.back()} hitSlop={8} style={styles.headerBack}>
           <ArrowLeft size={22} color={colors.text} strokeWidth={1.8} />
@@ -285,7 +281,12 @@ export default function JoinCircleScreen() {
         <View style={styles.headerBack} />
       </View>
 
-      <View style={[styles.body, { paddingHorizontal: layout.screenPadding, paddingBottom: insets.bottom + 32 }]}>
+      <KeyboardAwareScrollView
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={[styles.body, { paddingHorizontal: layout.screenPadding, paddingBottom: insets.bottom + 48 }]}
+        bottomOffset={24}
+      >
         <Animated.View entering={FadeInDown.duration(280)} style={styles.iconWrap}>
           <View style={[styles.iconCircle, { backgroundColor: colors.primary + '14', borderRadius: radius.full }]}>
             <Users size={36} color={colors.primary} strokeWidth={1.4} />
@@ -328,8 +329,8 @@ export default function JoinCircleScreen() {
           Codes are case-insensitive and contain letters and numbers only.{'\n'}
           Don't have a code? Ask the Circle owner to share one.
         </Animated.Text>
-      </View>
-    </KeyboardAvoidingView>
+      </KeyboardAwareScrollView>
+    </View>
   );
 }
 

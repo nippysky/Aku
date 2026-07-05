@@ -1,8 +1,11 @@
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
+import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import { parseISO, addDays, startOfDay, setHours, setMinutes, setSeconds } from 'date-fns';
 import type { Bill, Goal } from '../../types';
+import { getNotifPrefs } from '../../store/notif-prefs.store';
+import { formatAmount } from '../format';
 
 // ─── Notification Handler ─────────────────────────────────────────────────────
 // Controls how notifications appear when the app is foregrounded.
@@ -91,11 +94,14 @@ class NotificationService {
 
   // ── Bill Reminders ───────────────────────────────────────────────────────
 
-  async scheduleBillReminders(bill: Bill): Promise<void> {
+  async scheduleBillReminders(bill: Bill, currencySymbol = '₦'): Promise<void> {
     // Cancel any existing reminders for this bill first
     await this.cancelBillReminders(bill.id);
 
     if (bill.isPaid) return;
+
+    // Respect user notification preferences
+    if (!getNotifPrefs().billReminders) return;
 
     const dueDate = parseISO(bill.dueDate);
     const today   = startOfDay(new Date());
@@ -108,10 +114,7 @@ class NotificationService {
       { days: 0,  enabled: bill.notifyDay },
     ];
 
-    const amountNaira = (bill.amount / 100).toLocaleString('en-NG', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
+    const amountFormatted = formatAmount(bill.amount, currencySymbol);
 
     for (const config of reminderConfigs) {
       if (!config.enabled) continue;
@@ -135,7 +138,7 @@ class NotificationService {
         ? 'Bill due today!'
         : `Bill due in ${config.days} day${config.days === 1 ? '' : 's'}`;
 
-      const body = `${bill.name} — ₦${amountNaira}`;
+      const body = `${bill.name} — ${amountFormatted}`;
 
       const identifier = `bill_${bill.id}_${config.days}d`;
 
@@ -180,6 +183,7 @@ class NotificationService {
     percent: number,
     budgetId: string,
   ): Promise<void> {
+    if (!getNotifPrefs().budgetAlerts) return;
     await Notifications.scheduleNotificationAsync({
       identifier: `budget_alert_${budgetId}_${percent}`,
       content: {
@@ -200,6 +204,7 @@ class NotificationService {
   // ── Goal Milestones ──────────────────────────────────────────────────────
 
   async scheduleGoalMilestone(goal: Goal, percent: number): Promise<void> {
+    if (!getNotifPrefs().goalMilestones) return;
     const milestones = [25, 50, 75, 100] as const;
     if (!(milestones as readonly number[]).includes(percent)) return;
 
@@ -257,6 +262,44 @@ class NotificationService {
       await Notifications.cancelScheduledNotificationAsync('aku_daily_digest');
     } catch {
       // Notification may not exist yet — safe to ignore
+    }
+  }
+
+  // ── Expo Push Token ──────────────────────────────────────────────────────
+
+  /**
+   * Obtains the Expo push token for this device.
+   * Returns null if:
+   *  - Running on a simulator / web (push not supported)
+   *  - Permissions denied
+   *  - projectId is missing from app config
+   */
+  async getExpoPushToken(): Promise<string | null> {
+    if (!Device.isDevice) {
+      // Physical device required for real push tokens.
+      // In dev you can still test local notifications.
+      console.warn('[NotificationService] Push tokens require a physical device.');
+      return null;
+    }
+
+    const { status } = await Notifications.getPermissionsAsync();
+    if (status !== 'granted') return null;
+
+    const projectId =
+      Constants.expoConfig?.extra?.eas?.projectId ??
+      Constants.easConfig?.projectId;
+
+    if (!projectId) {
+      console.warn('[NotificationService] EAS projectId not found in app config.');
+      return null;
+    }
+
+    try {
+      const result = await Notifications.getExpoPushTokenAsync({ projectId });
+      return result.data;
+    } catch (err) {
+      console.error('[NotificationService] Failed to get push token:', err);
+      return null;
     }
   }
 

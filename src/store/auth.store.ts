@@ -1,13 +1,20 @@
 import { create } from 'zustand';
 import * as SecureStore from 'expo-secure-store';
 import * as LocalAuthentication from 'expo-local-authentication';
+import { eq } from 'drizzle-orm';
 import { generateUUID } from '../lib/uuid';
 import {
   requestMagicLink,
   validateSession,
   revokeSession,
+  syncAvatarData,
+  fetchDek,
+  uploadDek,
   type UserProfile,
 } from '../lib/api-client';
+import { getDatabase, schema } from '../lib/database/client';
+import { generateDEK, encodeDEK, decodeDEK } from '../lib/sync/crypto';
+import { useSyncStore } from './sync.store';
 import type { User, AuthSession, BiometricConfig } from '../types';
 
 // ─── Cross-store reset helper ─────────────────────────────────────────────────
@@ -62,6 +69,11 @@ interface AuthState {
   signOut:                 () => Promise<void>;
   updateUser:              (patch: Partial<User>) => void;
   markOnboardingComplete:  () => Promise<void>;
+  /**
+   * Save a new avatar (base64 data URI) locally and sync to server.
+   * avatarData is stored in SQLite only — never SecureStore (size limit).
+   */
+  saveAvatarData:          (avatarData: string) => Promise<void>;
 
   // Actions — PIN
   setupPin:         (pin: string) => Promise<void>;
@@ -137,24 +149,69 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
             set({ user: null, session: null, biometric, hasOnboarded, isLocked: false, isInitialized: true });
             return;
           }
-          // Sync latest profile from server
+          // Sync latest profile from server (avatarData comes from SQLite below)
           validatedUser = {
             id:          profile.id,
             name:        profile.name,
             email:       profile.email,
             avatarUrl:   profile.avatarUrl,
+            avatarData:  null, // loaded from SQLite below
             householdId: user?.householdId ?? null,
             createdAt:   user?.createdAt ?? new Date().toISOString(),
             updatedAt:   new Date().toISOString(),
           };
-          await SecureStore.setItemAsync(KEYS.USER, JSON.stringify(validatedUser));
+          // Save to SecureStore WITHOUT avatarData (too large for Keychain)
+          const { avatarData: _strip, ...toStore } = validatedUser;
+          void _strip;
+          await SecureStore.setItemAsync(KEYS.USER, JSON.stringify(toStore));
         } catch {
           // Network unavailable — trust the local cache
         }
       }
 
+      // Load avatarData from SQLite — it's stored there, not SecureStore
+      let avatarData: string | null = null;
+      if (validatedUser?.id) {
+        try {
+          const db = getDatabase();
+          const rows = await db
+            .select({ avatarData: schema.users.avatarData })
+            .from(schema.users)
+            .where(eq(schema.users.id, validatedUser.id))
+            .limit(1);
+          avatarData = rows[0]?.avatarData ?? null;
+        } catch { /* SQLite not yet ready — non-fatal */ }
+      }
+
+      const userWithAvatar: User | null = validatedUser
+        ? { ...validatedUser, avatarData }
+        : null;
+
+      // Upsert to SQLite so circle LEFT JOINs resolve names without band-aids.
+      // This replaces scattered ensureUserInSQLite() calls throughout circle.store.
+      if (userWithAvatar) {
+        const db  = getDatabase();
+        const now = new Date().toISOString();
+        try {
+          await db.insert(schema.users).values({
+            id:        userWithAvatar.id,
+            name:      userWithAvatar.name,
+            email:     userWithAvatar.email,
+            avatarUrl: userWithAvatar.avatarUrl ?? null,
+            createdAt: now,
+            updatedAt: now,
+          });
+        } catch {
+          try {
+            await db.update(schema.users)
+              .set({ name: userWithAvatar.name, updatedAt: now })
+              .where(eq(schema.users.id, userWithAvatar.id));
+          } catch { /* ignore */ }
+        }
+      }
+
       set({
-        user:          validatedUser,
+        user:          userWithAvatar,
         session,
         biometric,
         hasOnboarded,
@@ -179,6 +236,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       email,
       householdId: null,
       avatarUrl:   null,
+      avatarData:  null,
       createdAt:   now.toISOString(),
       updatedAt:   now.toISOString(),
     };
@@ -193,6 +251,22 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       SecureStore.setItemAsync(KEYS.USER,    JSON.stringify(user)),
       SecureStore.setItemAsync(KEYS.SESSION, JSON.stringify(session)),
     ]);
+
+    // Upsert to SQLite so circle LEFT JOINs can resolve the user's name
+    const upsertDb  = getDatabase();
+    const upsertNow = now.toISOString(); // `now` is the Date already declared above
+    try {
+      await upsertDb.insert(schema.users).values({
+        id: user.id, name: user.name, email: user.email,
+        avatarUrl: null, createdAt: upsertNow, updatedAt: upsertNow,
+      });
+    } catch {
+      try {
+        await upsertDb.update(schema.users)
+          .set({ name: user.name, updatedAt: upsertNow })
+          .where(eq(schema.users.id, user.id));
+      } catch { /* ignore */ }
+    }
 
     // Keep locked — the user still needs to go through PIN setup in onboarding.
     // unlock() is called at the end of the onboarding flow.
@@ -233,6 +307,9 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       name:        profile.name,
       email:       profile.email,
       avatarUrl:   profile.avatarUrl,
+      // Restore avatar from server on new device — written to SQLite below.
+      // SecureStore has a size limit so base64 images are never stored there.
+      avatarData:  profile.avatarData ?? null,
       householdId: null,
       createdAt:   now.toISOString(),
       updatedAt:   now.toISOString(),
@@ -244,10 +321,34 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       expiresAt,
     };
 
+    // Store user WITHOUT avatarData — base64 is too large for SecureStore (Keychain)
+    const { avatarData: _strip, ...toStore } = user;
+    void _strip;
     await Promise.all([
-      SecureStore.setItemAsync(KEYS.USER,    JSON.stringify(user)),
+      SecureStore.setItemAsync(KEYS.USER,    JSON.stringify(toStore)),
       SecureStore.setItemAsync(KEYS.SESSION, JSON.stringify(session)),
     ]);
+
+    // Upsert to SQLite — include avatarData so it's available immediately on
+    // new device without waiting for a sync pull (avatar is also in sync_records
+    // but this path is faster and ensures it's present before the PIN screen).
+    const db2  = getDatabase();
+    const now2 = new Date().toISOString();
+    try {
+      await db2.insert(schema.users).values({
+        id: user.id, name: user.name, email: user.email,
+        avatarUrl:  user.avatarUrl  ?? null,
+        avatarData: user.avatarData ?? null,   // restore from server
+        createdAt:  now2,
+        updatedAt:  now2,
+      });
+    } catch {
+      try {
+        await db2.update(schema.users)
+          .set({ name: user.name, avatarData: user.avatarData ?? null, updatedAt: now2 })
+          .where(eq(schema.users.id, user.id));
+      } catch { /* ignore */ }
+    }
 
     // Locked = true so PIN screen shows before entering the app
     set({ user, session, isLocked: true });
@@ -258,7 +359,22 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     // Tell the server to revoke the session (best-effort — don't block sign-out)
     void revokeSession();
 
-    // Delete every persisted key so the app starts completely fresh
+    // Deregister push token so this device stops receiving push notifications
+    // while signed out. Fire-and-forget — non-blocking.
+    void (async () => {
+      try {
+        const { notificationService } = require('../lib/notifications');
+        const { deregisterPushToken } = require('../lib/api-client');
+        const token = await notificationService.getExpoPushToken();
+        if (token) await deregisterPushToken(token);
+      } catch {
+        // Non-critical — token will be cleaned up by DeviceNotRegistered on next send
+      }
+    })();
+
+    // Delete every persisted key so the app starts completely fresh.
+    // Also wipe the DEK from memory and SecureStore.
+    void useSyncStore.getState().clearDek();
     await Promise.all([
       SecureStore.deleteItemAsync(KEYS.SESSION),
       SecureStore.deleteItemAsync(KEYS.USER),
@@ -285,7 +401,33 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     if (!current) return;
     const updated = { ...current, ...patch, updatedAt: new Date().toISOString() };
     set({ user: updated });
-    SecureStore.setItemAsync(KEYS.USER, JSON.stringify(updated)).catch(() => {});
+    // Strip avatarData — too large for SecureStore (Keychain size limit)
+    const { avatarData: _strip, ...toStore } = updated;
+    void _strip;
+    SecureStore.setItemAsync(KEYS.USER, JSON.stringify(toStore)).catch(() => {});
+  },
+
+  // ── Save Avatar Data ───────────────────────────────────────────────────
+  // Persists a base64 data URI to SQLite, updates in-memory state,
+  // then fire-and-forgets a sync to the server. Never throws.
+  saveAvatarData: async (avatarData: string) => {
+    const { user } = get();
+    if (!user) return;
+
+    // 1. Optimistic in-memory update — UI responds instantly
+    set({ user: { ...user, avatarData } });
+
+    // 2. Persist to SQLite
+    try {
+      const db = getDatabase();
+      await db
+        .update(schema.users)
+        .set({ avatarData })
+        .where(eq(schema.users.id, user.id));
+    } catch { /* SQLite write failed — in-memory state still updated */ }
+
+    // 3. Fire-and-forget server sync — failure is silent, local is authoritative
+    void syncAvatarData(avatarData).catch(() => {});
   },
 
   // ── Mark onboarding complete (persists across restarts) ───────────────
@@ -294,21 +436,111 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     set({ hasOnboarded: true });
   },
 
-  // ── Setup PIN (hash + store) ───────────────────────────────────────────
+  // ── Setup PIN ─────────────────────────────────────────────────────────
+  //
+  // Option B architecture: PIN is a screen-lock only — it never derives the DEK.
+  // The DEK is a random 32-byte key generated once per account and stored on the
+  // server (encrypted at rest). This means:
+  //   - Forgotten PIN: re-auth via email → fetch same DEK → all data intact.
+  //   - New device: auth → fetch DEK → set PIN → done.
+  //   - New account: PIN setup → no DEK anywhere → generate → upload.
+  //
   setupPin: async (pin: string) => {
-    // Simple hash for demo — in production use bcrypt via a service
-    const hash = `pin_${btoa(pin)}_${Date.now()}`;
-    await SecureStore.setItemAsync(KEYS.PIN_HASH, hash);
+    const { user } = get();
+    if (!user) throw new Error('setupPin called without a logged-in user');
+
+    // 1. Hash PIN for local screen-lock verification (SHA-256, never sent to server).
+    //    Domain-separated so an attacker who gets this hash can't reuse it elsewhere.
+    const { digestStringAsync, CryptoDigestAlgorithm } = await import('expo-crypto');
+    const pinHash = await digestStringAsync(
+      CryptoDigestAlgorithm.SHA256,
+      `aku:pin:${user.id}:${pin}`,
+    );
+    await SecureStore.setItemAsync(KEYS.PIN_HASH, pinHash);
+
+    // 2. Determine the DEK to use — in priority order:
+    //    a) Already in Keychain (same device — PIN reset or re-setup).
+    //    b) Available on server (returning user on new device).
+    //    c) Generate fresh (brand-new account — DEK doesn't exist anywhere yet).
+    const syncStore = useSyncStore.getState();
+    const alreadyLoaded = await syncStore.loadDek();
+
+    if (alreadyLoaded) {
+      // DEK was already in Keychain. Opportunistically ensure it's on the server
+      // (covers the edge case where the initial upload failed due to a network error).
+      void uploadDek(encodeDEK(syncStore.dek!)).catch(() => {});
+      return;
+    }
+
+    // No DEK in Keychain — try the server first (returning user on new device).
+    let dekHex: string | null = null;
+    try {
+      dekHex = await fetchDek();
+    } catch { /* offline — will fall through to generate */ }
+
+    if (dekHex) {
+      // Returning user — server has the DEK; store it in Keychain.
+      await syncStore.setDek(decodeDEK(dekHex));
+    } else {
+      // Brand-new account — generate a random DEK, store locally and upload.
+      const newDek = await generateDEK();
+      await syncStore.setDek(newDek);
+      try {
+        await uploadDek(encodeDEK(newDek));
+      } catch {
+        // Non-fatal — the opportunistic upload in the `alreadyLoaded` branch
+        // above will retry next time setupPin is called on this device.
+      }
+    }
   },
 
   // ── Verify PIN ────────────────────────────────────────────────────────
+  //
+  // PIN verification is now purely a local screen-lock check.
+  // If valid, load the DEK from Keychain (set during setupPin) and sync.
+  //
   verifyPin: async (pin: string) => {
+    const { user } = get();
     const stored = await SecureStore.getItemAsync(KEYS.PIN_HASH);
-    if (!stored) return false;
-    // Extract the encoded part and compare
-    const parts = stored.split('_');
-    if (parts.length < 2) return false;
-    return parts[1] === btoa(pin);
+    if (!stored || !user) return false;
+
+    let isValid: boolean;
+
+    if (stored.startsWith('pin_')) {
+      // ── Legacy format (pre-Option-B): `pin_<btoa(pin)>_<timestamp>` ──
+      // Verify, then migrate the hash format in-place so next unlock uses SHA-256.
+      const parts = stored.split('_');
+      isValid = parts.length >= 2 && parts[1] === btoa(pin);
+      if (isValid) {
+        const { digestStringAsync, CryptoDigestAlgorithm } = await import('expo-crypto');
+        const newHash = await digestStringAsync(
+          CryptoDigestAlgorithm.SHA256,
+          `aku:pin:${user.id}:${pin}`,
+        );
+        void SecureStore.setItemAsync(KEYS.PIN_HASH, newHash).catch(() => {});
+      }
+    } else {
+      // ── New SHA-256 format ──
+      const { digestStringAsync, CryptoDigestAlgorithm } = await import('expo-crypto');
+      const pinHash = await digestStringAsync(
+        CryptoDigestAlgorithm.SHA256,
+        `aku:pin:${user.id}:${pin}`,
+      );
+      isValid = pinHash === stored;
+    }
+
+    if (isValid) {
+      // Load DEK from Keychain (stored there since setupPin). If missing
+      // (edge case: Keychain wiped by OS after app reinstall), the user will
+      // need to re-auth via email to restore it.
+      void useSyncStore.getState().loadDek().then((loaded) => {
+        if (loaded) {
+          import('../lib/sync/engine').then(({ fullSync }) => fullSync()).catch(() => {});
+        }
+      });
+    }
+
+    return isValid;
   },
 
   // ── Reset PIN ─────────────────────────────────────────────────────────
@@ -353,6 +585,12 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
 
     if (result.success) {
       set({ isLocked: false });
+      // Load DEK from SecureStore (set during PIN setup) then trigger sync.
+      void useSyncStore.getState().loadDek().then((loaded) => {
+        if (loaded) {
+          import('../lib/sync/engine').then(({ fullSync }) => fullSync()).catch(() => {});
+        }
+      });
     }
     return result.success;
   },

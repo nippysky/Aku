@@ -2,6 +2,7 @@
 module.exports = {
   name: 'Akù',
   slug: 'aku',
+  owner: 'nippysky',
   version: '1.0.0',
   orientation: 'portrait',
   icon: './assets/images/icon.png',
@@ -21,7 +22,11 @@ module.exports = {
       NSFaceIDUsageDescription:
         'Akù uses Face ID to keep your financial data secure and unlock the app instantly.',
       NSCameraUsageDescription:
-        'Akù uses the camera to let you update your profile photo.',
+        'Akù uses the camera so you can take a profile photo.',
+      NSPhotoLibraryUsageDescription:
+        'Akù needs access to your photo library so you can set a profile photo.',
+      NSPhotoLibraryAddUsageDescription:
+        'Akù saves your profile photo to your library.',
       UIBackgroundModes: ['fetch', 'remote-notification'],
     },
   },
@@ -79,14 +84,22 @@ module.exports = {
       'expo-image-picker',
       {
         photosPermission:
-          'Akù needs access to your photo library to update your profile picture.',
+          'Akù needs access to your photo library so you can set a profile photo.',
         cameraPermission:
-          'Akù needs access to your camera to take a profile photo.',
+          'Akù needs access to your camera so you can take a profile photo.',
       },
     ],
   ],
   experiments: {
     typedRoutes: true,
     reactCompiler: true,
+  },
+  // EAS project ID — auto-injected by EAS cloud builds via Constants.easConfig.projectId.
+  // Set explicitly here so local device builds can also register push tokens.
+  // Get yours: npx eas project:info  (then paste the ID below)
+  extra: {
+    eas: {
+      projectId: process.env.EAS_PROJECT_ID ?? '',
+    },
   },
 };

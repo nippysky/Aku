@@ -7,6 +7,7 @@ import type {
   Expense, ExpenseCreateInput, ExpenseUpdateInput,
   ExpenseSummary, ExpenseCategory,
 } from '../types';
+import { useBudgetsStore } from './budgets.store';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
@@ -168,6 +169,13 @@ export const useExpensesStore = create<ExpensesState>()((set, get) => ({
       const summaryMonth = get().selectedMonth === 'all' ? currentMonth : get().selectedMonth;
       const summary = buildSummary(expenses, summaryMonth);
       set({ expenses, allExpenses, summary });
+
+      // Refresh period-aware budget spent + fire threshold notifications (fire-and-forget)
+      useBudgetsStore
+        .getState()
+        .refreshCategory(userId, input.category)
+        .catch(() => {});
+
       return newExpense;
     } catch (e: any) {
       set({ error: e?.message ?? 'Failed to add expense' });

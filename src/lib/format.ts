@@ -15,7 +15,7 @@ export interface FormatOptions {
  */
 export function formatAmount(kobo: number, symbol = '₦'): string {
   const naira = kobo / 100;
-  return `${symbol}${naira.toLocaleString('en-NG', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+  return `${symbol}${naira.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
 }
 
 /**
@@ -36,7 +36,7 @@ export function formatCompact(kobo: number, symbol = '₦'): string {
     const v = naira / 1_000;
     return `${symbol}${trimDecimals(v, 1)}K`;
   }
-  return `${symbol}${naira.toLocaleString('en-NG', { maximumFractionDigits: 0 })}`;
+  return `${symbol}${naira.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
 }
 
 function trimDecimals(n: number, places: number): string {

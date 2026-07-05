@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import { getDatabase, schema } from '../lib/database/client';
 import { differenceInMonths, parseISO } from 'date-fns';
 import { generateUUID } from '../lib/uuid';
+import { notificationService } from '../lib/notifications';
 import type {
   Goal, GoalWithProgress, GoalContribution,
   GoalCreateInput, GoalUpdateInput, ContributionCreateInput,
@@ -226,6 +227,21 @@ export const useGoalsStore = create<GoalsState>()((set, get) => ({
       .where(eq(schema.goals.id, input.goalId));
 
     const contribution: GoalContribution = { id, ...input, userId, createdAt: now };
+
+    // Fire milestone notification if a threshold was crossed (25 / 50 / 75 / 100%)
+    const oldProgress = goal.targetAmount > 0 ? goal.savedAmount / goal.targetAmount : 0;
+    const newProgress = goal.targetAmount > 0 ? newSaved / goal.targetAmount : 0;
+
+    const MILESTONES = [0.25, 0.5, 0.75, 1.0] as const;
+    for (const m of MILESTONES) {
+      if (oldProgress < m && newProgress >= m) {
+        const pct = Math.round(m * 100);
+        notificationService
+          .scheduleGoalMilestone(goal, pct)
+          .catch(() => {});
+        break; // Only fire the highest newly-crossed milestone per contribution
+      }
+    }
 
     set((s) => ({
       goals: s.goals.map((g) =>

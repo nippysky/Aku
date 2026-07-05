@@ -152,6 +152,18 @@ export default function WelcomeScreen() {
             <Text style={styles.ctaLabel}>Get started</Text>
           </AnimatedPressable>
         </Animated.View>
+
+        <Pressable
+          onPress={() => router.push('/sign-in')}
+          accessibilityRole="button"
+          accessibilityLabel="Sign in to existing account"
+          style={styles.signInLink}
+        >
+          <Text style={styles.signInText}>
+            Already have an account?{' '}
+            <Text style={styles.signInTextBold}>Sign in</Text>
+          </Text>
+        </Pressable>
       </Animated.View>
     </View>
     </>
@@ -206,5 +218,19 @@ const styles = StyleSheet.create({
     fontSize:      FontSize.base,
     color:         Palette.forest,
     letterSpacing: 0,
+  },
+  signInLink: {
+    alignItems:    'center',
+    paddingTop:    20,
+    paddingBottom: 4,
+  },
+  signInText: {
+    fontFamily: FontFamily.sansRegular,
+    fontSize:   FontSize.sm,
+    color:      'rgba(250,250,248,0.50)',
+  },
+  signInTextBold: {
+    fontFamily: FontFamily.sansSemiBold,
+    color:      'rgba(250,250,248,0.80)',
   },
 });

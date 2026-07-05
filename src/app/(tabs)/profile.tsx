@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActionSheetIOS,
   Alert,
-  Image,
   Platform,
   Pressable,
   ScrollView,
@@ -11,17 +10,16 @@ import {
   Text,
   View,
 } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
+import * as FileSystem from 'expo-file-system/legacy';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as Linking from 'expo-linking';
 import * as Haptics from 'expo-haptics';
 import * as WebBrowser from 'expo-web-browser';
-import * as ImagePicker from 'expo-image-picker';
-import * as ImageManipulator from 'expo-image-manipulator';
-import { uploadAvatarFile } from '../../lib/api-client';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
-import * as FileSystem from 'expo-file-system';
 import { Asset } from 'expo-asset';
 import {
   ChevronRight,
@@ -43,6 +41,7 @@ import {
   Users,
   Plus,
   LogIn,
+  Repeat,
 } from 'lucide-react-native';
 import { BottomSheetModal, BottomSheetView, BottomSheetBackdrop } from '@gorhom/bottom-sheet';
 import type { BottomSheetBackdropProps } from '@gorhom/bottom-sheet';
@@ -55,8 +54,10 @@ import { useBillsStore } from '../../store/bills.store';
 import { useExpensesStore } from '../../store/expenses.store';
 import { useBudgetsStore } from '../../store/budgets.store';
 import { useGoalsStore } from '../../store/goals.store';
+import { useIncomeStore } from '../../store/income.store';
 import { getDatabase, schema } from '../../lib/database/client';
 import { eq } from 'drizzle-orm';
+import { UserAvatar } from '../../components/ui/UserAvatar';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Divider } from '../../components/ui/Divider';
@@ -87,16 +88,9 @@ const THEME_OPTIONS: ThemeOption[] = [
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function getInitials(name: string): string {
-  const parts = name.trim().split(/\s+/);
-  if (parts.length === 0 || !parts[0]) return '?';
-  if (parts.length === 1) return parts[0][0]?.toUpperCase() ?? '?';
-  return ((parts[0][0] ?? '') + (parts[parts.length - 1][0] ?? '')).toUpperCase();
-}
-
 function formatMemberSince(iso: string): string {
   const d = new Date(iso);
-  return d.toLocaleDateString('en-NG', { month: 'long', year: 'numeric' });
+  return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 }
 
 // ─── Section header ───────────────────────────────────────────────────────────
@@ -238,13 +232,14 @@ export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
 
-  const { user, updateUser, biometric, setupBiometric, disableBiometric, signOut } = useAuthStore();
+  const { user, updateUser, saveAvatarData, biometric, setupBiometric, disableBiometric, signOut } = useAuthStore();
   const { circles, activeCircle, load: loadCircles } = useCirclesStore();
   const { showToast, currency, themeMode, setThemeMode } = useUIStore();
-  const { bills, load: loadBills }         = useBillsStore();
-  const { expenses, load: loadExpenses }   = useExpensesStore();
-  const { budgets, load: loadBudgets }     = useBudgetsStore();
-  const { goals, load: loadGoals }         = useGoalsStore();
+  const { bills, load: loadBills }                   = useBillsStore();
+  const { expenses, load: loadExpenses }             = useExpensesStore();
+  const { budgets, load: loadBudgets }               = useBudgetsStore();
+  const { goals, load: loadGoals }                   = useGoalsStore();
+  const { allRecords: incomeRecords, loadAll: loadAllInc } = useIncomeStore();
 
   // ── Theme picker sheet ────────────────────────────────────────────────
   const themeSheetRef = useRef<BottomSheetModal>(null);
@@ -307,9 +302,12 @@ export default function ProfileScreen() {
     return { from: rangeFrom || null, to: rangeTo || today };
   }, [rangePreset, rangeFrom, rangeTo]);
 
-  // ── Load circles on mount (ensures fresh data after app restart) ─────
+  // ── Load circles + income on mount (ensures fresh data after app restart) ─────
   useEffect(() => {
-    if (user?.id) loadCircles(user.id);
+    if (user?.id) {
+      loadCircles(user.id);
+      loadAllInc(user.id);
+    }
   }, [user?.id]);
 
   // ── Create Circle sheet ───────────────────────────────────────────────
@@ -382,11 +380,13 @@ export default function ProfileScreen() {
               await db.delete(schema.expenses).where(eq(schema.expenses.userId, user.id));
               await db.delete(schema.bills).where(eq(schema.bills.userId, user.id));
               await db.delete(schema.budgets).where(eq(schema.budgets.userId, user.id));
+              await db.delete(schema.income).where(eq(schema.income.userId, user.id));
               await Promise.all([
                 loadBills(user.id),
                 loadExpenses(user.id),
-                loadBudgets(user.id, {}),
+                loadBudgets(user.id),
                 loadGoals(user.id),
+                loadAllInc(user.id),
               ]);
               showToast('success', 'All data cleared');
             } catch {
@@ -396,82 +396,69 @@ export default function ProfileScreen() {
         },
       ],
     );
-  }, [user, showToast, loadBills, loadExpenses, loadBudgets, loadGoals]);
+  }, [user, showToast, loadBills, loadExpenses, loadBudgets, loadGoals, loadAllInc]);
 
-  // ── Profile picture ───────────────────────────────────────────────────
-  const pickAvatarFromSource = useCallback(async (source: 'camera' | 'library') => {
+  // ── Profile avatar ────────────────────────────────────────────────────
+  // Flow: pick → resize 250×250 JPEG → read as base64 → save to SQLite
+  // → sync to server in background. Entire flow is crash-safe.
+
+  const pickAndSaveAvatar = useCallback(async (source: 'camera' | 'library') => {
     try {
       let result: ImagePicker.ImagePickerResult;
 
       if (source === 'camera') {
         const { status } = await ImagePicker.requestCameraPermissionsAsync();
         if (status !== 'granted') {
-          showToast('error', 'Camera permission required');
+          showToast('error', 'Camera permission is required');
           return;
         }
-        result = await ImagePicker.launchCameraAsync({
-          mediaTypes: ['images'],
-          quality: 0.85,
-        });
+        result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 1 });
       } else {
         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (status !== 'granted') {
-          showToast('error', 'Photo library permission required');
+          showToast('error', 'Photo library permission is required');
           return;
         }
-        result = await ImagePicker.launchImageLibraryAsync({
-          mediaTypes: ['images'],
-          quality: 0.85,
-        });
+        result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1 });
       }
 
       if (result.canceled || !result.assets[0]) return;
 
-      // Crop to square 400×400, compress locally first
+      // Resize to 250×250, compress, and get base64 in one step — no FileSystem read needed
       const manipulated = await ImageManipulator.manipulateAsync(
         result.assets[0].uri,
-        [{ resize: { width: 400, height: 400 } }],
-        { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG },
+        [{ resize: { width: 250, height: 250 } }],
+        { compress: 0.75, format: ImageManipulator.SaveFormat.JPEG, base64: true },
       );
 
-      // Show optimistic local preview immediately
-      updateUser({ avatarUrl: manipulated.uri });
+      if (!manipulated.base64) throw new Error('Image processing failed');
+      const dataUri = `data:image/jpeg;base64,${manipulated.base64}`;
 
-      try {
-        // Upload to Cloudinary via the API and get the permanent CDN URL
-        const cloudUrl = await uploadAvatarFile(manipulated.uri);
-        // Replace the local URI with the permanent Cloudinary URL
-        updateUser({ avatarUrl: cloudUrl });
-        showToast('success', 'Profile photo updated');
-      } catch {
-        // Upload failed — keep the local preview but warn the user
-        showToast('error', 'Photo saved locally but upload failed. It will sync next time.');
-      }
+      // saveAvatarData: updates memory + SQLite instantly, syncs server in background
+      await saveAvatarData(dataUri);
+      showToast('success', 'Profile photo updated');
     } catch {
-      showToast('error', 'Failed to update photo');
+      showToast('error', 'Could not update photo — please try again');
     }
-  }, [updateUser, showToast]);
+  }, [saveAvatarData, showToast]);
 
   const handlePickAvatar = useCallback(() => {
     if (Platform.OS === 'ios') {
       ActionSheetIOS.showActionSheetWithOptions(
-        {
-          options: ['Cancel', 'Take Photo', 'Choose from Library'],
-          cancelButtonIndex: 0,
-        },
+        { options: ['Cancel', 'Take Photo', 'Choose from Library'], cancelButtonIndex: 0 },
         (idx) => {
-          if (idx === 1) pickAvatarFromSource('camera');
-          if (idx === 2) pickAvatarFromSource('library');
+          if (idx === 1) void pickAndSaveAvatar('camera');
+          if (idx === 2) void pickAndSaveAvatar('library');
         },
       );
     } else {
-      Alert.alert('Profile Photo', 'Choose a photo source', [
+      Alert.alert('Profile Photo', 'Choose a source', [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Take Photo',          onPress: () => pickAvatarFromSource('camera') },
-        { text: 'Choose from Library', onPress: () => pickAvatarFromSource('library') },
+        { text: 'Take Photo',           onPress: () => void pickAndSaveAvatar('camera') },
+        { text: 'Choose from Library',  onPress: () => void pickAndSaveAvatar('library') },
       ]);
     }
-  }, [pickAvatarFromSource]);
+  }, [pickAndSaveAvatar]);
 
   // ── Generate PDF bank statement (with optional date range) ───────────
   const handleExportData = useCallback(async (bounds?: { from: string | null; to: string | null }) => {
@@ -486,7 +473,7 @@ export default function ProfileScreen() {
       const filename  = `Aku_Statement_${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
 
       const money = (kobo: number) =>
-        `${sym}${(kobo / 100).toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        `${sym}${(kobo / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
       // ── Apply date range filter ───────────────────────────────────────
       const from = bounds?.from ?? null;
@@ -499,8 +486,9 @@ export default function ProfileScreen() {
         return true;
       };
 
-      const filteredBills    = from || to ? bills.filter((b) => inRange(b.dueDate))   : bills;
-      const filteredExpenses = from || to ? expenses.filter((e) => inRange(e.date))    : expenses;
+      const filteredBills    = from || to ? bills.filter((b) => inRange(b.dueDate))        : bills;
+      const filteredExpenses = from || to ? expenses.filter((e) => inRange(e.date))         : expenses;
+      const filteredIncome   = from || to ? incomeRecords.filter((r) => inRange(r.date))    : incomeRecords;
       const filteredGoals    = goals;  // goals not date-filtered
 
       const rangeLabel = from
@@ -522,6 +510,8 @@ export default function ProfileScreen() {
 
       const totalBills    = filteredBills.reduce((s, b) => s + b.amount, 0);
       const totalExpenses = filteredExpenses.reduce((s, e) => s + e.amount, 0);
+      const totalIncome   = filteredIncome.reduce((s, r) => s + r.amount, 0);
+      const netFlow       = totalIncome - totalExpenses;
 
       // ── Bill rows HTML ──
       const billRows = filteredBills.length === 0
@@ -546,6 +536,19 @@ export default function ProfileScreen() {
             </tr>`;
           }).join('') +
           `<tr class="subtotal"><td colspan="2">Total Expenses</td><td class="amount debit">${money(totalExpenses)}</td></tr>`;
+
+      // ── Income rows HTML ──
+      const incomeRows = filteredIncome.length === 0
+        ? '<tr><td colspan="3" class="empty">No income recorded in this period</td></tr>'
+        : filteredIncome.map((r) => {
+            const d = new Date(r.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+            return `<tr>
+              <td>${d}</td>
+              <td>${r.description ?? r.category}</td>
+              <td class="amount credit">${money(r.amount)}</td>
+            </tr>`;
+          }).join('') +
+          `<tr class="subtotal"><td colspan="2">Total Income</td><td class="amount credit">${money(totalIncome)}</td></tr>`;
 
       // ── Budget rows HTML ──
       const budgetRows = budgets.length === 0
@@ -619,6 +622,7 @@ export default function ProfileScreen() {
   .s-label { font-size:8.5px; letter-spacing:1.5px; text-transform:uppercase; color:#9CA3A0; margin-bottom:5px; }
   .s-value { font-size:20px; font-weight:300; color:#163A2F; letter-spacing:-0.5px; font-family:Georgia,'Times New Roman',serif; }
   .s-value.debit { color:#D63B3B; }
+  .s-value.credit { color:#16A85A; }
   .s-sub { font-size:9px; color:#B0B8B4; margin-top:4px; }
 
   /* ── Body ── */
@@ -712,24 +716,24 @@ export default function ProfileScreen() {
 <div class="summary-section">
   <div class="summary-grid">
     <div class="summary-box">
-      <div class="s-label">Total Bills</div>
+      <div class="s-label">Total Earned</div>
+      <div class="s-value credit">${money(totalIncome)}</div>
+      <div class="s-sub">${filteredIncome.length} income record${filteredIncome.length !== 1 ? 's' : ''}</div>
+    </div>
+    <div class="summary-box">
+      <div class="s-label">Total Spent</div>
+      <div class="s-value debit">${money(totalExpenses)}</div>
+      <div class="s-sub">${filteredExpenses.length} expense${filteredExpenses.length !== 1 ? 's' : ''}</div>
+    </div>
+    <div class="summary-box">
+      <div class="s-label">Net${netFlow >= 0 ? ' Surplus' : ' Deficit'}</div>
+      <div class="s-value ${netFlow >= 0 ? 'credit' : 'debit'}">${netFlow >= 0 ? '' : '−'}${money(Math.abs(netFlow))}</div>
+      <div class="s-sub">Income − Expenses</div>
+    </div>
+    <div class="summary-box">
+      <div class="s-label">Bills Outstanding</div>
       <div class="s-value">${money(totalBills)}</div>
       <div class="s-sub">${filteredBills.length} bill${filteredBills.length !== 1 ? 's' : ''}</div>
-    </div>
-    <div class="summary-box">
-      <div class="s-label">Total Expenses</div>
-      <div class="s-value debit">${money(totalExpenses)}</div>
-      <div class="s-sub">${filteredExpenses.length} transaction${filteredExpenses.length !== 1 ? 's' : ''}</div>
-    </div>
-    <div class="summary-box">
-      <div class="s-label">Net Outflow</div>
-      <div class="s-value debit">${money(totalBills + totalExpenses)}</div>
-      <div class="s-sub">Bills + Expenses</div>
-    </div>
-    <div class="summary-box">
-      <div class="s-label">Savings Goals</div>
-      <div class="s-value">${goals.length}</div>
-      <div class="s-sub">active goal${goals.length !== 1 ? 's' : ''}</div>
     </div>
   </div>
 </div>
@@ -746,6 +750,18 @@ export default function ProfileScreen() {
     <table>
       <thead><tr><th>Bill Name</th><th>Status</th><th style="text-align:right">Amount</th></tr></thead>
       <tbody>${billRows}</tbody>
+    </table>
+  </div>
+
+  <!-- Income -->
+  <div class="section">
+    <div class="section-head">
+      <div class="section-title">Income</div>
+      <div class="section-rule"></div>
+    </div>
+    <table>
+      <thead><tr><th>Date</th><th>Description</th><th style="text-align:right">Amount</th></tr></thead>
+      <tbody>${incomeRows}</tbody>
     </table>
   </div>
 
@@ -812,7 +828,7 @@ export default function ProfileScreen() {
     } catch {
       showToast('error', 'Failed to generate PDF');
     }
-  }, [user, activeCircle, currency, bills, expenses, budgets, goals, showToast]);
+  }, [user, activeCircle, currency, bills, expenses, incomeRecords, budgets, goals, showToast]);
 
   // ── Feedback ──────────────────────────────────────────────────────────
   const handleFeedback = useCallback(() => {
@@ -825,8 +841,7 @@ export default function ProfileScreen() {
 
   if (!user) return null;
 
-  const initials     = getInitials(user.name);
-  const memberSince  = formatMemberSince(user.createdAt);
+  const memberSince = formatMemberSince(user.createdAt);
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
@@ -843,31 +858,17 @@ export default function ProfileScreen() {
       >
         {/* ── Profile hero ── */}
         <View style={styles.hero}>
-          <Pressable onPress={handlePickAvatar} style={styles.avatarWrap}>
-            {user.avatarUrl ? (
-              <Image
-                source={{ uri: user.avatarUrl }}
-                style={styles.avatarImage}
-              />
-            ) : (
-              <View style={[styles.avatar, { backgroundColor: colors.primary }]}>
-                <Text
-                  style={[
-                    styles.avatarInitials,
-                    { fontFamily: font.displayLight, color: colors.textOnForest },
-                  ]}
-                >
-                  {initials}
-                </Text>
-              </View>
-            )}
-            {/* Camera overlay badge */}
-            <View
-              style={[
-                styles.cameraBadge,
-                { backgroundColor: colors.primary, borderColor: colors.background },
-              ]}
-            >
+          <Pressable
+            onPress={handlePickAvatar}
+            style={styles.avatarWrap}
+            accessibilityLabel="Change profile photo"
+          >
+            <UserAvatar
+              name={user.name}
+              avatarData={user.avatarData}
+              size={80}
+            />
+            <View style={[styles.cameraBadge, { backgroundColor: colors.primary, borderColor: colors.background }]}>
               <Camera size={12} color={colors.textOnForest} strokeWidth={2} />
             </View>
           </Pressable>
@@ -921,42 +922,68 @@ export default function ProfileScreen() {
             ))}
             <View style={styles.circleActions}>
               <Pressable
-                style={[styles.circleActionBtn, { backgroundColor: colors.backgroundSecondary, borderColor: colors.border }]}
+                style={({ pressed }) => [
+                  styles.circleActionBtn,
+                  { backgroundColor: colors.primary + '15', borderColor: colors.primary + '40', opacity: pressed ? 0.75 : 1 },
+                ]}
                 onPress={() => setShowCreateCircle(true)}
               >
-                <Plus size={16} color={colors.primary} strokeWidth={2} />
-                <Text style={[text.bodySm, { color: colors.primary, fontFamily: font.sansMedium }]}>New Circle</Text>
+                <Plus size={15} color={colors.primary} strokeWidth={2.2} />
+                <Text style={[text.caption, { color: colors.primary, fontFamily: font.sansSemiBold }]}>New Circle</Text>
               </Pressable>
               <Pressable
-                style={[styles.circleActionBtn, { backgroundColor: colors.backgroundSecondary, borderColor: colors.border }]}
+                style={({ pressed }) => [
+                  styles.circleActionBtn,
+                  { backgroundColor: colors.backgroundSecondary, borderColor: colors.border, opacity: pressed ? 0.75 : 1 },
+                ]}
                 onPress={() => router.push('/circle/join' as never)}
               >
-                <LogIn size={16} color={colors.primary} strokeWidth={2} />
-                <Text style={[text.bodySm, { color: colors.primary, fontFamily: font.sansMedium }]}>Join Circle</Text>
+                <LogIn size={15} color={colors.primary} strokeWidth={2} />
+                <Text style={[text.caption, { color: colors.primary, fontFamily: font.sansMedium }]}>Join Circle</Text>
               </Pressable>
             </View>
           </>
         ) : (
-          <Card style={[styles.card, { gap: 12 }]}>
-            <Text style={[text.body, { color: colors.textSecondary }]}>
-              You're not in any Circle yet. Create one or join with an invite code.
-            </Text>
-            <View style={styles.circleActions}>
-              <Pressable
-                style={[styles.circleActionBtn, { backgroundColor: colors.primary + '14', borderColor: colors.primary + '30', flex: 1 }]}
-                onPress={() => setShowCreateCircle(true)}
-              >
-                <Plus size={16} color={colors.primary} strokeWidth={2} />
-                <Text style={[text.bodySm, { color: colors.primary, fontFamily: font.sansMedium }]}>Create a Circle</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.circleActionBtn, { backgroundColor: colors.backgroundSecondary, borderColor: colors.border, flex: 1 }]}
-                onPress={() => router.push('/circle/join' as never)}
-              >
-                <LogIn size={16} color={colors.primary} strokeWidth={2} />
-                <Text style={[text.bodySm, { color: colors.primary, fontFamily: font.sansMedium }]}>Join a Circle</Text>
-              </Pressable>
+          <Card style={styles.circlesEmptyCard}>
+            {/* Icon badge */}
+            <View style={[styles.circlesEmptyBadge, { backgroundColor: colors.primary + '18', borderColor: colors.primary + '30' }]}>
+              <Users size={28} color={colors.primary} strokeWidth={1.5} />
             </View>
+
+            <Text style={[text.bodyMedium, { color: colors.text, fontFamily: font.sansSemiBold, textAlign: 'center' }]}>
+              No Circles yet
+            </Text>
+            <Text style={[text.caption, { color: colors.textSecondary, textAlign: 'center', lineHeight: 19 }]}>
+              Save together, track together.{'\n'}Create one or join with an invite code.
+            </Text>
+
+            {/* Primary CTA — solid fill */}
+            <Pressable
+              style={({ pressed }) => [
+                styles.circlesEmptyPrimary,
+                { backgroundColor: colors.primary, opacity: pressed ? 0.82 : 1 },
+              ]}
+              onPress={() => setShowCreateCircle(true)}
+            >
+              <Plus size={17} color="#F5F2EC" strokeWidth={2.2} />
+              <Text style={[text.bodySm, { color: '#F5F2EC', fontFamily: font.sansSemiBold }]}>
+                Create a Circle
+              </Text>
+            </Pressable>
+
+            {/* Secondary CTA — outlined */}
+            <Pressable
+              style={({ pressed }) => [
+                styles.circlesEmptySecondary,
+                { borderColor: colors.primary + '50', opacity: pressed ? 0.7 : 1 },
+              ]}
+              onPress={() => router.push('/circle/join' as never)}
+            >
+              <LogIn size={17} color={colors.primary} strokeWidth={2} />
+              <Text style={[text.bodySm, { color: colors.primary, fontFamily: font.sansMedium }]}>
+                Join a Circle
+              </Text>
+            </Pressable>
           </Card>
         )}
 
@@ -991,6 +1018,18 @@ export default function ProfileScreen() {
             icon={Bell}
             label="Notification settings"
             onPress={() => router.push('/notification-settings' as never)}
+            isFirst
+            isLast
+          />
+        </SettingsGroup>
+
+        {/* ── Expenses ── */}
+        <SectionHeader label="Expenses" />
+        <SettingsGroup>
+          <SettingsRow
+            icon={Repeat}
+            label="Recurring"
+            onPress={() => router.push('/recurring-expenses' as never)}
             isFirst
             isLast
           />
@@ -1353,34 +1392,17 @@ const styles = StyleSheet.create({
     marginBottom: 14,
     position:     'relative',
   },
-  avatar: {
-    width:          80,
-    height:         80,
-    borderRadius:   40,
+  cameraBadge: {
+    position:       'absolute',
+    bottom:         0,
+    right:          0,
+    width:          24,
+    height:         24,
+    borderRadius:   12,
+    borderWidth:    2,
     alignItems:     'center',
     justifyContent: 'center',
   },
-  avatarImage: {
-    width:        80,
-    height:       80,
-    borderRadius: 40,
-  },
-  cameraBadge: {
-    position:     'absolute',
-    bottom:       0,
-    right:        0,
-    width:        24,
-    height:       24,
-    borderRadius: 12,
-    borderWidth:  2,
-    alignItems:   'center',
-    justifyContent: 'center',
-  },
-  avatarInitials: {
-    fontSize:      36,
-    lineHeight:    40,
-    includeFontPadding: false,
-  } as object,
   heroName: {
     letterSpacing: -0.5,
     marginBottom:  4,
@@ -1392,20 +1414,57 @@ const styles = StyleSheet.create({
     padding:      16,
     marginBottom: 24,
   },
+  // ── My Circles empty state ────────────────────────────────────────────────
+  circlesEmptyCard: {
+    paddingVertical:   28,
+    paddingHorizontal: 20,
+    gap: 8,
+  },
+  circlesEmptyBadge: {
+    width:          64,
+    height:         64,
+    borderRadius:   32,
+    borderWidth:    1.5,
+    alignItems:     'center',
+    justifyContent: 'center',
+    alignSelf:      'center',
+    marginBottom:   4,
+  },
+  circlesEmptyPrimary: {
+    flexDirection:  'row',
+    alignItems:     'center',
+    justifyContent: 'center',
+    gap:            8,
+    paddingVertical: 15,
+    borderRadius:   100,
+    marginTop:      8,
+    marginBottom:   6,
+  },
+  circlesEmptySecondary: {
+    flexDirection:  'row',
+    alignItems:     'center',
+    justifyContent: 'center',
+    gap:            8,
+    paddingVertical: 14,
+    borderRadius:   100,
+    borderWidth:    1.5,
+  },
+
+  // ── Has-circles action row ─────────────────────────────────────────────────
   circleActions: {
     flexDirection:  'row',
     gap:            10,
     marginTop:      10,
   },
   circleActionBtn: {
-    flexDirection:  'row',
-    alignItems:     'center',
-    justifyContent: 'center',
-    gap:            6,
-    paddingVertical: 10,
+    flexDirection:   'row',
+    alignItems:      'center',
+    justifyContent:  'center',
+    gap:             6,
+    paddingVertical: 9,
     paddingHorizontal: 16,
-    borderRadius:   100,
-    borderWidth:    1,
+    borderRadius:    100,
+    borderWidth:     1,
   },
   ownerBadge: {
     paddingHorizontal: 6,

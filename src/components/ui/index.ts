@@ -12,3 +12,4 @@ export { ScreenHeader } from './ScreenHeader';
 export { Divider } from './Divider';
 export { AkuDatePicker } from './AkuDatePicker';
 export { OnboardingHeader } from './OnboardingHeader';
+export { AppLoader, LoadingScreen } from './AppLoader';

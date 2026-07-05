@@ -1,3 +1,18 @@
+/**
+ * Forgot Passcode screen
+ *
+ * Flow:
+ *   1. User enters email → we send a magic link + write a SecureStore reset flag.
+ *   2. User taps the link → auth-callback reads the flag → clears PIN + ONBOARDED
+ *      → routes to pin-setup?returning=1 (regardless of hasOnboarded).
+ *   3. User sets a new passcode in pin-setup → setupPin() fetches the same DEK
+ *      from the server → all financial data is fully intact.
+ *
+ * Security model (Option B):
+ *   The DEK is a random key stored server-side (encrypted at rest). The passcode
+ *   is a screen-lock only — resetting it does NOT change the DEK, so data is
+ *   always recoverable after re-authenticating via email.
+ */
 import React, { useState } from 'react';
 import {
   StyleSheet,
@@ -11,24 +26,29 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import Svg, { Path, Circle } from 'react-native-svg';
+import * as SecureStore from 'expo-secure-store';
+import Svg, { Path } from 'react-native-svg';
 import { Button, Input, KeyboardWrapper } from '../../components/ui';
 import { useAuthStore } from '../../store';
+import { requestMagicLink } from '../../lib/api-client';
 import { useTheme } from '../../theme';
 import { Palette } from '../../theme/colors';
+import { FontFamily, FontSize } from '../../theme/typography';
 
-// ─── Email validation ──────────────────────────────────────────────────────
+// ─── SecureStore key checked by auth-callback to override routing ─────────────
+export const PIN_RESET_PENDING_KEY = 'aku_pin_reset_pending';
+
+// ─── Email validation ──────────────────────────────────────────────────────────
 
 function isValidEmail(v: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
 }
 
-// ─── Envelope illustration (success state) ─────────────────────────────────
+// ─── Envelope illustration ────────────────────────────────────────────────────
 
 function EnvelopeSentIllustration() {
   return (
     <Svg width={100} height={84} viewBox="0 0 120 100" fill="none">
-      {/* Envelope body */}
       <Path
         d="M10 30 L10 80 Q10 88 18 88 L102 88 Q110 88 110 80 L110 30 Q110 22 102 22 L18 22 Q10 22 10 30 Z"
         stroke={Palette.forest}
@@ -44,7 +64,6 @@ function EnvelopeSentIllustration() {
         strokeLinejoin="round"
         strokeLinecap="round"
       />
-      {/* Sent paper plane */}
       <Path
         d="M90 8 L100 20 L75 26 L90 8 Z"
         stroke={Palette.forest}
@@ -62,7 +81,7 @@ function EnvelopeSentIllustration() {
   );
 }
 
-// ─── Screen ────────────────────────────────────────────────────────────────
+// ─── Screen ───────────────────────────────────────────────────────────────────
 
 type ScreenState = 'form' | 'success';
 
@@ -87,8 +106,14 @@ export default function ForgotPinScreen() {
     try {
       setIsLoading(true);
       setError('');
-      // Simulate sending reset link — wire to real API in production
-      await new Promise<void>((resolve) => setTimeout(resolve, 1200));
+
+      // 1. Send magic link via the real API
+      await requestMagicLink(email);
+
+      // 2. Mark that the next auth-callback should route to pin-setup
+      //    (bypassing the normal hasOnboarded routing)
+      await SecureStore.setItemAsync(PIN_RESET_PENDING_KEY, 'true');
+
       setScreen('success');
     } catch {
       setError('Something went wrong. Please try again.');
@@ -96,6 +121,8 @@ export default function ForgotPinScreen() {
       setIsLoading(false);
     }
   }
+
+  // ── Success state ────────────────────────────────────────────────────────────
 
   if (screenState === 'success') {
     return (
@@ -124,27 +151,43 @@ export default function ForgotPinScreen() {
 
           <Animated.View entering={FadeInDown.delay(300).duration(500)}>
             <Text style={[text.body, { color: colors.textSecondary, marginTop: spacing[3] }]}>
-              We've sent a reset link to{' '}
-              <Text style={{ color: colors.primary, fontFamily: 'PlusJakartaSans_500Medium' }}>
+              We sent a sign-in link to{' '}
+              <Text style={{ color: colors.primary, fontFamily: FontFamily.sansMedium }}>
                 {email}
               </Text>
-              .{'\n'}Tap it to set a new passcode.
+              .{'\n\n'}
+              Tap it to set a new passcode. Your expenses, bills and goals will all be waiting for you.
+            </Text>
+          </Animated.View>
+
+          {/* Reassurance — data is safe */}
+          <Animated.View
+            entering={FadeInDown.delay(420).duration(500)}
+            style={[styles.infoBox, { backgroundColor: colors.backgroundSecondary, borderColor: colors.borderLight }]}
+          >
+            <Text style={[styles.infoTitle, { color: colors.text }]}>
+              Your data is safe
+            </Text>
+            <Text style={[styles.infoBody, { color: colors.textSecondary }]}>
+              Your passcode is a screen-lock only — your financial records are encrypted with a separate key stored securely on our servers. Resetting your passcode doesn't touch your data.
             </Text>
           </Animated.View>
         </View>
 
-        <Animated.View entering={FadeInUp.delay(400).duration(500)}>
+        <Animated.View entering={FadeInUp.delay(500).duration(500)}>
           <Button
             label="Back to sign in"
             variant="primary"
             size="lg"
             fullWidth
-            onPress={() => router.replace('/(auth)')}
+            onPress={() => router.replace('/sign-in')}
           />
         </Animated.View>
       </View>
     );
   }
+
+  // ── Form state ───────────────────────────────────────────────────────────────
 
   return (
     <KeyboardWrapper style={{ backgroundColor: colors.background }}>
@@ -168,13 +211,13 @@ export default function ForgotPinScreen() {
 
           <Animated.View entering={FadeInDown.delay(140).duration(500)}>
             <Text style={[text.body, { color: colors.textSecondary, marginTop: spacing[3] }]}>
-              Enter your email and we'll send you a link to create a new passcode.
+              Enter your email and we'll send a sign-in link to set a new passcode. Your financial records will be fully restored.
             </Text>
           </Animated.View>
 
           <Animated.View
             entering={FadeInDown.delay(220).duration(500)}
-            style={{ marginTop: spacing[8] }}
+            style={{ marginTop: spacing[6] }}
           >
             <Input
               label="Email address"
@@ -196,7 +239,7 @@ export default function ForgotPinScreen() {
           </Animated.View>
         </View>
 
-        {/* Send button */}
+        {/* Buttons */}
         <Animated.View entering={FadeInUp.delay(300).duration(500)} style={styles.buttons}>
           <Button
             label="Send reset link"
@@ -220,7 +263,7 @@ export default function ForgotPinScreen() {
   );
 }
 
-// ─── Styles ────────────────────────────────────────────────────────────────
+// ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   container: {
@@ -239,6 +282,22 @@ const styles = StyleSheet.create({
   },
   illustration: {
     alignSelf: 'flex-start',
+  },
+  infoBox: {
+    borderRadius:  12,
+    borderWidth:   1,
+    padding:       16,
+    gap:           6,
+    marginTop:     20,
+  },
+  infoTitle: {
+    fontFamily: FontFamily.sansMedium,
+    fontSize:   FontSize.sm,
+  },
+  infoBody: {
+    fontFamily:  FontFamily.sansRegular,
+    fontSize:    FontSize.sm,
+    lineHeight:  FontSize.sm * 1.6,
   },
   buttons: {
     gap: 12,

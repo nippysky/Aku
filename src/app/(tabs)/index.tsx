@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect } from 'react';
+import React, { useCallback, useEffect, useMemo } from 'react';
 import {
   Platform,
   Pressable,
@@ -19,13 +19,16 @@ import Animated, {
   withSpring,
 } from 'react-native-reanimated';
 import { Palette } from '../../theme/colors';
-import { format } from 'date-fns';
+import { format, subDays } from 'date-fns';
 import {
   Bell,
   Receipt,
   Target,
   TrendingUp,
+  TrendingDown,
   BarChart2,
+  PieChart,
+  Lightbulb,
 } from 'lucide-react-native';
 import {
   UtensilsCrossed, Car, ShoppingBag, Tv, Home,
@@ -41,16 +44,132 @@ import { GoalCard } from '../../components/home/GoalCard';
 import { useAuthStore } from '../../store/auth.store';
 import { useBillsStore } from '../../store/bills.store';
 import { useExpensesStore } from '../../store/expenses.store';
+import { useIncomeStore } from '../../store/income.store';
 import { useGoalsStore } from '../../store/goals.store';
+import { useBudgetsStore } from '../../store/budgets.store';
+import { useNotifHistoryStore } from '../../store/notif-history.store';
+import { FirstTimeHint } from '../../components/ui/FirstTimeHint';
+import { useFirstTimeHint } from '../../hooks/useFirstTimeHint';
 import { useCurrencyFormat } from '../../hooks/useCurrencyFormat';
 import { EXPENSE_CATEGORIES } from '../../types';
-import type { Bill } from '../../types';
+import type { Bill, BudgetWithSpent, ExpenseCategory } from '../../types';
 
 // ─── Icon map for expenses ────────────────────────────────────────────────────
 
 const EXPENSE_ICONS: Record<string, React.ComponentType<{ size?: number; color?: string; strokeWidth?: number }>> = {
   UtensilsCrossed, Car, ShoppingBag, Tv, Home, Zap, Heart, Users, BookOpen, PiggyBank, Gift, MoreHorizontal,
 };
+
+// ─── Smart Insight ────────────────────────────────────────────────────────────
+
+interface Insight {
+  icon: React.ComponentType<{ size?: number; color?: string; strokeWidth?: number }>;
+  iconColor: string;
+  label: string;
+  text: string;
+}
+
+function computeInsight(
+  allExpenses: { date: string; amount: number; category: string }[],
+  incRecords:  { date: string; amount: number }[],
+  bills:       Bill[],
+  goals:       { name: string; progress: number; isCompleted: boolean }[],
+  fmt:         (kobo: number) => string,
+): Insight | null {
+  const now = new Date();
+  const currentMonth = format(now, 'yyyy-MM');
+
+  const incomeThisMonth  = incRecords.filter(r => r.date.startsWith(currentMonth)).reduce((s, r) => s + r.amount, 0);
+  const expensesThisMonth = allExpenses.filter(e => e.date.startsWith(currentMonth)).reduce((s, e) => s + e.amount, 0);
+  const unpaidBillsTotal = bills.filter(b => !(b as { isPaid?: boolean }).isPaid).reduce((s, b) => s + b.amount, 0);
+
+  // 1. Income covers bills — feels like wealth
+  if (incomeThisMonth > 0 && unpaidBillsTotal > 0) {
+    const ratio = incomeThisMonth / unpaidBillsTotal;
+    if (ratio >= 1.5) {
+      return {
+        icon: TrendingUp, iconColor: '#16A85A', label: 'Cash flow',
+        text: `Your income this month covers your bills ${ratio.toFixed(1)}× over.`,
+      };
+    }
+  }
+
+  // 2. Savings rate
+  if (incomeThisMonth > 0 && expensesThisMonth > 0) {
+    const net = incomeThisMonth - expensesThisMonth;
+    const rate = net / incomeThisMonth;
+    if (rate >= 0.2) {
+      return {
+        icon: PiggyBank, iconColor: '#16A85A', label: 'Savings rate',
+        text: `You're keeping ${Math.round(rate * 100)}% of your income this month.`,
+      };
+    }
+    if (rate < -0.05) {
+      return {
+        icon: TrendingDown, iconColor: '#D63B3B', label: 'Over budget',
+        text: `Spending exceeded income by ${fmt(Math.abs(net))} this month. Time to review.`,
+      };
+    }
+  }
+
+  // 3. Top spending category this month
+  const thisMonthExp = allExpenses.filter(e => e.date.startsWith(currentMonth));
+  if (thisMonthExp.length >= 3) {
+    const byCat: Record<string, number> = {};
+    for (const e of thisMonthExp) { byCat[e.category] = (byCat[e.category] ?? 0) + e.amount; }
+    const [topCat, topAmt] = Object.entries(byCat).sort(([,a],[,b]) => b - a)[0] ?? [];
+    if (topCat && topAmt) {
+      const total = thisMonthExp.reduce((s, e) => s + e.amount, 0);
+      const pct   = Math.round(topAmt / total * 100);
+      const meta  = EXPENSE_CATEGORIES[topCat as ExpenseCategory];
+      return {
+        icon: PieChart, iconColor: meta?.color ?? '#163A2F', label: 'Top category',
+        text: `${meta?.label ?? topCat} is ${pct}% of your spending this month.`,
+      };
+    }
+  }
+
+  // 4. Nearest active goal
+  const activeGoals = goals.filter(g => !g.isCompleted && g.progress > 0)
+    .sort((a, b) => b.progress - a.progress);
+  if (activeGoals[0]) {
+    const g = activeGoals[0];
+    const pct = Math.round(g.progress * 100);
+    return {
+      icon: Target, iconColor: '#C4A85A', label: 'Goal progress',
+      text: `You're ${pct}% towards "${g.name}". Keep going!`,
+    };
+  }
+
+  return null;
+}
+
+// ── InsightCard component ──────────────────────────────────────────────────────
+
+function InsightCard({ insight, onPress }: { insight: Insight; onPress: () => void }) {
+  const { colors, text, font, fontSize, radius } = useTheme();
+  const Icon = insight.icon;
+  return (
+    <Pressable onPress={onPress}>
+      <Card style={[styles.insightCard, { borderRadius: radius.lg }]}>
+        <View style={[styles.insightIconWrap, { backgroundColor: insight.iconColor + '18', borderRadius: radius.sm }]}>
+          <Icon size={18} color={insight.iconColor} strokeWidth={1.8} />
+        </View>
+        <View style={styles.insightBody}>
+          <View style={styles.insightLabelRow}>
+            <Lightbulb size={11} color={colors.textTertiary} strokeWidth={1.8} />
+            <Text style={[text.caption, { color: colors.textTertiary, marginLeft: 4, letterSpacing: 0.6, textTransform: 'uppercase', fontSize: 9 }]}>
+              {insight.label}
+            </Text>
+          </View>
+          <Text style={[{ fontFamily: font.sansRegular, fontSize: fontSize.sm, color: colors.text, marginTop: 3, lineHeight: 20 }]}>
+            {insight.text}
+          </Text>
+        </View>
+      </Card>
+    </Pressable>
+  );
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -81,6 +200,15 @@ function totalUnpaidBills(bills: Bill[]): number {
 function todaySpend(expenses: { date: string; amount: number }[]): number {
   const today = format(new Date(), 'yyyy-MM-dd');
   return expenses.filter((e) => e.date === today).reduce((sum, e) => sum + e.amount, 0);
+}
+
+/** Last 7 days spending per day (index 0 = 6 days ago, index 6 = today) */
+function last7DaysSpending(expenses: { date: string; amount: number }[]): number[] {
+  const today = new Date();
+  return Array.from({ length: 7 }, (_, i) => {
+    const d = format(subDays(today, 6 - i), 'yyyy-MM-dd');
+    return expenses.filter((e) => e.date === d).reduce((s, e) => s + e.amount, 0);
+  });
 }
 
 // ─── Summary Card ─────────────────────────────────────────────────────────────
@@ -183,6 +311,151 @@ function SectionHeader({
   );
 }
 
+// ─── 7-day Sparkline ─────────────────────────────────────────────────────────
+
+const DAY_LABELS = ['6d', '5d', '4d', '3d', '2d', '1d', 'T'] as const;
+
+interface SparklineProps {
+  data:    number[];
+  onPress: () => void;
+}
+
+function SpendingSparkline({ data, onPress }: SparklineProps) {
+  const { colors, text, radius } = useTheme();
+  const { fmt } = useCurrencyFormat();
+
+  const maxVal = Math.max(...data, 1);
+  const total  = data.reduce((s, v) => s + v, 0);
+
+  return (
+    <Pressable onPress={onPress}>
+      <Card style={styles.sparklineCard}>
+        <View style={styles.sparklineHeader}>
+          <Text style={[text.bodyMedium, { color: colors.text }]}>
+            Last 7 days
+          </Text>
+          <Text style={[text.bodySm, { color: colors.primary, fontWeight: '600' }]}>
+            {fmt(total)}
+          </Text>
+        </View>
+
+        {/* Bar chart */}
+        <View style={styles.sparklineBars}>
+          {data.map((val, i) => {
+            const heightPct = val > 0 ? Math.max(val / maxVal, 0.04) : 0.04;
+            const isToday   = i === 6;
+            const barColor  = isToday ? colors.primary : colors.primary + '50';
+            return (
+              <View key={i} style={styles.sparklineBarWrap}>
+                <View style={[styles.sparklineBarBg, { borderRadius: radius.sm }]}>
+                  <View
+                    style={[
+                      styles.sparklineBarFill,
+                      {
+                        height:          `${heightPct * 100}%`,
+                        backgroundColor: val === 0 ? colors.backgroundSecondary : barColor,
+                        borderRadius:    radius.sm,
+                      },
+                    ]}
+                  />
+                </View>
+                <Text
+                  style={[
+                    text.caption,
+                    {
+                      color:      isToday ? colors.primary : colors.textTertiary,
+                      fontWeight: isToday ? '700' : '400',
+                      marginTop:  4,
+                      fontSize:   10,
+                    },
+                  ]}
+                >
+                  {DAY_LABELS[i]}
+                </Text>
+              </View>
+            );
+          })}
+        </View>
+      </Card>
+    </Pressable>
+  );
+}
+
+// ─── Budget progress mini-bars ────────────────────────────────────────────────
+
+interface BudgetProgressSectionProps {
+  budgets: BudgetWithSpent[];
+  onSeeAll: () => void;
+}
+
+function BudgetProgressSection({ budgets, onSeeAll }: BudgetProgressSectionProps) {
+  const { colors, text, radius } = useTheme();
+  const { fmt } = useCurrencyFormat();
+
+  const visible = budgets.slice(0, 3);
+
+  const fillColor = (status: BudgetWithSpent['status']) => {
+    if (status === 'exceeded')   return colors.budgetExceeded;
+    if (status === 'near-limit') return colors.budgetNearLimit;
+    return colors.budgetHealthy;
+  };
+
+  return (
+    <Card style={styles.budgetMiniCard}>
+      {visible.map((b, idx) => {
+        const meta      = EXPENSE_CATEGORIES[b.category];
+        const pct       = Math.min(b.progress * 100, 100);
+        const isLast    = idx === visible.length - 1;
+        return (
+          <View
+            key={b.id}
+            style={[
+              styles.budgetMiniRow,
+              !isLast && { borderBottomWidth: 1, borderBottomColor: colors.borderLight },
+            ]}
+          >
+            <Text
+              style={[text.bodySm, { color: colors.text, flex: 1 }]}
+              numberOfLines={1}
+            >
+              {meta?.label ?? b.category}
+            </Text>
+            <Text style={[text.caption, { color: colors.textTertiary, marginRight: 8, minWidth: 32, textAlign: 'right' }]}>
+              {Math.round(pct)}%
+            </Text>
+            <View style={[styles.budgetMiniTrack, { backgroundColor: colors.backgroundSecondary, borderRadius: radius.full }]}>
+              <View
+                style={[
+                  styles.budgetMiniFill,
+                  {
+                    width:           `${pct}%`,
+                    backgroundColor: fillColor(b.status),
+                    borderRadius:    radius.full,
+                  },
+                ]}
+              />
+            </View>
+          </View>
+        );
+      })}
+
+      {budgets.length === 0 && (
+        <View style={styles.budgetMiniEmpty}>
+          <Text style={[text.bodySm, { color: colors.textSecondary }]}>No budgets set</Text>
+        </View>
+      )}
+
+      <Pressable onPress={onSeeAll} style={[styles.budgetMiniSeeAll, { borderTopColor: colors.borderLight }]}>
+        <Text style={[text.bodySm, { color: colors.accent }]}>
+          {budgets.length > 3
+            ? `See all ${budgets.length} budgets`
+            : 'Manage budgets'}
+        </Text>
+      </Pressable>
+    </Card>
+  );
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function HomeScreen() {
@@ -191,16 +464,22 @@ export default function HomeScreen() {
   const router = useRouter();
   const { user } = useAuthStore();
   const { bills, upcoming, overdue, dueToday, load: loadBills, isLoading: billsLoading } = useBillsStore();
-  const { expenses, load: loadExpenses, isLoading: expensesLoading } = useExpensesStore();
+  const { expenses, allExpenses, load: loadExpenses, isLoading: expensesLoading } = useExpensesStore();
+  const { allRecords: incRecords, loadAll: loadAllInc } = useIncomeStore();
   const { goals, load: loadGoals, isLoading: goalsLoading } = useGoalsStore();
+  const { budgets, load: loadBudgets, isLoading: budgetsLoading } = useBudgetsStore();
+  const notifUnread = useNotifHistoryStore((s) => s.unreadCount);
+  const hintBell = useFirstTimeHint('hint_home_bell');
 
-  const isLoading = billsLoading || expensesLoading || goalsLoading;
+  const isLoading = billsLoading || expensesLoading || goalsLoading || budgetsLoading;
   const { fmt, fmtCompact } = useCurrencyFormat();
 
   useEffect(() => {
     if (user) {
       loadBills(user.id);
       loadExpenses(user.id);
+      loadBudgets(user.id);
+      loadAllInc(user.id);
     }
   }, [user]);
 
@@ -219,12 +498,37 @@ export default function HomeScreen() {
     ? goals.reduce((s, g) => s + g.progress, 0) / goals.length
     : 0;
 
+  // Income vs expenses this month
+  const currentMonthStr = format(new Date(), 'yyyy-MM');
+  const incomeThisMonth = useMemo(
+    () => incRecords.filter((r) => r.date.startsWith(currentMonthStr)).reduce((s, r) => s + r.amount, 0),
+    [incRecords, currentMonthStr],
+  );
+  const spentThisMonth = useMemo(
+    () => allExpenses.filter((e) => e.date.startsWith(currentMonthStr)).reduce((s, e) => s + e.amount, 0),
+    [allExpenses, currentMonthStr],
+  );
+  const netThisMonth = incomeThisMonth - spentThisMonth;
+
   const upcomingBills   = [...upcoming, ...dueToday, ...overdue]
     .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
     .slice(0, 3);
 
   const recentExpenses = [...expenses].slice(0, 5);
   const displayGoals   = goals.filter((g) => !g.isCompleted).slice(0, 3);
+
+  // Sparkline: use allExpenses (all-time) for 7-day data
+  const sparklineData  = useMemo(
+    () => last7DaysSpending(allExpenses.length > 0 ? allExpenses : expenses),
+    [allExpenses, expenses],
+  );
+  const activeBudgets  = budgets.filter((b) => b.status !== 'healthy' || b.progress > 0);
+  const insight = useMemo(
+    () => !isLoading
+      ? computeInsight(allExpenses, incRecords, bills, goals, fmt)
+      : null,
+    [allExpenses, incRecords, bills, goals, fmt, isLoading],
+  );
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
@@ -262,6 +566,13 @@ export default function HomeScreen() {
             hitSlop={4}
           >
             <Bell size={20} color={colors.text} strokeWidth={1.8} />
+            {notifUnread > 0 && (
+              <View style={[styles.bellBadge, { backgroundColor: colors.danger }]}>
+                <Text style={{ fontFamily: font.sansSemiBold, fontSize: 9, color: '#fff', lineHeight: 13 }}>
+                  {notifUnread > 9 ? '9+' : String(notifUnread)}
+                </Text>
+              </View>
+            )}
           </TouchableOpacity>
         </Animated.View>
 
@@ -317,6 +628,14 @@ export default function HomeScreen() {
                 <Text style={[text.caption, { color: 'rgba(250,250,248,0.55)' }]}>Spent today</Text>
                 <BannerAmount kobo={spentToday} textStyle={[text.bodyMedium, { color: Palette.linen }]} />
               </View>
+              <View style={{ width: 1, backgroundColor: 'rgba(250,250,248,0.15)' }} />
+              <Pressable
+                onPress={() => router.push({ pathname: '/(tabs)/expenses', params: { segment: 'income' } } as never)}
+                hitSlop={8}
+              >
+                <Text style={[text.caption, { color: 'rgba(250,250,248,0.55)' }]}>Earned · Month</Text>
+                <BannerAmount kobo={incomeThisMonth} textStyle={[text.bodyMedium, { color: '#A5F3C0' }]} />
+              </Pressable>
             </View>
           </View>
         </Animated.View>}
@@ -353,14 +672,56 @@ export default function HomeScreen() {
           />
           <SummaryCard
             icon={TrendingUp}
-            iconColor={colors.success}
-            label="Spent today"
-            value={<CompactAmountDisplay kobo={spentToday} textStyle={{ fontFamily: font.sansSemiBold, fontSize: fontSize.md, color: colors.text }} align="left" />}
-            onPress={() => router.push('/(tabs)/expenses' as never)}
+            iconColor={netThisMonth >= 0 ? colors.success : colors.danger}
+            label="Net · Month"
+            value={
+              <Text
+                style={{ fontFamily: font.sansSemiBold, fontSize: fontSize.md, color: netThisMonth >= 0 ? colors.success : colors.danger }}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+              >
+                {netThisMonth >= 0 ? '+' : '−'}{fmtCompact(Math.abs(netThisMonth))}
+              </Text>
+            }
+            onPress={() => router.push('/analytics' as never)}
             entering={FadeInDown}
             delay={130}
           />
         </View>}
+
+        {/* ── SECTION 2.5: 7-day Spending Sparkline ── */}
+        {!isLoading && (
+          <Animated.View entering={FadeInDown.delay(150).duration(280)}>
+            <SpendingSparkline
+              data={sparklineData}
+              onPress={() => router.push('/analytics' as never)}
+            />
+          </Animated.View>
+        )}
+
+        {/* ── SECTION 2.6: Smart Financial Insight ── */}
+        {!isLoading && insight && (
+          <Animated.View entering={FadeInDown.delay(155).duration(280)}>
+            <InsightCard
+              insight={insight}
+              onPress={() => router.push('/analytics' as never)}
+            />
+          </Animated.View>
+        )}
+
+        {/* ── SECTION 2.7: Budget Progress ── */}
+        {!isLoading && budgets.length > 0 && (
+          <Animated.View entering={FadeInDown.delay(160).duration(280)}>
+            <SectionHeader
+              title="Budgets"
+              onSeeAll={() => router.push('/budgets' as never)}
+            />
+            <BudgetProgressSection
+              budgets={activeBudgets.length > 0 ? activeBudgets : budgets}
+              onSeeAll={() => router.push('/budgets' as never)}
+            />
+          </Animated.View>
+        )}
 
         {/* ── SECTION 3: Upcoming Bills ── */}
         <Animated.View entering={FadeInDown.delay(120).duration(280)}>
@@ -489,7 +850,14 @@ export default function HomeScreen() {
         </Animated.View>
       </ScrollView>
 
-
+      {/* First-time hint — shown once, slides up from bottom */}
+      <FirstTimeHint
+        visible={hintBell.visible}
+        onDismiss={hintBell.dismiss}
+        text="Tap the bell to see your financial alerts and notification history."
+        icon={Bell}
+        bottomOffset={layout.tabBarHeight + 16}
+      />
     </View>
   );
 }
@@ -525,6 +893,17 @@ const styles = StyleSheet.create({
     alignItems:      'center',
     justifyContent:  'center',
     marginTop:       4,
+  },
+  bellBadge: {
+    position:         'absolute',
+    top:              6,
+    right:            6,
+    minWidth:         16,
+    height:           16,
+    borderRadius:     8,
+    alignItems:       'center',
+    justifyContent:   'center',
+    paddingHorizontal: 3,
   },
 
   // Snapshot banner
@@ -601,4 +980,85 @@ const styles = StyleSheet.create({
     paddingBottom: 4,
   },
 
+  // Insight card
+  insightCard: {
+    flexDirection: 'row',
+    alignItems:    'flex-start',
+    padding:       14,
+    gap:           12,
+    marginBottom:  0,
+  },
+  insightIconWrap: {
+    width:          36,
+    height:         36,
+    alignItems:     'center',
+    justifyContent: 'center',
+    flexShrink:     0,
+  },
+  insightBody: {
+    flex: 1,
+  },
+  insightLabelRow: {
+    flexDirection: 'row',
+    alignItems:    'center',
+  },
+
+  // Sparkline
+  sparklineCard: {
+    padding: 16,
+  },
+  sparklineHeader: {
+    flexDirection:  'row',
+    justifyContent: 'space-between',
+    alignItems:     'center',
+    marginBottom:   14,
+  },
+  sparklineBars: {
+    flexDirection:  'row',
+    alignItems:     'flex-end',
+    gap:            6,
+    height:         60,
+  },
+  sparklineBarWrap: {
+    flex:           1,
+    alignItems:     'center',
+  },
+  sparklineBarBg: {
+    width:    '100%',
+    height:   48,
+    justifyContent: 'flex-end',
+  },
+  sparklineBarFill: {
+    width: '100%',
+  },
+
+  // Budget mini
+  budgetMiniCard: {
+    overflow: 'hidden',
+  },
+  budgetMiniRow: {
+    flexDirection:     'row',
+    alignItems:        'center',
+    paddingHorizontal: 16,
+    paddingVertical:   12,
+    gap:               8,
+  },
+  budgetMiniTrack: {
+    width:   80,
+    height:  6,
+    overflow: 'hidden',
+  },
+  budgetMiniFill: {
+    height: '100%',
+  },
+  budgetMiniEmpty: {
+    paddingVertical:   20,
+    alignItems:        'center',
+    paddingHorizontal: 16,
+  },
+  budgetMiniSeeAll: {
+    paddingHorizontal: 16,
+    paddingVertical:   10,
+    borderTopWidth:    1,
+  },
 });

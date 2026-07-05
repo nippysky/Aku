@@ -1,31 +1,38 @@
 import { create } from 'zustand';
-import * as SecureStore from 'expo-secure-store';
+import { getSQLiteDatabase } from '../lib/database/client';
 import { generateUUID } from '../lib/uuid';
 import type { CurrencyOption } from '../lib/currencies';
 import { DEFAULT_CURRENCY, CURRENCIES } from '../lib/currencies';
 
-// ─── Persistence keys ─────────────────────────────────────────────────────────
+// ─── Persistence keys (SQLite app_state table) ────────────────────────────────
 const KEY_THEME    = 'aku_theme_mode';
 const KEY_CURRENCY = 'aku_currency_code';
 const KEY_BASE_CCY = 'aku_base_currency';
 
+// ─── SQLite app_state helpers ─────────────────────────────────────────────────
+// Non-sensitive UI prefs live in SQLite (not SecureStore — Keychain is for secrets).
+
+function appStateGet(key: string): string | null {
+  try {
+    const sqlite = getSQLiteDatabase();
+    const row = sqlite.getFirstSync<{ value: string }>(
+      'SELECT value FROM app_state WHERE key = ?', [key],
+    );
+    return row?.value ?? null;
+  } catch { return null; }
+}
+
+function appStateSet(key: string, value: string): void {
+  try {
+    const sqlite = getSQLiteDatabase();
+    sqlite.runSync(
+      'INSERT INTO app_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+      [key, value],
+    );
+  } catch { /* ignore */ }
+}
+
 export type ThemeMode = 'system' | 'light' | 'dark';
-
-// ─── UI Store ─────────────────────────────────────────────────────────────
-// Tracks transient UI state: sheets, loading, toasts.
-
-export type SheetName =
-  | 'add-expense'
-  | 'add-bill'
-  | 'add-goal'
-  | 'add-contribution'
-  | 'edit-bill'
-  | 'edit-expense'
-  | 'edit-goal'
-  | 'category-picker'
-  | 'date-picker'
-  | 'frequency-picker'
-  | null;
 
 export interface Toast {
   id:      string;
@@ -33,22 +40,14 @@ export interface Toast {
   message: string;
 }
 
-// ─── State ────────────────────────────────────────────────────────────────
+// ─── State ────────────────────────────────────────────────────────────────────
 
 interface UIState {
-  // Sheets
-  activeSheet:     SheetName;
-  sheetData:       Record<string, unknown>;
-
   // Toast notifications
   toasts:          Toast[];
 
   // Global loading overlay (for auth transitions)
   isGlobalLoading: boolean;
-
-  // Actions — Sheets
-  openSheet:   (name: SheetName, data?: Record<string, unknown>) => void;
-  closeSheet:  () => void;
 
   // Actions — Toasts
   showToast:   (type: Toast['type'], message: string) => void;
@@ -71,15 +70,13 @@ interface UIState {
   themeMode:    ThemeMode;
   setThemeMode: (mode: ThemeMode) => void;
 
-  // Persist + rehydrate settings from SecureStore
+  // Persist + rehydrate settings from SQLite
   loadSettings: () => Promise<void>;
 }
 
-// ─── Store ────────────────────────────────────────────────────────────────
+// ─── Store ────────────────────────────────────────────────────────────────────
 
 export const useUIStore = create<UIState>()((set, get) => ({
-  activeSheet:      null,
-  sheetData:        {},
   toasts:           [],
   isGlobalLoading:  false,
   currency:         DEFAULT_CURRENCY,
@@ -89,12 +86,6 @@ export const useUIStore = create<UIState>()((set, get) => ({
   exchangeRates:    null,
   ratesFetchedAt:   null,
   themeMode:        'system',
-
-  openSheet: (name, data = {}) =>
-    set({ activeSheet: name, sheetData: data }),
-
-  closeSheet: () =>
-    set({ activeSheet: null, sheetData: {} }),
 
   showToast: (type, message) => {
     const id = generateUUID();
@@ -113,14 +104,13 @@ export const useUIStore = create<UIState>()((set, get) => ({
   setCurrency: (currency) =>
     set((s) => {
       const baseCurrencyCode = s.baseCurrencyCode || DEFAULT_CURRENCY.code;
-      // Persist both selections
-      SecureStore.setItemAsync(KEY_CURRENCY, currency.code).catch(() => {});
+      appStateSet(KEY_CURRENCY, currency.code);
       if (!s.baseCurrencyCode) {
-        SecureStore.setItemAsync(KEY_BASE_CCY, baseCurrencyCode).catch(() => {});
+        appStateSet(KEY_BASE_CCY, baseCurrencyCode);
       }
       return {
         currency,
-        // baseCurrencyCode locks in the ENTRY currency.  Only set it once.
+        // baseCurrencyCode locks in the ENTRY currency. Only set it once.
         baseCurrencyCode,
       };
     }),
@@ -140,16 +130,14 @@ export const useUIStore = create<UIState>()((set, get) => ({
 
   setThemeMode: (mode) => {
     set({ themeMode: mode });
-    SecureStore.setItemAsync(KEY_THEME, mode).catch(() => {});
+    appStateSet(KEY_THEME, mode);
   },
 
   loadSettings: async () => {
     try {
-      const [themeSaved, currencyCode, baseCCY] = await Promise.all([
-        SecureStore.getItemAsync(KEY_THEME),
-        SecureStore.getItemAsync(KEY_CURRENCY),
-        SecureStore.getItemAsync(KEY_BASE_CCY),
-      ]);
+      const themeSaved   = appStateGet(KEY_THEME);
+      const currencyCode = appStateGet(KEY_CURRENCY);
+      const baseCCY      = appStateGet(KEY_BASE_CCY);
 
       const updates: Partial<UIState> = {};
 

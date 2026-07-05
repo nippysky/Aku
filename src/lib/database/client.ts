@@ -40,6 +40,7 @@ const CREATE_TABLES_SQL = `
     email TEXT NOT NULL UNIQUE,
     household_id TEXT,
     avatar_url TEXT,
+    avatar_data TEXT,
     pin_hash TEXT,
     biometric_enabled INTEGER DEFAULT 0,
     created_at TEXT NOT NULL,
@@ -183,6 +184,54 @@ const CREATE_TABLES_SQL = `
     value TEXT NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS recurring_expenses (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    amount INTEGER NOT NULL,
+    category TEXT NOT NULL,
+    frequency TEXT NOT NULL,
+    next_date TEXT NOT NULL,
+    notes TEXT,
+    is_active INTEGER DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS income (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    amount INTEGER NOT NULL,
+    category TEXT NOT NULL,
+    description TEXT,
+    date TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_income_user ON income(user_id);
+  CREATE INDEX IF NOT EXISTS idx_income_date ON income(date);
+  CREATE INDEX IF NOT EXISTS idx_income_category ON income(category);
+
+  CREATE TABLE IF NOT EXISTS recurring_income (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    amount INTEGER NOT NULL,
+    category TEXT NOT NULL,
+    frequency TEXT NOT NULL,
+    next_date TEXT NOT NULL,
+    notes TEXT,
+    is_active INTEGER DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_recurring_expenses_user ON recurring_expenses(user_id);
+  CREATE INDEX IF NOT EXISTS idx_recurring_expenses_next ON recurring_expenses(next_date);
+  CREATE INDEX IF NOT EXISTS idx_recurring_income_user ON recurring_income(user_id);
+  CREATE INDEX IF NOT EXISTS idx_recurring_income_next ON recurring_income(next_date);
+
   CREATE INDEX IF NOT EXISTS idx_circle_contributions_circle ON circle_contributions(circle_id);
   CREATE INDEX IF NOT EXISTS idx_circle_contributions_user ON circle_contributions(user_id);
   CREATE INDEX IF NOT EXISTS idx_circle_contributions_status ON circle_contributions(status);
@@ -210,6 +259,11 @@ const MIGRATIONS_SQL = [
   "ALTER TABLE circle_settings ADD COLUMN contribution_type TEXT DEFAULT 'equal'",
   "ALTER TABLE circle_settings ADD COLUMN deadline TEXT",
   "ALTER TABLE households ADD COLUMN invite_code TEXT",
+  // avatar_data: base64 profile photo stored locally — no CDN dependency
+  "ALTER TABLE users ADD COLUMN avatar_data TEXT",
+  // recurring income → goal auto-contribute
+  "ALTER TABLE recurring_income ADD COLUMN goal_id TEXT",
+  "ALTER TABLE recurring_income ADD COLUMN allocation_pct INTEGER DEFAULT 0",
 ];
 
 export async function initializeDatabase(): Promise<void> {

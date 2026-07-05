@@ -105,10 +105,13 @@ async function apiFetch<T>(path: string, opts: FetchOptions = {}): Promise<T> {
 // ─── Auth endpoints ───────────────────────────────────────────────────────────
 
 export type UserProfile = {
-  id:        string;
-  name:      string;
-  email:     string;
-  avatarUrl: string | null;
+  id:         string;
+  name:       string;
+  email:      string;
+  avatarUrl:  string | null;
+  avatarData: string | null;
+  /** True only when the account was created in this magic-link request. */
+  isNew?:     boolean;
 };
 
 /**
@@ -159,23 +162,179 @@ export async function updateName(name: string): Promise<void> {
 }
 
 /**
- * Upload an avatar image. Pass a local file URI (from expo-image-picker).
- * Returns the Cloudinary HTTPS URL.
+ * Sync avatar to the server (fire-and-forget).
+ * Pass the full data URI: `data:image/jpeg;base64,...`
+ * Server stores it in the users.avatar_data PostgreSQL column.
  */
-export async function uploadAvatarFile(localUri: string): Promise<string> {
-  const form = new FormData();
-
-  // React Native's FormData accepts { uri, name, type } objects
-  form.append('avatar', {
-    uri:  localUri,
-    name: 'avatar.jpg',
-    type: 'image/jpeg',
-  } as unknown as Blob);
-
-  const res = await apiFetch<{ avatarUrl: string }>('/api/user/avatar', {
-    method: 'POST',
-    body:   form,
+export async function syncAvatarData(avatarData: string): Promise<void> {
+  await apiFetch('/api/user/avatar-data', {
+    method: 'PUT',
+    body:   { avatarData },
   });
+}
 
-  return res.avatarUrl;
+// ─── DEK endpoints ───────────────────────────────────────────────────────────
+
+/**
+ * Fetch the user's DEK from the server (auth-gated).
+ * Returns the DEK as a 64-char hex string, or null if the server has no DEK
+ * stored yet (brand-new account that hasn't completed PIN setup yet).
+ *
+ * Called on new-device restore inside setupPin() before generating a fresh key.
+ */
+export async function fetchDek(): Promise<string | null> {
+  const res = await apiFetch<{ dek: string | null }>('/api/user/dek');
+  return res.dek;
+}
+
+/**
+ * Upload the user's DEK to the server for safe-keeping.
+ * The server encrypts it at rest with its master key before storing.
+ * Idempotent — safe to call multiple times (each call overwrites the previous).
+ *
+ * @param dekHex 64-char lowercase hex string (the raw 32-byte DEK, hex-encoded).
+ */
+export async function uploadDek(dekHex: string): Promise<void> {
+  await apiFetch('/api/user/dek', { method: 'POST', body: { dek: dekHex } });
+}
+
+// ─── Notification endpoints ───────────────────────────────────────────────────
+
+/**
+ * Register a device's Expo push token with the server.
+ * Safe to call on every app launch — the server upserts.
+ */
+export async function registerPushToken(
+  token: string,
+  platform: 'ios' | 'android',
+): Promise<void> {
+  await apiFetch('/api/notifications/token', {
+    method: 'POST',
+    body:   { token, platform },
+  });
+}
+
+/**
+ * Deregister a push token on sign-out so the device stops receiving
+ * push notifications while logged out.
+ */
+export async function deregisterPushToken(token: string): Promise<void> {
+  try {
+    await apiFetch('/api/notifications/token', {
+      method: 'DELETE',
+      body:   { token },
+    });
+  } catch {
+    // Best-effort — token will be pruned by DeviceNotRegistered cleanup anyway
+  }
+}
+
+/**
+ * Fan out a circle event push notification to a list of recipient user IDs.
+ * Server resolves their registered push tokens and sends the notification.
+ * Best-effort — silently ignores errors so it never blocks the caller.
+ */
+export async function sendCircleNotification(
+  recipientUserIds: string[],
+  title: string,
+  body: string,
+  data?: Record<string, string>,
+): Promise<void> {
+  if (recipientUserIds.length === 0) return;
+  try {
+    await apiFetch('/api/notifications/circle-event', {
+      method: 'POST',
+      body:   { recipientUserIds, title, body, data: data ?? {} },
+    });
+  } catch {
+    // Non-critical — push notifications are additive
+  }
+}
+
+// ─── Statement parse endpoint ─────────────────────────────────────────────────
+
+export type ServerTransaction = {
+  date:        string;
+  description: string;
+  amount:      number;
+  type:        'credit' | 'debit';
+};
+
+/**
+ * Upload a base64-encoded PDF to the server for text extraction and
+ * best-effort transaction parsing. Returns up to 200 transactions.
+ */
+export async function parseStatementPDF(pdfBase64: string): Promise<ServerTransaction[]> {
+  const res = await apiFetch<{ transactions: ServerTransaction[] }>(
+    '/api/statement/parse',
+    { method: 'POST', body: { pdfBase64 } },
+  );
+  return res.transactions;
+}
+
+// ─── Receipt OCR endpoint ─────────────────────────────────────────────────────
+
+/**
+ * Send a base64-encoded receipt image to the server for OCR text extraction.
+ * Returns the detected total amount in kobo (×100), or null if undetected.
+ */
+export async function scanReceiptImage(imageBase64: string): Promise<number | null> {
+  const res = await apiFetch<{ amount: number | null }>(
+    '/api/receipt/scan',
+    { method: 'POST', body: { imageBase64 } },
+  );
+  return res.amount;
+}
+
+// ─── Sync endpoints ───────────────────────────────────────────────────────────
+
+export type SyncPushRecord = {
+  id:               string;
+  entityType:       string;
+  entityId:         string;
+  encryptedPayload: string;
+  clientUpdatedAt:  string;
+  isDeleted:        boolean;
+};
+
+export type SyncPulledRecord = {
+  id:               string;
+  entityType:       string;
+  entityId:         string;
+  encryptedPayload: string;
+  clientUpdatedAt:  string;
+  serverUpdatedAt:  string;
+  isDeleted:        boolean;
+};
+
+/**
+ * Push a batch of encrypted records to the server.
+ * Returns the number of records pushed and the server timestamp.
+ */
+export async function syncPush(
+  records: SyncPushRecord[],
+): Promise<{ pushed: number; serverUpdatedAt: string }> {
+  return apiFetch('/api/sync/push', { method: 'POST', body: { records } });
+}
+
+/**
+ * Pull encrypted records from the server.
+ * Pass `since` (ISO string) to fetch only deltas since the last sync.
+ * Omit `since` to pull everything (full restore on new device).
+ */
+export async function syncPull(
+  since?: string,
+): Promise<{ records: SyncPulledRecord[]; pulledAt: string }> {
+  const qs = since ? `?since=${encodeURIComponent(since)}` : '';
+  return apiFetch(`/api/sync/pull${qs}`);
+}
+
+/**
+ * Get sync statistics (record counts by entity type).
+ */
+export async function getSyncStats(): Promise<{
+  counts: Record<string, number>;
+  totalActive: number;
+}> {
+  return apiFetch('/api/sync/stats');
 }

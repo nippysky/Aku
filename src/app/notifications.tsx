@@ -9,7 +9,7 @@
  *   2. "Updates"          — upcoming bills, budget warnings, goal milestones
  *   3. "Preferences"      — push notification toggles
  */
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
@@ -17,6 +17,7 @@ import {
   ScrollView,
   Pressable,
   Platform,
+  Alert,
 } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -32,14 +33,18 @@ import {
   CheckCircle2,
   ChevronRight,
   Settings2,
+  Bell,
+  Trash2,
 } from 'lucide-react-native';
-import { differenceInDays, parseISO } from 'date-fns';
+import { differenceInDays, formatDistanceToNow, parseISO } from 'date-fns';
 import { useTheme } from '../theme';
 import { Palette } from '../theme/colors';
 import { Divider } from '../components/ui/Divider';
 import { useBillsStore } from '../store/bills.store';
 import { useGoalsStore } from '../store/goals.store';
 import { useUIStore } from '../store/ui.store';
+import { useAuthStore } from '../store/auth.store';
+import { useNotifHistoryStore } from '../store/notif-history.store';
 import { formatAmount } from '../lib/format';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -250,14 +255,34 @@ export default function NotificationsScreen() {
   const router = useRouter();
 
   const { currency } = useUIStore();
+  const { user } = useAuthStore();
   const symbol = currency.symbol;
 
+  // ── Computed smart alerts ────────────────────────────────────────────────
   const [readIds, setReadIds] = useState<Set<string>>(new Set());
 
   const alerts   = useAlerts(symbol, colors.danger, colors.warning, colors.primary);
   const critical = alerts.filter((a) => a.priority === 'high');
   const updates  = alerts.filter((a) => a.priority === 'normal');
-  const unreadCount = alerts.filter((a) => !readIds.has(a.id)).length;
+  const computedUnread = alerts.filter((a) => !readIds.has(a.id)).length;
+
+  // ── Push history ─────────────────────────────────────────────────────────
+  const {
+    items: historyItems,
+    unreadCount: historyUnread,
+    markRead: markHistRead,
+    markAllRead: markHistAllRead,
+    clearAll: clearAllHist,
+  } = useNotifHistoryStore();
+
+  // Auto-mark history as read when screen opens
+  useEffect(() => {
+    if (user && historyUnread > 0) {
+      markHistAllRead(user.id);
+    }
+  }, []);
+
+  const totalUnread = computedUnread + historyUnread;
 
   // ── Read state ──────────────────────────────────────────────────────────
   const markRead = useCallback((id: string) => {
@@ -266,7 +291,20 @@ export default function NotificationsScreen() {
 
   const markAllRead = useCallback(() => {
     setReadIds(new Set(alerts.map((a) => a.id)));
-  }, [alerts]);
+    if (user) markHistAllRead(user.id);
+  }, [alerts, user]);
+
+  const handleClearHistory = useCallback(() => {
+    if (!user) return;
+    Alert.alert(
+      'Clear History',
+      'Remove all notification history?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Clear', style: 'destructive', onPress: () => clearAllHist(user.id) },
+      ],
+    );
+  }, [user]);
 
   const navigate = useCallback(
     (href: string) => router.push(href as never),
@@ -310,7 +348,7 @@ export default function NotificationsScreen() {
             >
               Notifications
             </Text>
-            {unreadCount > 0 && (
+            {totalUnread > 0 && (
               <View style={[styles.countBadge, { backgroundColor: Palette.gold }]}>
                 <Text
                   style={[
@@ -322,14 +360,14 @@ export default function NotificationsScreen() {
                     },
                   ]}
                 >
-                  {unreadCount}
+                  {totalUnread}
                 </Text>
               </View>
             )}
           </View>
 
           <View style={styles.headerRight}>
-            {unreadCount > 0 && (
+            {totalUnread > 0 && (
               <Pressable onPress={markAllRead} hitSlop={12} style={{ marginRight: 8 }}>
                 <Text
                   style={[
@@ -477,6 +515,88 @@ export default function NotificationsScreen() {
           </Animated.View>
         )}
 
+        {/* ── Push Notification History ── */}
+        {historyItems.length > 0 && (
+          <Animated.View entering={FadeInDown.delay(100).duration(200)}>
+            <View style={styles.historyHeader}>
+              <Text style={[text.labelCaps, styles.sectionLabel, { color: colors.textTertiary, marginTop: 20, marginBottom: 0 }]}>
+                Recent
+              </Text>
+              <Pressable onPress={handleClearHistory} hitSlop={10} style={{ padding: 4 }}>
+                <Trash2 size={14} color={colors.textTertiary} strokeWidth={1.8} />
+              </Pressable>
+            </View>
+            <View
+              style={[
+                styles.group,
+                {
+                  marginTop:    8,
+                  borderRadius: radius.lg,
+                  overflow:     'hidden',
+                  borderWidth:  1,
+                  borderColor:  colors.border,
+                },
+              ]}
+            >
+              {historyItems.map((item, idx) => {
+                const isFirst = idx === 0;
+                const isLast  = idx === historyItems.length - 1;
+                const ago     = formatDistanceToNow(parseISO(item.createdAt), { addSuffix: true });
+                return (
+                  <React.Fragment key={item.id}>
+                    <Pressable
+                      onPress={() => markHistRead(item.id)}
+                      style={[
+                        styles.alertRow,
+                        {
+                          backgroundColor:         colors.card,
+                          borderTopLeftRadius:     isFirst ? radius.lg : 0,
+                          borderTopRightRadius:    isFirst ? radius.lg : 0,
+                          borderBottomLeftRadius:  isLast  ? radius.lg : 0,
+                          borderBottomRightRadius: isLast  ? radius.lg : 0,
+                        },
+                      ]}
+                    >
+                      <View
+                        style={[
+                          styles.alertIconWrap,
+                          { backgroundColor: colors.primary + '14', borderRadius: radius.full },
+                        ]}
+                      >
+                        <Bell size={16} color={colors.primary} strokeWidth={1.8} />
+                      </View>
+                      <View style={styles.alertBody}>
+                        <View style={styles.alertTitleRow}>
+                          <Text
+                            style={[styles.alertTitle, { fontFamily: font.sansMedium, fontSize: fontSize.sm, color: colors.text }]}
+                            numberOfLines={1}
+                          >
+                            {item.title}
+                          </Text>
+                          {!item.isRead && (
+                            <View style={[styles.unreadDot, { backgroundColor: colors.primary }]} />
+                          )}
+                        </View>
+                        <Text style={[text.caption, { color: colors.textSecondary, marginTop: 2 }]} numberOfLines={2}>
+                          {item.body}
+                        </Text>
+                        <Text style={[text.caption, { color: colors.textTertiary, marginTop: 3 }]}>
+                          {ago}
+                        </Text>
+                      </View>
+                    </Pressable>
+                    {!isLast && (
+                      <View style={{ backgroundColor: colors.card }}>
+                        <Divider style={{ marginLeft: 56 }} />
+                      </View>
+                    )}
+                  </React.Fragment>
+                );
+              })}
+            </View>
+          </Animated.View>
+        )}
+
         {/* Settings link */}
         <Animated.View entering={FadeInDown.delay(120).duration(200)}>
           <Pressable
@@ -588,6 +708,14 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   group: {},
+  historyHeader: {
+    flexDirection:  'row',
+    alignItems:     'center',
+    justifyContent: 'space-between',
+    marginTop:      20,
+    marginBottom:   8,
+    marginLeft:     2,
+  },
 
   // ── Alert row ──
   alertRow: {

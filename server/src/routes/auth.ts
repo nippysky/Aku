@@ -57,18 +57,21 @@ router.post('/magic-link', async (c) => {
     return c.json({ error: 'Valid email is required' }, 400);
   }
 
-  // Find or create the user
+  // Find or create the user — track whether this is a brand-new account.
   let [user] = await db.select().from(users).where(eq(users.email, email)).limit(1);
+  let isNewUser = false;
 
   if (!user) {
-    const now = new Date().toISOString();
+    isNewUser = true;
     const newUser = {
-      id:        generateId(),
-      name:      body.name ?? email.split('@')[0],
+      id:           generateId(),
+      name:         body.name ?? email.split('@')[0],
       email,
-      avatarUrl: null,
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      avatarUrl:    null,
+      avatarData:   null,
+      encryptedDek: null,  // set by the client after first PIN setup
+      createdAt:    new Date(),
+      updatedAt:    new Date(),
     };
     await db.insert(users).values(newUser);
     user = { ...newUser };
@@ -83,6 +86,7 @@ router.post('/magic-link', async (c) => {
     email,
     tokenHash,
     expiresAt: getExpiryDate(),
+    isNew:     isNewUser,  // client uses this to skip onboarding for returning users
   });
 
   // Build the verification URL (goes to the server, then redirects to app)
@@ -128,6 +132,9 @@ router.get('/magic-link/verify', async (c) => {
     return c.html(errorPage('This link has expired or already been used. Please request a new one.'), 400);
   }
 
+  // Carry the new-user flag through to the deep link
+  const isNewUser = record.isNew;
+
   // Mark token as used
   await db
     .update(magicTokens)
@@ -167,12 +174,16 @@ router.get('/magic-link/verify', async (c) => {
 
   // Redirect to the app's deep link
   // The app's auth-callback route reads ?token= and ?user=
+  // isNew tells the app whether to route to full onboarding (new user)
+  // or PIN-setup-only (returning user on a new device).
   const scheme   = process.env.APP_SCHEME ?? 'aku';
   const userData = Buffer.from(JSON.stringify({
-    id:        user.id,
-    name:      user.name,
-    email:     user.email,
-    avatarUrl: user.avatarUrl,
+    id:         user.id,
+    name:       user.name,
+    email:      user.email,
+    avatarUrl:  user.avatarUrl,
+    avatarData: user.avatarData,
+    isNew:      isNewUser,
   })).toString('base64');
 
   const deepLink = `${scheme}://auth-callback?token=${encodeURIComponent(jwt)}&user=${encodeURIComponent(userData)}`;
@@ -198,10 +209,11 @@ router.get('/session', authMiddleware, async (c) => {
 
   return c.json({
     user: {
-      id:        user.id,
-      name:      user.name,
-      email:     user.email,
-      avatarUrl: user.avatarUrl,
+      id:         user.id,
+      name:       user.name,
+      email:      user.email,
+      avatarUrl:  user.avatarUrl,
+      avatarData: user.avatarData,
     },
     sessionId: payload.sessionId,
   });

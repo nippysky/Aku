@@ -1,11 +1,35 @@
 import { create } from 'zustand';
 import { eq } from 'drizzle-orm';
 import { getDatabase, schema } from '../lib/database/client';
-import { differenceInDays, parseISO, format } from 'date-fns';
+import {
+  differenceInDays, parseISO, format,
+  addWeeks, addMonths, addYears,
+} from 'date-fns';
 import { generateUUID } from '../lib/uuid';
-import type { Bill, BillCreateInput, BillUpdateInput, BillStatus } from '../types';
+import { notificationService } from '../lib/notifications';
+import { useUIStore } from './ui.store';
+import type { Bill, BillCreateInput, BillUpdateInput, BillStatus, BillFrequency } from '../types';
 
-// ─── Helpers ──────────────────────────────────────────────────────────────
+// ─── Recurring due-date helper ────────────────────────────────────────────────
+
+/**
+ * Given the current due date and frequency, returns the next due date string.
+ * Returns null for one-time or custom bills (no auto-advance).
+ */
+function advanceDueDate(dueDate: string, frequency: BillFrequency): string | null {
+  if (frequency === 'one-time' || frequency === 'custom') return null;
+  const date = parseISO(dueDate);
+  switch (frequency) {
+    case 'weekly':    return format(addWeeks(date, 1),   'yyyy-MM-dd');
+    case 'biweekly':  return format(addWeeks(date, 2),   'yyyy-MM-dd');
+    case 'monthly':   return format(addMonths(date, 1),  'yyyy-MM-dd');
+    case 'quarterly': return format(addMonths(date, 3),  'yyyy-MM-dd');
+    case 'yearly':    return format(addYears(date, 1),   'yyyy-MM-dd');
+    default:          return null;
+  }
+}
+
+// ─── Status helper ────────────────────────────────────────────────────────────
 
 function computeStatus(bill: Bill): BillStatus {
   if (bill.isPaid) return 'paid';
@@ -43,14 +67,14 @@ function fromDb(row: typeof schema.bills.$inferSelect): Bill {
   };
 }
 
-// ─── State ────────────────────────────────────────────────────────────────
+// ─── State ────────────────────────────────────────────────────────────────────
 
 interface BillsState {
   bills:      Bill[];
   isLoading:  boolean;
   error:      string | null;
 
-  // Computed
+  // Computed slices
   upcoming:   Bill[];
   dueToday:   Bill[];
   overdue:    Bill[];
@@ -66,7 +90,7 @@ interface BillsState {
   clearError: () => void;
 }
 
-// ─── Store ────────────────────────────────────────────────────────────────
+// ─── Store ────────────────────────────────────────────────────────────────────
 
 export const useBillsStore = create<BillsState>()((set, get) => ({
   bills:     [],
@@ -136,6 +160,9 @@ export const useBillsStore = create<BillsState>()((set, get) => ({
         updatedAt: now,
       };
 
+      // Schedule local notifications for the new bill (fire-and-forget)
+      notificationService.scheduleBillReminders(newBill, useUIStore.getState().currency.symbol).catch(() => {});
+
       const bills = [...get().bills, newBill].sort((a, b) =>
         a.dueDate.localeCompare(b.dueDate)
       );
@@ -161,11 +188,13 @@ export const useBillsStore = create<BillsState>()((set, get) => ({
         .set({ ...rest, updatedAt: now })
         .where(eq(schema.bills.id, id));
 
-      const bills = get().bills.map((b) =>
-        b.id === id
-          ? { ...b, ...rest, updatedAt: now, status: computeStatus({ ...b, ...rest }) }
-          : b
-      );
+      const bills = get().bills.map((b) => {
+        if (b.id !== id) return b;
+        const updated = { ...b, ...rest, updatedAt: now, status: computeStatus({ ...b, ...rest }) };
+        // Reschedule notifications whenever bill details change (fire-and-forget)
+        notificationService.scheduleBillReminders(updated, useUIStore.getState().currency.symbol).catch(() => {});
+        return updated;
+      });
       _setBills(set, bills);
     } catch (e: any) {
       set({ error: e?.message ?? 'Failed to update bill' });
@@ -176,39 +205,77 @@ export const useBillsStore = create<BillsState>()((set, get) => ({
 
   markPaid: async (id) => {
     const now = new Date().toISOString();
-    const db = getDatabase();
-    await db
-      .update(schema.bills)
-      .set({ isPaid: true, paidAt: now, updatedAt: now })
-      .where(eq(schema.bills.id, id));
+    const db  = getDatabase();
 
-    const bills = get().bills.map((b) =>
-      b.id === id
-        ? { ...b, isPaid: true, paidAt: now, status: 'paid' as BillStatus, updatedAt: now }
-        : b
-    );
-    _setBills(set, bills);
+    const bill = get().bills.find((b) => b.id === id);
+    if (!bill) return;
+
+    // ── Recurring bill: advance due date instead of permanently marking paid ──
+    const nextDue = advanceDueDate(bill.dueDate, bill.frequency);
+
+    if (nextDue) {
+      // Reset to unpaid with the next due date
+      await db
+        .update(schema.bills)
+        .set({ isPaid: false, paidAt: null, dueDate: nextDue, updatedAt: now })
+        .where(eq(schema.bills.id, id));
+
+      const updated: Bill = {
+        ...bill,
+        isPaid:  false,
+        paidAt:  null,
+        dueDate: nextDue,
+        updatedAt: now,
+        status: computeStatus({ ...bill, isPaid: false, dueDate: nextDue }),
+      };
+
+      // Reschedule notifications for the next due date
+      notificationService.scheduleBillReminders(updated, useUIStore.getState().currency.symbol).catch(() => {});
+
+      const bills = get().bills.map((b) => b.id === id ? updated : b);
+      _setBills(set, bills);
+    } else {
+      // One-time or custom: mark permanently paid
+      await db
+        .update(schema.bills)
+        .set({ isPaid: true, paidAt: now, updatedAt: now })
+        .where(eq(schema.bills.id, id));
+
+      // Cancel any pending reminders — bill is done
+      notificationService.cancelBillReminders(id).catch(() => {});
+
+      const bills = get().bills.map((b) =>
+        b.id === id
+          ? { ...b, isPaid: true, paidAt: now, status: 'paid' as BillStatus, updatedAt: now }
+          : b
+      );
+      _setBills(set, bills);
+    }
   },
 
   markUnpaid: async (id) => {
     const now = new Date().toISOString();
-    const db = getDatabase();
+    const db  = getDatabase();
     await db
       .update(schema.bills)
       .set({ isPaid: false, paidAt: null, updatedAt: now })
       .where(eq(schema.bills.id, id));
 
-    const bills = get().bills.map((b) =>
-      b.id === id
-        ? { ...b, isPaid: false, paidAt: null, status: computeStatus({ ...b, isPaid: false }), updatedAt: now }
-        : b
-    );
+    const bills = get().bills.map((b) => {
+      if (b.id !== id) return b;
+      const updated = { ...b, isPaid: false, paidAt: null, status: computeStatus({ ...b, isPaid: false }), updatedAt: now };
+      // Re-enable notifications for this bill
+      notificationService.scheduleBillReminders(updated, useUIStore.getState().currency.symbol).catch(() => {});
+      return updated;
+    });
     _setBills(set, bills);
   },
 
   remove: async (id) => {
     const db = getDatabase();
     await db.delete(schema.bills).where(eq(schema.bills.id, id));
+    // Cancel all scheduled reminders for the deleted bill
+    notificationService.cancelBillReminders(id).catch(() => {});
     const bills = get().bills.filter((b) => b.id !== id);
     _setBills(set, bills);
   },
@@ -216,7 +283,7 @@ export const useBillsStore = create<BillsState>()((set, get) => ({
   clearError: () => set({ error: null }),
 }));
 
-// ─── Private helper: set bills + recompute computed slices ────────────────
+// ─── Private helper: set bills + recompute computed slices ────────────────────
 
 function _setBills(set: any, bills: Bill[]) {
   set({

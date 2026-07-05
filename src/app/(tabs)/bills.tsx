@@ -28,6 +28,8 @@ import { EditBillSheet } from '../../components/bills/EditBillSheet';
 import { useBillsStore } from '../../store/bills.store';
 import { useAuthStore } from '../../store/auth.store';
 import { useCurrencyFormat } from '../../hooks/useCurrencyFormat';
+import { FirstTimeHint } from '../../components/ui/FirstTimeHint';
+import { useFirstTimeHint } from '../../hooks/useFirstTimeHint';
 import type { Bill } from '../../types';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -255,6 +257,7 @@ export default function BillsScreen() {
 
   const { bills, load: loadBills, isLoading } = useBillsStore();
   const { user } = useAuthStore();
+  const hintBill = useFirstTimeHint('hint_bills_paid');
 
   const [segment,     setSegment]     = useState<SegmentKey>('all');
   const [searchOpen,  setSearchOpen]  = useState(false);
@@ -385,6 +388,13 @@ export default function BillsScreen() {
         bill={editBill}
         onClose={() => setEditBill(null)}
         onSuccess={handleReload}
+      />
+
+      <FirstTimeHint
+        visible={hintBill.visible}
+        onDismiss={hintBill.dismiss}
+        text="Tap a bill to view details or mark it as paid."
+        bottomOffset={layout.tabBarHeight + 16}
       />
     </View>
   );

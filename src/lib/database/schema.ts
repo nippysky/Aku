@@ -12,6 +12,8 @@ export const users = sqliteTable('users', {
   email:       text('email').notNull().unique(),
   householdId: text('household_id'),
   avatarUrl:   text('avatar_url'),
+  /** Base64 data URI for profile photo — stored locally, never hits a CDN. */
+  avatarData:  text('avatar_data'),
   pinHash:     text('pin_hash'),          // bcrypt hash
   biometricEnabled: int('biometric_enabled', { mode: 'boolean' }).default(false),
   createdAt:   text('created_at').notNull(),
@@ -90,6 +92,23 @@ export const expenses = sqliteTable('expenses', {
   index('idx_expenses_date').on(t.date),
   index('idx_expenses_category').on(t.category),
   index('idx_expenses_household').on(t.householdId),
+]);
+
+// ─── Income ───────────────────────────────────────────────────────────────
+
+export const income = sqliteTable('income', {
+  id:          text('id').primaryKey(),
+  userId:      text('user_id').notNull(),
+  amount:      int('amount').notNull(),       // in kobo
+  category:    text('category').notNull(),
+  description: text('description'),
+  date:        text('date').notNull(),        // 'YYYY-MM-DD'
+  createdAt:   text('created_at').notNull(),
+  updatedAt:   text('updated_at').notNull(),
+}, (t) => [
+  index('idx_income_user').on(t.userId),
+  index('idx_income_date').on(t.date),
+  index('idx_income_category').on(t.category),
 ]);
 
 // ─── Budgets ──────────────────────────────────────────────────────────────
@@ -212,6 +231,51 @@ export const appState = sqliteTable('app_state', {
   value: text('value').notNull(),
 });
 
+// ─── Recurring Expenses ───────────────────────────────────────────────────
+// Templates that auto-log an expense on a schedule.
+// e.g. Netflix monthly, gym membership, etc.
+
+export const recurringExpenses = sqliteTable('recurring_expenses', {
+  id:          text('id').primaryKey(),
+  userId:      text('user_id').notNull(),
+  name:        text('name').notNull(),
+  amount:      int('amount').notNull(),       // in kobo
+  category:    text('category').notNull(),
+  frequency:   text('frequency').notNull(),   // 'daily'|'weekly'|'biweekly'|'monthly'|'yearly'
+  nextDate:    text('next_date').notNull(),   // 'YYYY-MM-DD'
+  notes:       text('notes'),
+  isActive:    int('is_active', { mode: 'boolean' }).default(true),
+  createdAt:   text('created_at').notNull(),
+  updatedAt:   text('updated_at').notNull(),
+}, (t) => [
+  index('idx_recurring_expenses_user').on(t.userId),
+  index('idx_recurring_expenses_next').on(t.nextDate),
+]);
+
+// ─── Recurring Income ─────────────────────────────────────────────────────
+// Templates that auto-log an income entry on a schedule.
+// e.g. monthly salary, rental income, dividends, etc.
+
+export const recurringIncome = sqliteTable('recurring_income', {
+  id:            text('id').primaryKey(),
+  userId:        text('user_id').notNull(),
+  name:          text('name').notNull(),
+  amount:        int('amount').notNull(),       // in kobo
+  category:      text('category').notNull(),   // IncomeCategory
+  frequency:     text('frequency').notNull(),   // 'daily'|'weekly'|'biweekly'|'monthly'|'yearly'
+  nextDate:      text('next_date').notNull(),   // 'YYYY-MM-DD'
+  notes:         text('notes'),
+  isActive:      int('is_active', { mode: 'boolean' }).default(true),
+  /** Optional: auto-contribute a % of this income to a goal */
+  goalId:        text('goal_id'),
+  allocationPct: int('allocation_pct').default(0), // 0–100
+  createdAt:     text('created_at').notNull(),
+  updatedAt:     text('updated_at').notNull(),
+}, (t) => [
+  index('idx_recurring_income_user').on(t.userId),
+  index('idx_recurring_income_next').on(t.nextDate),
+]);
+
 // ─── Schema Export ────────────────────────────────────────────────────────
 
 export const schema = {
@@ -220,11 +284,14 @@ export const schema = {
   householdMembers,
   bills,
   expenses,
+  income,
   budgets,
   goals,
   goalContributions,
   notifications,
   circleSettings,
+  recurringExpenses,
+  recurringIncome,
   circleContributions,
   appState,
 };

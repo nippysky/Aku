@@ -133,7 +133,7 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="expenses"
         options={{
-          title: 'Expenses',
+          title: 'Finance',
           tabBarIcon: ({ color, focused, size }) => (
             <TabIcon Icon={Wallet} color={color} focused={focused} size={size} />
           ),

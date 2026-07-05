@@ -37,7 +37,7 @@ function formatWithCommas(raw: string): string {
   // Remove any non-digit characters
   const digits = raw.replace(/\D/g, '');
   if (!digits) return '';
-  return Number(digits).toLocaleString('en-NG');
+  return Number(digits).toLocaleString('en-US');
 }
 
 function stripCommas(formatted: string): string {

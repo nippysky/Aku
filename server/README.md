@@ -13,7 +13,6 @@ Node.js + Hono backend — runs on your DigitalOcean Ubuntu Droplet.
 | Database   | PostgreSQL 16 + Drizzle ORM   |
 | Auth       | Custom JWT (via `jose`)       |
 | Email      | Resend                        |
-| Storage    | Cloudinary (avatars)          |
 | Process    | pm2                           |
 | Proxy      | nginx (TLS termination)       |
 
@@ -86,9 +85,6 @@ Fill in every value. Key ones:
 | `JWT_SECRET`               | Run: `node -e "console.log(require('crypto').randomBytes(64).toString('base64'))"` |
 | `RESEND_API_KEY`           | resend.com → API Keys                                |
 | `EMAIL_FROM`               | `Akù <auth@yourdomain.com>` (must be verified domain)|
-| `CLOUDINARY_CLOUD_NAME`    | cloudinary.com → Dashboard                           |
-| `CLOUDINARY_API_KEY`       | cloudinary.com → Dashboard                           |
-| `CLOUDINARY_API_SECRET`    | cloudinary.com → Dashboard                           |
 | `API_URL`                  | `https://api.yourdomain.com`                         |
 
 ---
@@ -146,9 +142,6 @@ server {
         proxy_set_header   X-Real-IP $remote_addr;
         proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_cache_bypass $http_upgrade;
-
-        # Increase body size for avatar uploads (max 5 MB)
-        client_max_body_size 6M;
     }
 }
 ```
@@ -197,7 +190,6 @@ npx expo run:ios     # or run:android
 |--------|--------------------|-------|--------------------------------|
 | GET    | `/api/user/me`     | Yes   | Get profile                    |
 | PUT    | `/api/user/me`     | Yes   | Update name                    |
-| POST   | `/api/user/avatar` | Yes   | Upload avatar (multipart)      |
 
 All protected routes require `Authorization: Bearer JWT` header.
 

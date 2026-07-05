@@ -1,25 +1,35 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import {
+  Alert,
   FlatList,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Animated, {
-  FadeInDown,
-} from 'react-native-reanimated';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 import {
   Plus,
+  Upload,
   Wallet,
+  TrendingUp,
+  Search,
+  X,
   UtensilsCrossed, Car, ShoppingBag, Tv, Home, Zap,
   Heart, Users, BookOpen, PiggyBank, Gift, MoreHorizontal,
+  Briefcase, Building2, ArrowLeftRight, RotateCcw,
 } from 'lucide-react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
+import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system';
+import { parseCSV, fromServerTransactions } from '../../lib/statement-parser';
+import { setImportRows } from '../../lib/import-state';
+import { parseStatementPDF } from '../../lib/api-client';
 import { useTheme } from '../../theme';
 import { Palette } from '../../theme/colors';
 import { BannerAmount } from '../../components/ui/CompactAmountDisplay';
@@ -29,48 +39,47 @@ import { EmptyState } from '../../components/ui/EmptyState';
 import { AddExpenseSheet } from '../../components/expenses/AddExpenseSheet';
 import { EditExpenseSheet } from '../../components/expenses/EditExpenseSheet';
 import { ExpenseRow } from '../../components/expenses/ExpenseRow';
+import { AddIncomeSheet } from '../../components/income/AddIncomeSheet';
+import { IncomeRow } from '../../components/income/IncomeRow';
 import { useExpensesStore } from '../../store/expenses.store';
+import { useIncomeStore } from '../../store/income.store';
 import { useAuthStore } from '../../store/auth.store';
 import { useCurrencyFormat } from '../../hooks/useCurrencyFormat';
-import { EXPENSE_CATEGORIES, type ExpenseCategory, type Expense } from '../../types';
+import { FirstTimeHint } from '../../components/ui/FirstTimeHint';
+import { useFirstTimeHint } from '../../hooks/useFirstTimeHint';
+import {
+  EXPENSE_CATEGORIES,
+  INCOME_CATEGORIES,
+  type ExpenseCategory,
+  type IncomeCategory,
+  type Expense,
+  type Income,
+} from '../../types';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type CategoryFilter = 'all' | ExpenseCategory;
+type Segment = 'expenses' | 'income';
+type CategoryFilter = 'all' | ExpenseCategory | IncomeCategory;
 
 interface MonthOption {
   label: string;
   value: string;
 }
 
-interface DateGroup {
+interface ExpenseDateGroup {
   dateKey:   string;
   dateValue: string;
   items:     Expense[];
 }
 
-// FlatList renders each item as one of these:
-type ListItem = { type: 'dateGroup'; group: DateGroup };
+interface IncomeDateGroup {
+  dateKey:   string;
+  dateValue: string;
+  items:     Income[];
+}
 
-// ─── Icon map ─────────────────────────────────────────────────────────────────
-
-const EXPENSE_ICONS: Record<
-  ExpenseCategory,
-  React.ComponentType<{ size?: number; color?: string; strokeWidth?: number }>
-> = {
-  food:          UtensilsCrossed,
-  transport:     Car,
-  shopping:      ShoppingBag,
-  entertainment: Tv,
-  housing:       Home,
-  utilities:     Zap,
-  health:        Heart,
-  family:        Users,
-  education:     BookOpen,
-  savings:       PiggyBank,
-  gifts:         Gift,
-  other:         MoreHorizontal,
-};
+type ExpenseListItem = { type: 'dateGroup'; group: ExpenseDateGroup };
+type IncomeListItem  = { type: 'dateGroup'; group: IncomeDateGroup  };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -114,7 +123,7 @@ function formatDateHeader(dateStr: string): string {
   return `${dayNames[date.getDay()]} ${parseInt(d, 10)} ${monthNames[parseInt(m, 10) - 1]}`;
 }
 
-function groupExpensesByDate(expenses: Expense[]): DateGroup[] {
+function groupExpensesByDate(expenses: Expense[]): ExpenseDateGroup[] {
   const map = new Map<string, Expense[]>();
   for (const e of expenses) {
     const arr = map.get(e.date) ?? [];
@@ -123,14 +132,22 @@ function groupExpensesByDate(expenses: Expense[]): DateGroup[] {
   }
   return Array.from(map.entries())
     .sort(([a], [b]) => b.localeCompare(a))
-    .map(([dateValue, items]) => ({
-      dateKey:   formatDateHeader(dateValue),
-      dateValue,
-      items,
-    }));
+    .map(([dateValue, items]) => ({ dateKey: formatDateHeader(dateValue), dateValue, items }));
 }
 
-function getTop3(byCategory: Record<ExpenseCategory, number>) {
+function groupIncomeByDate(records: Income[]): IncomeDateGroup[] {
+  const map = new Map<string, Income[]>();
+  for (const r of records) {
+    const arr = map.get(r.date) ?? [];
+    arr.push(r);
+    map.set(r.date, arr);
+  }
+  return Array.from(map.entries())
+    .sort(([a], [b]) => b.localeCompare(a))
+    .map(([dateValue, items]) => ({ dateKey: formatDateHeader(dateValue), dateValue, items }));
+}
+
+function getTop3Expenses(byCategory: Record<ExpenseCategory, number>) {
   return (Object.entries(byCategory) as Array<[ExpenseCategory, number]>)
     .filter(([, amt]) => amt > 0)
     .sort(([, a], [, b]) => b - a)
@@ -138,38 +155,37 @@ function getTop3(byCategory: Record<ExpenseCategory, number>) {
     .map(([cat, amount]) => ({ cat, amount }));
 }
 
-// ─── Date group card ──────────────────────────────────────────────────────────
+function getTop3Income(byCategory: Record<IncomeCategory, number>) {
+  return (Object.entries(byCategory) as Array<[IncomeCategory, number]>)
+    .filter(([, amt]) => amt > 0)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 1)
+    .map(([cat, amount]) => ({ cat, amount }));
+}
 
-function DateGroupCard({ group, onPressExpense, onLongPressExpense }: {
-  group:               DateGroup;
-  onPressExpense:      (id: string) => void;
-  onLongPressExpense:  (exp: Expense) => void;
+// ─── Date group card — Expenses ───────────────────────────────────────────────
+
+function ExpenseDateGroupCard({ group, onPress, onLongPress }: {
+  group:       ExpenseDateGroup;
+  onPress:     (id: string) => void;
+  onLongPress: (exp: Expense) => void;
 }) {
-  const { colors, text, font, fontSize, radius } = useTheme();
-
+  const { colors, text } = useTheme();
   return (
     <View>
-      {/* Date label */}
       <Text style={[styles.dateLabel, text.labelCaps, { color: colors.textSecondary }]}>
         {group.dateKey}
       </Text>
-
-      {/* Card per date group */}
       <Card style={styles.dateCard}>
         {group.items.map((exp, idx) => (
           <View
             key={exp.id}
-            style={[
-              idx < group.items.length - 1 && {
-                borderBottomWidth: 1,
-                borderBottomColor: colors.borderLight,
-              },
-            ]}
+            style={idx < group.items.length - 1 ? { borderBottomWidth: 1, borderBottomColor: colors.borderLight } : undefined}
           >
             <ExpenseRow
               expense={exp}
-              onPress={() => onPressExpense(exp.id)}
-              onLongPress={() => onLongPressExpense(exp)}
+              onPress={() => onPress(exp.id)}
+              onLongPress={() => onLongPress(exp)}
             />
           </View>
         ))}
@@ -178,72 +194,153 @@ function DateGroupCard({ group, onPressExpense, onLongPressExpense }: {
   );
 }
 
-const EXPENSE_CATEGORIES_KEYS = Object.keys(EXPENSE_CATEGORIES) as ExpenseCategory[];
+// ─── Date group card — Income ─────────────────────────────────────────────────
+
+function IncomeDateGroupCard({ group, onLongPress }: {
+  group:       IncomeDateGroup;
+  onLongPress: (rec: Income) => void;
+}) {
+  const { colors, text } = useTheme();
+  return (
+    <View>
+      <Text style={[styles.dateLabel, text.labelCaps, { color: colors.textSecondary }]}>
+        {group.dateKey}
+      </Text>
+      <Card style={styles.dateCard}>
+        {group.items.map((rec, idx) => (
+          <View
+            key={rec.id}
+            style={idx < group.items.length - 1 ? { borderBottomWidth: 1, borderBottomColor: colors.borderLight } : undefined}
+          >
+            <IncomeRow
+              record={rec}
+              onPress={() => {}}
+              onLongPress={() => onLongPress(rec)}
+            />
+          </View>
+        ))}
+      </Card>
+    </View>
+  );
+}
+
+const EXPENSE_CATEGORY_KEYS = Object.keys(EXPENSE_CATEGORIES) as ExpenseCategory[];
+const INCOME_CATEGORY_KEYS  = Object.keys(INCOME_CATEGORIES)  as IncomeCategory[];
 
 // ─── Main screen ──────────────────────────────────────────────────────────────
 
 export default function ExpensesScreen() {
   const { colors, text, font, fontSize, radius, layout } = useTheme();
-  const insets   = useSafeAreaInsets();
-  const router   = useRouter();
+  const insets = useSafeAreaInsets();
+  const router = useRouter();
 
+  // ── Expenses store ────────────────────────────────────────────────────────
   const {
-    expenses, allExpenses, summary, selectedMonth, isLoading,
-    load, loadAll, loadMonth, setMonth,
+    expenses, allExpenses, summary: expSummary, selectedMonth, isLoading: expLoading,
+    load: loadExp, loadAll: loadAllExp, loadMonth: loadMonthExp, setMonth: setExpMonth,
   } = useExpensesStore();
 
-  const { user } = useAuthStore();
-  const { fmt, fmtCompact } = useCurrencyFormat();
+  // ── Income store ──────────────────────────────────────────────────────────
+  const {
+    records: incRecords, allRecords: allIncRecords, summary: incSummary,
+    isLoading: incLoading,
+    load: loadInc, loadAll: loadAllInc, loadMonth: loadMonthInc, setMonth: setIncMonth,
+  } = useIncomeStore();
 
-  // viewMode: 'all' shows all-time; 'month' filters by selectedMonth
+  const { user }             = useAuthStore();
+  const { fmt, fmtCompact }  = useCurrencyFormat();
+  const hintSwipe            = useFirstTimeHint('hint_expenses_swipe');
+
+  // ── Deep-link segment param (e.g. from home "Earned · Month" tap) ─────────
+  const params = useLocalSearchParams<{ segment?: string }>();
+
+  const [segment,        setSegment]        = useState<Segment>('expenses');
   const [viewMode,       setViewMode]       = useState<'all' | 'month'>('all');
-  const [addOpen,        setAddOpen]        = useState(false);
-  const [editExpense,    setEditExpense]     = useState<Expense | null>(null);
+  const [addExpOpen,     setAddExpOpen]     = useState(false);
+  const [addIncOpen,     setAddIncOpen]     = useState(false);
+  const [editExpense,    setEditExpense]    = useState<Expense | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('all');
+  const [searchQuery,    setSearchQuery]    = useState('');
+  const [importing,      setImporting]      = useState(false);
 
   const monthOptions = useMemo(() => buildMonthOptions(), []);
 
-  // On mount and whenever user changes, load all expenses
+  // ── Switch segment when navigated from home banner ────────────────────────
+  useEffect(() => {
+    if (params.segment === 'income' || params.segment === 'expenses') {
+      setSegment(params.segment as Segment);
+      setCategoryFilter('all');
+      setSearchQuery('');
+    }
+  }, [params.segment]);
+
+  // ── Initial load ──────────────────────────────────────────────────────────
   useEffect(() => {
     if (!user) return;
     if (viewMode === 'all') {
-      loadAll(user.id);
+      loadAllExp(user.id);
+      loadAllInc(user.id);
     } else {
-      load(user.id);
+      loadExp(user.id);
+      loadInc(user.id);
     }
   }, [user, viewMode]);
 
+  const isLoading = segment === 'expenses' ? expLoading : incLoading;
+
+  // ── Month handlers ────────────────────────────────────────────────────────
   const handleMonthSelect = useCallback((monthValue: string) => {
     if (!user) return;
     setViewMode('month');
-    setMonth(monthValue);
-    loadMonth(user.id, monthValue);
+    setExpMonth(monthValue);
+    setIncMonth(monthValue);
+    loadMonthExp(user.id, monthValue);
+    loadMonthInc(user.id, monthValue);
     setCategoryFilter('all');
-  }, [user, setMonth, loadMonth]);
+  }, [user, setExpMonth, setIncMonth, loadMonthExp, loadMonthInc]);
 
   const handleViewAll = useCallback(() => {
     if (!user) return;
     setViewMode('all');
     setCategoryFilter('all');
-    loadAll(user.id);
-  }, [user, loadAll]);
+    loadAllExp(user.id);
+    loadAllInc(user.id);
+  }, [user, loadAllExp, loadAllInc]);
 
   const handleSuccess = useCallback(() => {
     if (!user) return;
-    if (viewMode === 'all') loadAll(user.id);
-    else load(user.id);
-  }, [user, viewMode, load, loadAll]);
+    if (viewMode === 'all') { loadAllExp(user.id); loadAllInc(user.id); }
+    else                    { loadExp(user.id);    loadInc(user.id);    }
+  }, [user, viewMode, loadExp, loadAllExp, loadInc, loadAllInc]);
 
-  // Source: all-time in 'all' mode, month-filtered otherwise
+  // ── Segment switch ────────────────────────────────────────────────────────
+  const handleSegmentChange = useCallback((seg: Segment) => {
+    setSegment(seg);
+    setCategoryFilter('all');
+    setSearchQuery('');
+  }, []);
+
+  // ── Filtered data — Expenses ──────────────────────────────────────────────
   const sourceExpenses = viewMode === 'all' ? allExpenses : expenses;
 
   const filteredExpenses = useMemo(() => {
-    if (categoryFilter === 'all') return sourceExpenses;
-    return sourceExpenses.filter((e) => e.category === categoryFilter);
-  }, [sourceExpenses, categoryFilter]);
+    let result = categoryFilter === 'all'
+      ? sourceExpenses
+      : sourceExpenses.filter((e) => e.category === categoryFilter);
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter(
+        (e) =>
+          (e.description ?? '').toLowerCase().includes(q) ||
+          EXPENSE_CATEGORIES[e.category]?.label.toLowerCase().includes(q)
+      );
+    }
+    return result;
+  }, [sourceExpenses, categoryFilter, searchQuery]);
 
-  // "Recently added" = expenses with createdAt within last 48h, by creation time
-  const recentlyAdded = useMemo(() => {
+  const expDateGroups = useMemo(() => groupExpensesByDate(filteredExpenses), [filteredExpenses]);
+
+  const recentlyAddedExp = useMemo(() => {
     const cutoff = Date.now() - 48 * 60 * 60 * 1000;
     return [...allExpenses]
       .filter((e) => new Date(e.createdAt).getTime() > cutoff)
@@ -251,109 +348,147 @@ export default function ExpensesScreen() {
       .slice(0, 5);
   }, [allExpenses]);
 
-  const dateGroups = useMemo(
-    () => groupExpensesByDate(filteredExpenses),
-    [filteredExpenses],
-  );
+  // ── Filtered data — Income ────────────────────────────────────────────────
+  const sourceIncome = viewMode === 'all' ? allIncRecords : incRecords;
 
-  const top3       = useMemo(() => (summary ? getTop3(summary.byCategory) : []), [summary]);
-  const totalSpent = summary?.totalAmount ?? 0;
-  const txCount    = sourceExpenses.length;
+  const filteredIncome = useMemo(() => {
+    let result = categoryFilter === 'all'
+      ? sourceIncome
+      : sourceIncome.filter((r) => r.category === categoryFilter);
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter(
+        (r) =>
+          (r.description ?? '').toLowerCase().includes(q) ||
+          INCOME_CATEGORIES[r.category]?.label.toLowerCase().includes(q)
+      );
+    }
+    return result;
+  }, [sourceIncome, categoryFilter, searchQuery]);
 
-  // FlatList data: one item per date group
-  const listData = useMemo((): ListItem[] => {
-    return [
-      ...dateGroups.map((group): ListItem => ({ type: 'dateGroup', group })),
-    ];
-  }, [dateGroups]);
+  const incDateGroups = useMemo(() => groupIncomeByDate(filteredIncome), [filteredIncome]);
 
-  const renderItem = useCallback(
-    ({ item }: { item: ListItem }) => (
-      <DateGroupCard
-        group={item.group}
-        onPressExpense={(id) => router.push(`/expenses/${id}` as never)}
-        onLongPressExpense={(exp) => setEditExpense(exp)}
-      />
-    ),
-    [router],
-  );
+  // ── Banner stats ──────────────────────────────────────────────────────────
+  const totalSpent  = expSummary?.totalAmount ?? 0;
+  const totalIncome = incSummary?.totalAmount ?? 0;
+  const expTxCount  = sourceExpenses.length;
+  const incTxCount  = sourceIncome.length;
+  const top3Exp     = useMemo(() => (expSummary ? getTop3Expenses(expSummary.byCategory) : []), [expSummary]);
+  const top1Inc     = useMemo(() => (incSummary ? getTop3Income(incSummary.byCategory) : []), [incSummary]);
 
-  const keyExtractor = useCallback((item: ListItem): string => {
-    return `group-${item.group.dateValue}`;
-  }, []);
+  // ── Import handler ────────────────────────────────────────────────────────
+  const handleImportStatement = useCallback(async () => {
+    let result: DocumentPicker.DocumentPickerResult;
+    try {
+      result = await DocumentPicker.getDocumentAsync({
+        type: ['text/csv', 'text/comma-separated-values', 'application/pdf',
+               'application/octet-stream', '*/*'],
+        copyToCacheDirectory: true,
+      });
+    } catch { return; }
+    if (result.canceled || !result.assets?.[0]) return;
 
-  // Header is a function so FlatList instantiates it correctly
-  const ListHeader = useCallback(
+    const asset = result.assets[0];
+    const name  = (asset.name ?? '').toLowerCase();
+    const isPDF = name.endsWith('.pdf') || asset.mimeType === 'application/pdf';
+
+    setImporting(true);
+    try {
+      if (isPDF) {
+        const base64 = await FileSystem.readAsStringAsync(asset.uri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        const txns = await parseStatementPDF(base64);
+        if (txns.length === 0) {
+          Alert.alert('No transactions found', 'The PDF could not be parsed. Ensure it\'s a standard bank statement.');
+          return;
+        }
+        setImportRows(fromServerTransactions(txns));
+      } else {
+        const csvText = await FileSystem.readAsStringAsync(asset.uri, {
+          encoding: FileSystem.EncodingType.UTF8,
+        });
+        const rows = parseCSV(csvText);
+        if (rows.length === 0) {
+          Alert.alert('No transactions found', 'Could not detect Date or Amount columns in this CSV.');
+          return;
+        }
+        setImportRows(rows);
+      }
+      router.push('/import-statement' as never);
+    } catch {
+      Alert.alert('Import failed', 'Could not read the file. Please try again.');
+    } finally {
+      setImporting(false);
+    }
+  }, [router]);
+
+  // ── Render helpers ────────────────────────────────────────────────────────
+
+  const ExpListHeader = useCallback(
     () => (
       <>
-        {/* Summary banner — skeleton while loading */}
         {isLoading && <SkeletonBanner style={{ marginBottom: 8 }} />}
-
-        {/* Summary banner — forest-green, matches bills + goals */}
-        {!isLoading && <View style={styles.summaryBanner}>
-          {Platform.OS === 'ios' && (
-            <BlurView intensity={85} tint="dark" style={StyleSheet.absoluteFill} />
-          )}
-          <View
-            style={[
-              StyleSheet.absoluteFill,
-              {
-                backgroundColor:
-                  Platform.OS === 'ios' ? 'rgba(22,58,47,0.82)' : colors.primary,
-                borderRadius: 20,
-              },
-            ]}
-          />
-          <View style={{ position: 'relative' }}>
-            <Text style={[text.caption, { color: 'rgba(250,250,248,0.65)', letterSpacing: 1 }]}>
-              {viewMode === 'all' ? 'ALL TIME SPENT' : 'TOTAL SPENT'}
-            </Text>
-            <BannerAmount
-              kobo={totalSpent}
-              textStyle={{
-                fontFamily:    font.displayLight,
-                fontSize:      fontSize['3xl'],
-                color:         Palette.linen,
-                letterSpacing: -1,
-                marginTop:     4,
-              }}
+        {!isLoading && (
+          <View style={styles.summaryBanner}>
+            {Platform.OS === 'ios' && (
+              <BlurView intensity={85} tint="dark" style={StyleSheet.absoluteFill} />
+            )}
+            <View
+              style={[
+                StyleSheet.absoluteFill,
+                {
+                  backgroundColor:
+                    Platform.OS === 'ios' ? 'rgba(22,58,47,0.82)' : colors.primary,
+                  borderRadius: 20,
+                },
+              ]}
             />
-            <View style={{ flexDirection: 'row', gap: 16, marginTop: 12 }}>
-              <View>
-                <Text style={[text.caption, { color: 'rgba(250,250,248,0.55)' }]}>Transactions</Text>
-                <Text style={[text.bodyMedium, { color: Palette.linen, marginTop: 2 }]}>
-                  {txCount} {txCount === 1 ? 'entry' : 'entries'}
-                </Text>
+            <View style={{ position: 'relative' }}>
+              <Text style={[text.caption, { color: 'rgba(250,250,248,0.65)', letterSpacing: 1 }]}>
+                {viewMode === 'all' ? 'ALL TIME SPENT' : 'TOTAL SPENT'}
+              </Text>
+              <BannerAmount
+                kobo={totalSpent}
+                textStyle={{
+                  fontFamily: font.displayLight, fontSize: fontSize['3xl'],
+                  color: Palette.linen, letterSpacing: -1, marginTop: 4,
+                }}
+              />
+              <View style={{ flexDirection: 'row', gap: 16, marginTop: 12 }}>
+                <View>
+                  <Text style={[text.caption, { color: 'rgba(250,250,248,0.55)' }]}>Transactions</Text>
+                  <Text style={[text.bodyMedium, { color: Palette.linen, marginTop: 2 }]}>
+                    {expTxCount} {expTxCount === 1 ? 'entry' : 'entries'}
+                  </Text>
+                </View>
+                {top3Exp[0] && (
+                  <>
+                    <View style={{ width: 1, backgroundColor: 'rgba(250,250,248,0.15)' }} />
+                    <View>
+                      <Text style={[text.caption, { color: 'rgba(250,250,248,0.55)' }]}>Top category</Text>
+                      <Text style={[text.bodyMedium, { color: Palette.gold, marginTop: 2 }]}>
+                        {EXPENSE_CATEGORIES[top3Exp[0].cat].label}
+                      </Text>
+                    </View>
+                    <View style={{ width: 1, backgroundColor: 'rgba(250,250,248,0.15)' }} />
+                    <View>
+                      <Text style={[text.caption, { color: 'rgba(250,250,248,0.55)' }]}>Amount</Text>
+                      <Text style={[text.bodyMedium, { color: Palette.linen, marginTop: 2 }]}>
+                        {fmtCompact(top3Exp[0].amount)}
+                      </Text>
+                    </View>
+                  </>
+                )}
               </View>
-              {top3[0] && (
-                <>
-                  <View style={{ width: 1, backgroundColor: 'rgba(250,250,248,0.15)' }} />
-                  <View>
-                    <Text style={[text.caption, { color: 'rgba(250,250,248,0.55)' }]}>Top category</Text>
-                    <Text style={[text.bodyMedium, { color: Palette.gold, marginTop: 2 }]}>
-                      {EXPENSE_CATEGORIES[top3[0].cat].label}
-                    </Text>
-                  </View>
-                  <View style={{ width: 1, backgroundColor: 'rgba(250,250,248,0.15)' }} />
-                  <View>
-                    <Text style={[text.caption, { color: 'rgba(250,250,248,0.55)' }]}>Amount</Text>
-                    <Text style={[text.bodyMedium, { color: Palette.linen, marginTop: 2 }]}>
-                      {fmtCompact(top3[0].amount)}
-                    </Text>
-                  </View>
-                </>
-              )}
             </View>
           </View>
-        </View>}
+        )}
 
         {/* Category filter pills */}
         <ScrollView
-          horizontal
-          nestedScrollEnabled
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.filterRow}
-          style={styles.filterScroll}
+          horizontal nestedScrollEnabled showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.filterRow} style={styles.filterScroll}
         >
           <Pressable
             onPress={() => setCategoryFilter('all')}
@@ -366,19 +501,13 @@ export default function ExpensesScreen() {
               },
             ]}
           >
-            <Text
-              style={[
-                text.buttonLabelSm,
-                { color: categoryFilter === 'all' ? colors.textOnForest : colors.textSecondary },
-              ]}
-            >
+            <Text style={[text.buttonLabelSm, { color: categoryFilter === 'all' ? colors.textOnForest : colors.textSecondary }]}>
               All
             </Text>
           </Pressable>
-
-          {EXPENSE_CATEGORIES_KEYS.map((cat) => {
-            const meta     = EXPENSE_CATEGORIES[cat];
-            const selected = categoryFilter === cat;
+          {EXPENSE_CATEGORY_KEYS.map((cat) => {
+            const meta = EXPENSE_CATEGORIES[cat];
+            const sel  = categoryFilter === cat;
             return (
               <Pressable
                 key={cat}
@@ -386,18 +515,13 @@ export default function ExpensesScreen() {
                 style={[
                   styles.filterPill,
                   {
-                    backgroundColor: selected ? colors.primary : colors.backgroundSecondary,
-                    borderColor:     selected ? colors.primary : colors.border,
+                    backgroundColor: sel ? colors.primary : colors.backgroundSecondary,
+                    borderColor:     sel ? colors.primary : colors.border,
                     borderRadius:    radius.full,
                   },
                 ]}
               >
-                <Text
-                  style={[
-                    text.buttonLabelSm,
-                    { color: selected ? colors.textOnForest : colors.textSecondary },
-                  ]}
-                >
+                <Text style={[text.buttonLabelSm, { color: sel ? colors.textOnForest : colors.textSecondary }]}>
                   {meta.label}
                 </Text>
               </Pressable>
@@ -405,19 +529,14 @@ export default function ExpensesScreen() {
           })}
         </ScrollView>
 
-        {/* Recently added — expenses created in last 48h */}
-        {recentlyAdded.length > 0 && (
+        {/* Recently added expenses */}
+        {recentlyAddedExp.length > 0 && (
           <View style={styles.recentSection}>
-            <View style={styles.recentHeader}>
-              <Text style={[text.labelCaps, { color: colors.textSecondary }]}>Recently Added</Text>
-            </View>
-            <ScrollView
-              horizontal
-              nestedScrollEnabled
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.recentRow}
-            >
-              {recentlyAdded.map((exp) => {
+            <Text style={[text.labelCaps, { color: colors.textSecondary, marginBottom: 10 }]}>
+              Recently Added
+            </Text>
+            <ScrollView horizontal nestedScrollEnabled showsHorizontalScrollIndicator={false} contentContainerStyle={styles.recentRow}>
+              {recentlyAddedExp.map((exp) => {
                 const meta = EXPENSE_CATEGORIES[exp.category];
                 return (
                   <Pressable
@@ -426,10 +545,7 @@ export default function ExpensesScreen() {
                     style={[styles.recentCard, { backgroundColor: colors.card, borderRadius: radius.lg }]}
                   >
                     <View style={[styles.recentDot, { backgroundColor: meta.color }]} />
-                    <Text
-                      style={{ fontFamily: font.sansMedium, fontSize: 12, color: colors.text, lineHeight: 16 }}
-                      numberOfLines={1}
-                    >
+                    <Text style={{ fontFamily: font.sansMedium, fontSize: 12, color: colors.text, lineHeight: 16 }} numberOfLines={1}>
                       {exp.description ?? meta.label}
                     </Text>
                     <Text style={{ fontFamily: font.sansSemiBold, fontSize: 11, color: colors.textSecondary, marginTop: 3 }} numberOfLines={1}>
@@ -446,11 +562,155 @@ export default function ExpensesScreen() {
         )}
       </>
     ),
-    [top3, txCount, totalSpent, categoryFilter, recentlyAdded, viewMode, isLoading, colors, text, font, fontSize, radius, fmt, fmtCompact, router],
+    [top3Exp, expTxCount, totalSpent, categoryFilter, recentlyAddedExp, viewMode, isLoading, colors, text, font, fontSize, radius, fmtCompact, router],
   );
+
+  const IncListHeader = useCallback(
+    () => (
+      <>
+        {isLoading && <SkeletonBanner style={{ marginBottom: 8 }} />}
+        {!isLoading && (
+          <View style={[styles.summaryBanner, { }]}>
+            {Platform.OS === 'ios' && (
+              <BlurView intensity={85} tint="dark" style={StyleSheet.absoluteFill} />
+            )}
+            <View
+              style={[
+                StyleSheet.absoluteFill,
+                {
+                  backgroundColor:
+                    Platform.OS === 'ios' ? 'rgba(15,60,40,0.88)' : '#1B5E35',
+                  borderRadius: 20,
+                },
+              ]}
+            />
+            <View style={{ position: 'relative' }}>
+              <Text style={[text.caption, { color: 'rgba(250,250,248,0.65)', letterSpacing: 1 }]}>
+                {viewMode === 'all' ? 'ALL TIME INCOME' : 'TOTAL INCOME'}
+              </Text>
+              <BannerAmount
+                kobo={totalIncome}
+                textStyle={{
+                  fontFamily: font.displayLight, fontSize: fontSize['3xl'],
+                  color: '#A5F3C0', letterSpacing: -1, marginTop: 4,
+                }}
+              />
+              <View style={{ flexDirection: 'row', gap: 16, marginTop: 12 }}>
+                <View>
+                  <Text style={[text.caption, { color: 'rgba(250,250,248,0.55)' }]}>Entries</Text>
+                  <Text style={[text.bodyMedium, { color: Palette.linen, marginTop: 2 }]}>
+                    {incTxCount} {incTxCount === 1 ? 'entry' : 'entries'}
+                  </Text>
+                </View>
+                {top1Inc[0] && (
+                  <>
+                    <View style={{ width: 1, backgroundColor: 'rgba(250,250,248,0.15)' }} />
+                    <View>
+                      <Text style={[text.caption, { color: 'rgba(250,250,248,0.55)' }]}>Top source</Text>
+                      <Text style={[text.bodyMedium, { color: Palette.gold, marginTop: 2 }]}>
+                        {INCOME_CATEGORIES[top1Inc[0].cat].label}
+                      </Text>
+                    </View>
+                    <View style={{ width: 1, backgroundColor: 'rgba(250,250,248,0.15)' }} />
+                    <View>
+                      <Text style={[text.caption, { color: 'rgba(250,250,248,0.55)' }]}>Amount</Text>
+                      <Text style={[text.bodyMedium, { color: '#A5F3C0', marginTop: 2 }]}>
+                        {fmtCompact(top1Inc[0].amount)}
+                      </Text>
+                    </View>
+                  </>
+                )}
+              </View>
+            </View>
+          </View>
+        )}
+
+        {/* Income category filter pills */}
+        <ScrollView
+          horizontal nestedScrollEnabled showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.filterRow} style={styles.filterScroll}
+        >
+          <Pressable
+            onPress={() => setCategoryFilter('all')}
+            style={[
+              styles.filterPill,
+              {
+                backgroundColor: categoryFilter === 'all' ? colors.success : colors.backgroundSecondary,
+                borderColor:     categoryFilter === 'all' ? colors.success : colors.border,
+                borderRadius:    radius.full,
+              },
+            ]}
+          >
+            <Text style={[text.buttonLabelSm, { color: categoryFilter === 'all' ? '#fff' : colors.textSecondary }]}>
+              All
+            </Text>
+          </Pressable>
+          {INCOME_CATEGORY_KEYS.map((cat) => {
+            const meta = INCOME_CATEGORIES[cat];
+            const sel  = categoryFilter === cat;
+            return (
+              <Pressable
+                key={cat}
+                onPress={() => setCategoryFilter(cat)}
+                style={[
+                  styles.filterPill,
+                  {
+                    backgroundColor: sel ? colors.success : colors.backgroundSecondary,
+                    borderColor:     sel ? colors.success : colors.border,
+                    borderRadius:    radius.full,
+                  },
+                ]}
+              >
+                <Text style={[text.buttonLabelSm, { color: sel ? '#fff' : colors.textSecondary }]}>
+                  {meta.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </>
+    ),
+    [top1Inc, incTxCount, totalIncome, categoryFilter, viewMode, isLoading, colors, text, font, fontSize, radius, fmtCompact],
+  );
+
+  // Expense list renderItem
+  const renderExpenseItem = useCallback(
+    ({ item }: { item: ExpenseListItem }) => (
+      <ExpenseDateGroupCard
+        group={item.group}
+        onPress={(id) => router.push(`/expenses/${id}` as never)}
+        onLongPress={(exp) => setEditExpense(exp)}
+      />
+    ),
+    [router],
+  );
+
+  // Income list renderItem
+  const renderIncomeItem = useCallback(
+    ({ item }: { item: IncomeListItem }) => (
+      <IncomeDateGroupCard
+        group={item.group}
+        onLongPress={() => {}}
+      />
+    ),
+    [],
+  );
+
+  const expListData  = useMemo(
+    (): ExpenseListItem[] => expDateGroups.map((group) => ({ type: 'dateGroup', group })),
+    [expDateGroups],
+  );
+  const incListData  = useMemo(
+    (): IncomeListItem[] => incDateGroups.map((group) => ({ type: 'dateGroup', group })),
+    [incDateGroups],
+  );
+
+  const expKeyExtractor = useCallback((item: ExpenseListItem) => `exp-${item.group.dateValue}`, []);
+  const incKeyExtractor = useCallback((item: IncomeListItem)  => `inc-${item.group.dateValue}`,  []);
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
+
       {/* ── Header ── */}
       <View
         style={[
@@ -458,39 +718,94 @@ export default function ExpensesScreen() {
           { paddingTop: insets.top + 12, borderBottomColor: colors.borderLight },
         ]}
       >
-        <Text
-          style={[
-            styles.headerTitle,
-            { fontFamily: font.displayLight, fontSize: fontSize['2xl'], color: colors.text },
-          ]}
-        >
-          Expenses
+        <Text style={[styles.headerTitle, { fontFamily: font.displayLight, fontSize: fontSize['2xl'], color: colors.text }]}>
+          {segment === 'expenses' ? 'Expenses' : 'Income'}
         </Text>
         <View style={styles.headerRight}>
           <Text style={[text.bodySm, { color: colors.textSecondary }]}>
             {currentMonthLabel()}
           </Text>
+          {segment === 'expenses' && (
+            <Pressable
+              onPress={handleImportStatement}
+              disabled={importing}
+              style={[styles.headerIconBtn, { backgroundColor: colors.backgroundSecondary }]}
+              hitSlop={6}
+              accessibilityRole="button"
+              accessibilityLabel="Import bank statement"
+            >
+              <Upload size={18} color={colors.text} strokeWidth={1.8} />
+            </Pressable>
+          )}
           <Pressable
-            onPress={() => setAddOpen(true)}
+            onPress={() => segment === 'expenses' ? setAddExpOpen(true) : setAddIncOpen(true)}
             style={[styles.headerIconBtn, { backgroundColor: colors.backgroundSecondary }]}
             hitSlop={6}
             accessibilityRole="button"
-            accessibilityLabel="Add expense"
+            accessibilityLabel={segment === 'expenses' ? 'Add expense' : 'Add income'}
           >
             <Plus size={20} color={colors.text} strokeWidth={2} />
           </Pressable>
         </View>
       </View>
 
+      {/* ── Segment toggle ── */}
+      <View style={[styles.segmentWrap, { borderBottomColor: colors.borderLight }]}>
+        {(['expenses', 'income'] as Segment[]).map((seg) => {
+          const active = segment === seg;
+          const accent = seg === 'income' ? colors.success : colors.primary;
+          return (
+            <Pressable
+              key={seg}
+              onPress={() => handleSegmentChange(seg)}
+              style={[
+                styles.segmentTab,
+                active && { borderBottomColor: accent, borderBottomWidth: 2 },
+              ]}
+            >
+              <Text
+                style={[
+                  text.buttonLabelSm,
+                  {
+                    color:      active ? accent : colors.textSecondary,
+                    fontFamily: active ? font.sansSemiBold : font.sansRegular,
+                  },
+                ]}
+              >
+                {seg === 'expenses' ? 'Expenses' : 'Income'}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
+      {/* ── Search bar ── */}
+      <View style={[styles.searchRow, { borderBottomColor: colors.borderLight }]}>
+        <View style={[styles.searchInput, { backgroundColor: colors.backgroundSecondary, borderRadius: 99 }]}>
+          <Search size={15} color={colors.textTertiary} strokeWidth={2} />
+          <TextInput
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            placeholder={segment === 'expenses' ? 'Search expenses…' : 'Search income…'}
+            placeholderTextColor={colors.textTertiary}
+            style={[styles.searchText, { color: colors.text, fontFamily: font.sansRegular, fontSize: fontSize.sm }]}
+            returnKeyType="search"
+            clearButtonMode="never"
+          />
+          {searchQuery.length > 0 && (
+            <Pressable onPress={() => setSearchQuery('')} hitSlop={6}>
+              <X size={14} color={colors.textTertiary} strokeWidth={2} />
+            </Pressable>
+          )}
+        </View>
+      </View>
+
       {/* ── Month chips ── */}
       <View style={[styles.monthScrollWrap, { borderBottomColor: colors.borderLight }]}>
         <ScrollView
-          horizontal
-          nestedScrollEnabled
-          showsHorizontalScrollIndicator={false}
+          horizontal nestedScrollEnabled showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.monthRow}
         >
-          {/* "All" pill — default, shows everything */}
           <Pressable
             onPress={handleViewAll}
             style={[
@@ -502,16 +817,10 @@ export default function ExpensesScreen() {
               },
             ]}
           >
-            <Text
-              style={[
-                text.buttonLabelSm,
-                { color: viewMode === 'all' ? colors.textOnForest : colors.textSecondary },
-              ]}
-            >
+            <Text style={[text.buttonLabelSm, { color: viewMode === 'all' ? colors.textOnForest : colors.textSecondary }]}>
               All time
             </Text>
           </Pressable>
-
           {monthOptions.map((opt) => {
             const selected = viewMode === 'month' && selectedMonth === opt.value;
             return (
@@ -527,12 +836,7 @@ export default function ExpensesScreen() {
                   },
                 ]}
               >
-                <Text
-                  style={[
-                    text.buttonLabelSm,
-                    { color: selected ? colors.textOnForest : colors.textSecondary },
-                  ]}
-                >
+                <Text style={[text.buttonLabelSm, { color: selected ? colors.textOnForest : colors.textSecondary }]}>
                   {opt.label}
                 </Text>
               </Pressable>
@@ -542,53 +846,84 @@ export default function ExpensesScreen() {
       </View>
 
       {/* ── List ── */}
-      <FlatList
-        data={listData}
-        keyExtractor={keyExtractor}
-        renderItem={renderItem}
-        style={{ flex: 1 }}
-        ListHeaderComponent={ListHeader}
-        ListEmptyComponent={
-          isLoading ? (
-            <View style={{ gap: 0 }}>
-              {[0, 1, 2, 3, 4].map((i) => (
-                <SkeletonExpenseRow
-                  key={i}
-                  style={{
-                    paddingHorizontal: 0,
-                    borderBottomWidth: i < 4 ? 1 : 0,
-                    borderBottomColor: 'rgba(0,0,0,0.06)',
-                  }}
-                />
-              ))}
-            </View>
-          ) : (
-            <EmptyState
-              icon={Wallet}
-              title="No expenses yet"
-              message="Tap + to add your first expense"
-              action={{ label: 'Add Expense', onPress: () => setAddOpen(true) }}
-              style={{ marginTop: 24 }}
-            />
-          )
-        }
-        contentContainerStyle={[
-          styles.listContent,
-          { paddingBottom: insets.bottom + layout.tabBarHeight + 24 },
-        ]}
-        showsVerticalScrollIndicator={false}
-      />
+      {segment === 'expenses' ? (
+        <FlatList
+          data={expListData}
+          keyExtractor={expKeyExtractor}
+          renderItem={renderExpenseItem}
+          style={{ flex: 1 }}
+          ListHeaderComponent={ExpListHeader}
+          ListEmptyComponent={
+            isLoading ? (
+              <View style={{ gap: 0 }}>
+                {[0, 1, 2, 3, 4].map((i) => (
+                  <SkeletonExpenseRow key={i} style={{ paddingHorizontal: 0, borderBottomWidth: i < 4 ? 1 : 0, borderBottomColor: 'rgba(0,0,0,0.06)' }} />
+                ))}
+              </View>
+            ) : (
+              <EmptyState
+                icon={Wallet}
+                title="No expenses yet"
+                message="Tap + to add your first expense"
+                action={{ label: 'Add Expense', onPress: () => setAddExpOpen(true) }}
+                style={{ marginTop: 24 }}
+              />
+            )
+          }
+          contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + layout.tabBarHeight + 24 }]}
+          showsVerticalScrollIndicator={false}
+        />
+      ) : (
+        <FlatList
+          data={incListData}
+          keyExtractor={incKeyExtractor}
+          renderItem={renderIncomeItem}
+          style={{ flex: 1 }}
+          ListHeaderComponent={IncListHeader}
+          ListEmptyComponent={
+            isLoading ? (
+              <View style={{ gap: 0 }}>
+                {[0, 1, 2, 3, 4].map((i) => (
+                  <SkeletonExpenseRow key={i} style={{ paddingHorizontal: 0, borderBottomWidth: i < 4 ? 1 : 0, borderBottomColor: 'rgba(0,0,0,0.06)' }} />
+                ))}
+              </View>
+            ) : (
+              <EmptyState
+                icon={TrendingUp}
+                title="No income recorded"
+                message="Tap + to record your first income entry"
+                action={{ label: 'Add Income', onPress: () => setAddIncOpen(true) }}
+                style={{ marginTop: 24 }}
+              />
+            )
+          }
+          contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + layout.tabBarHeight + 24 }]}
+          showsVerticalScrollIndicator={false}
+        />
+      )}
 
       {/* ── Sheets ── */}
       <AddExpenseSheet
-        isOpen={addOpen}
-        onClose={() => setAddOpen(false)}
+        isOpen={addExpOpen}
+        onClose={() => setAddExpOpen(false)}
         onSuccess={handleSuccess}
       />
       <EditExpenseSheet
         expense={editExpense}
         onClose={() => setEditExpense(null)}
         onSuccess={handleSuccess}
+      />
+      <AddIncomeSheet
+        isOpen={addIncOpen}
+        onClose={() => setAddIncOpen(false)}
+        onSuccess={handleSuccess}
+      />
+
+      <FirstTimeHint
+        visible={hintSwipe.visible}
+        onDismiss={hintSwipe.dismiss}
+        text="Long-press any entry to edit or delete it."
+        bottomOffset={layout.tabBarHeight + 16}
       />
     </View>
   );
@@ -599,7 +934,6 @@ export default function ExpensesScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1 },
 
-  // Header
   header: {
     flexDirection:     'row',
     alignItems:        'center',
@@ -608,105 +942,65 @@ const styles = StyleSheet.create({
     paddingBottom:     12,
     borderBottomWidth: 1,
   },
-  headerTitle:   { letterSpacing: -0.5 },
-  headerRight: {
-    flexDirection: 'row',
-    alignItems:    'center',
-    gap:           10,
-  },
+  headerTitle: { letterSpacing: -0.5 },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   headerIconBtn: {
-    width:          40,
-    height:         40,
-    borderRadius:   20,
-    alignItems:     'center',
-    justifyContent: 'center',
+    width: 40, height: 40, borderRadius: 20,
+    alignItems: 'center', justifyContent: 'center',
   },
+
+  // Segment toggle
+  segmentWrap: {
+    flexDirection:     'row',
+    paddingHorizontal: 24,
+    borderBottomWidth: 1,
+  },
+  segmentTab: {
+    flex:              1,
+    alignItems:        'center',
+    paddingVertical:   12,
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
+  },
+
+  // Search
+  searchRow: {
+    paddingHorizontal: 16,
+    paddingVertical:   10,
+    borderBottomWidth: 1,
+  },
+  searchInput: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 12, paddingVertical: 9, gap: 8,
+  },
+  searchText: { flex: 1 },
 
   // Month chips
-  monthScrollWrap: {
-    borderBottomWidth: 1,
-    flexShrink:        0,
-    overflow:          'visible',
-  },
+  monthScrollWrap: { borderBottomWidth: 1, flexShrink: 0, overflow: 'visible' },
   monthRow: {
-    flexDirection: 'row',
-    gap:           8,
-    paddingLeft:   24,
-    paddingRight:  24,
-    paddingTop:    14,
-    paddingBottom: 14,
+    flexDirection: 'row', gap: 8,
+    paddingLeft: 24, paddingRight: 24, paddingTop: 14, paddingBottom: 14,
   },
-  monthChip: {
-    paddingHorizontal: 16,
-    paddingVertical:   8,
-    borderWidth:       1.5,
-  },
+  monthChip: { paddingHorizontal: 16, paddingVertical: 8, borderWidth: 1.5 },
 
-  // Summary banner — forest-green, matches bills + goals
+  // Summary banner
   summaryBanner: {
-    marginTop:    16,
-    marginBottom: 8,
-    borderRadius: 20,
-    padding:      20,
-    overflow:     'hidden',
+    marginTop: 16, marginBottom: 8, borderRadius: 20, padding: 20, overflow: 'hidden',
   },
 
-  // Category filter pills
-  filterScroll: {
-    marginTop: 4,
-    flexShrink: 0,
-  },
-  filterRow: {
-    flexDirection: 'row',
-    gap:           8,
-    paddingVertical: 10,
-  },
-  filterPill: {
-    paddingHorizontal: 16,
-    paddingVertical:   8,
-    borderWidth:       1.5,
-  },
+  // Category filter
+  filterScroll: { marginTop: 4, flexShrink: 0 },
+  filterRow: { flexDirection: 'row', gap: 8, paddingVertical: 10 },
+  filterPill: { paddingHorizontal: 16, paddingVertical: 8, borderWidth: 1.5 },
 
-  // Recently added section
-  recentSection: {
-    marginTop:    16,
-    marginBottom: 4,
-  },
-  recentHeader: {
-    flexDirection: 'row',
-    alignItems:    'center',
-    gap:           8,
-    marginBottom:  10,
-  },
-  recentRow: {
-    flexDirection: 'row',
-    gap:           10,
-  },
-  recentCard: {
-    padding:   12,
-    minWidth:  130,
-    maxWidth:  170,
-  },
-  recentDot: {
-    width:        8,
-    height:       8,
-    borderRadius: 4,
-    marginBottom: 6,
-  },
+  // Recently added
+  recentSection: { marginTop: 16, marginBottom: 4 },
+  recentRow: { flexDirection: 'row', gap: 10 },
+  recentCard: { padding: 12, minWidth: 130, maxWidth: 170 },
+  recentDot: { width: 8, height: 8, borderRadius: 4, marginBottom: 6 },
 
   // List
-  listContent: {
-    paddingTop:        8,
-    paddingHorizontal: 24,
-    gap:               16,
-  },
-  dateLabel: {
-    fontSize:     12,
-    marginBottom: 8,
-    marginTop:    4,
-  },
-  dateCard: {
-    paddingHorizontal: 16,
-    paddingVertical:   8,
-  },
+  listContent: { paddingTop: 8, paddingHorizontal: 24, gap: 16 },
+  dateLabel: { fontSize: 12, marginBottom: 8, marginTop: 4 },
+  dateCard: { paddingHorizontal: 16, paddingVertical: 8 },
 });

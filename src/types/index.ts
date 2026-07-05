@@ -15,6 +15,8 @@ export interface User {
   email:          string;
   householdId:    UUID | null;
   avatarUrl:      string | null;
+  /** Base64 data URI — stored in SQLite, never in SecureStore (size limit). */
+  avatarData:     string | null;
   createdAt:      ISO8601;
   updatedAt:      ISO8601;
 }
@@ -311,6 +313,38 @@ export type ContributionCreateInput = Omit<GoalContribution,
   'id' | 'userId' | 'createdAt'
 >;
 
+// ─── Income ───────────────────────────────────────────────────────────────
+
+export type IncomeCategory =
+  | 'salary'
+  | 'freelance'
+  | 'business'
+  | 'investment'
+  | 'rental'
+  | 'transfer'
+  | 'refund'
+  | 'other';
+
+export interface Income {
+  id:          UUID;
+  userId:      UUID;
+  amount:      NGN;
+  category:    IncomeCategory;
+  description: string | null;
+  date:        DateString;
+  createdAt:   ISO8601;
+  updatedAt:   ISO8601;
+}
+
+export type IncomeCreateInput = Omit<Income, 'id' | 'userId' | 'createdAt' | 'updatedAt'>;
+export type IncomeUpdateInput = Partial<IncomeCreateInput> & { id: UUID };
+
+export interface IncomeSummary {
+  totalAmount: NGN;
+  byCategory:  Record<IncomeCategory, NGN>;
+  month:       string; // 'YYYY-MM'
+}
+
 // ─── Notifications ────────────────────────────────────────────────────────
 
 export type NotificationType =
@@ -397,6 +431,17 @@ export const BILL_CATEGORIES: Record<BillCategory, CategoryMeta> = {
   subscriptions: { label: 'Subscriptions', icon: 'RefreshCw',         color: '#6DD9B8' },
   insurance:     { label: 'Insurance',     icon: 'Shield',            color: '#8890D9' },
   other:         { label: 'Other',         icon: 'MoreHorizontal',    color: '#888885' },
+};
+
+export const INCOME_CATEGORIES: Record<IncomeCategory, CategoryMeta> = {
+  salary:     { label: 'Salary',     icon: 'Briefcase',       color: '#3DAA6B' },
+  freelance:  { label: 'Freelance',  icon: 'Zap',             color: '#2BAAAA' },
+  business:   { label: 'Business',   icon: 'Building2',       color: '#5B8DD9' },
+  investment: { label: 'Investment', icon: 'TrendingUp',      color: '#9B6DD9' },
+  rental:     { label: 'Rental',     icon: 'Home',            color: '#E07B54' },
+  transfer:   { label: 'Transfer',   icon: 'ArrowLeftRight',  color: '#D9A050' },
+  refund:     { label: 'Refund',     icon: 'RotateCcw',       color: '#6DD9B8' },
+  other:      { label: 'Other',      icon: 'MoreHorizontal',  color: '#888885' },
 };
 
 export const BILL_FREQUENCY_LABELS: Record<BillFrequency, string> = {

@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   FlatList,
   Pressable,
@@ -11,6 +11,7 @@ import { useRouter } from 'expo-router';
 import Animated, {
   FadeInDown,
 } from 'react-native-reanimated';
+import { format } from 'date-fns';
 import {
   ChevronLeft,
   ChevronRight,
@@ -22,6 +23,7 @@ import {
 import { useTheme } from '../../theme';
 import { useAuthStore } from '../../store/auth.store';
 import { useBudgetsStore } from '../../store/budgets.store';
+import { useIncomeStore } from '../../store/income.store';
 import { useCurrencyFormat } from '../../hooks/useCurrencyFormat';
 import { Card } from '../../components/ui/Card';
 import { StatusBadge } from '../../components/ui/StatusBadge';
@@ -104,16 +106,29 @@ function ProgressBar({ progress, status, height = 8 }: ProgressBarProps) {
 // ─── Budget card ─────────────────────────────────────────────────────────────
 
 interface BudgetCardProps {
-  budget:  BudgetWithSpent;
-  onPress: () => void;
+  budget:       BudgetWithSpent;
+  onPress:      () => void;
+  incomeTotal?: number; // this month's income in kobo
 }
 
-function BudgetCard({ budget, onPress }: BudgetCardProps) {
+function BudgetCard({ budget, onPress, incomeTotal = 0 }: BudgetCardProps) {
   const { colors, text, font, radius } = useTheme();
   const { fmt } = useCurrencyFormat();
 
   const meta     = EXPENSE_CATEGORIES[budget.category];
   const IconComp = EXPENSE_ICONS[meta?.icon ?? 'MoreHorizontal'] ?? MoreHorizontal;
+
+  // Normalise budget limit to monthly for % calculation
+  const monthlyLimit = (() => {
+    switch (budget.period) {
+      case 'weekly':  return budget.amount * 4;
+      case 'monthly': return budget.amount;
+      case 'yearly':  return Math.round(budget.amount / 12);
+    }
+  })();
+  const incomeSharePct = incomeTotal > 0 && monthlyLimit > 0
+    ? Math.round((monthlyLimit / incomeTotal) * 100)
+    : null;
 
   const periodLabel = (() => {
     switch (budget.period) {
@@ -150,6 +165,11 @@ function BudgetCard({ budget, onPress }: BudgetCardProps) {
               </Text>
               <Text style={[text.caption, { color: colors.textTertiary }]}>
                 {periodLabel}
+                {incomeSharePct !== null && (
+                  <Text style={{ color: colors.textTertiary }}>
+                    {' · '}{incomeSharePct}% of income
+                  </Text>
+                )}
               </Text>
             </View>
 
@@ -237,8 +257,15 @@ export default function BudgetsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
 
-  const { user }                           = useAuthStore();
-  const { budgets, isLoading, load }       = useBudgetsStore();
+  const { user }                              = useAuthStore();
+  const { budgets, isLoading, load }          = useBudgetsStore();
+  const { allRecords: allIncome, loadAll: loadAllInc } = useIncomeStore();
+
+  const currentMonth = format(new Date(), 'yyyy-MM');
+  const thisMonthIncome = useMemo(
+    () => allIncome.filter((r) => r.date.startsWith(currentMonth)).reduce((s, r) => s + r.amount, 0),
+    [allIncome, currentMonth],
+  );
 
   const [currentDate,   setCurrentDate]   = useState(() => new Date());
   const [addOpen,       setAddOpen]       = useState(false);
@@ -246,9 +273,9 @@ export default function BudgetsScreen() {
 
   const reload = useCallback(() => {
     if (!user) return;
-    // Build spent-by-category for current month (no real filtering here — store handles it)
-    load(user.id, {});
-  }, [user, load]);
+    load(user.id);
+    loadAllInc(user.id);
+  }, [user, load, loadAllInc]);
 
   useEffect(() => {
     reload();
@@ -338,6 +365,7 @@ export default function BudgetsScreen() {
           <BudgetCard
             budget={item}
             onPress={() => router.push(`/budgets/${item.id}` as never)}
+            incomeTotal={thisMonthIncome}
           />
         )}
         ListHeaderComponent={<SummaryCard budgets={budgets} />}

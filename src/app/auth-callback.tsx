@@ -12,9 +12,11 @@
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import * as SecureStore from 'expo-secure-store';
 import { useTheme } from '../theme';
 import { useAuthStore } from '../store/auth.store';
 import type { UserProfile } from '../lib/api-client';
+import { PIN_RESET_PENDING_KEY } from './(auth)/forgot-pin';
 
 export default function AuthCallbackScreen() {
   const { colors, text } = useTheme();
@@ -50,13 +52,30 @@ export default function AuthCallbackScreen() {
         return;
       }
 
-      // Route to PIN setup for new users, or straight to lock screen for returning users
+      // Check if this auth came from a "Forgot passcode" reset flow.
+      // If so, override normal routing and send to PIN setup regardless of
+      // hasOnboarded — the user needs a new PIN (and new DEK).
+      const resetPending = await SecureStore.getItemAsync(PIN_RESET_PENDING_KEY);
+      if (resetPending === 'true') {
+        await SecureStore.deleteItemAsync(PIN_RESET_PENDING_KEY);
+        // Also clear the stored PIN hash so the old lock screen can't be used
+        await SecureStore.deleteItemAsync('aku_pin_hash');
+        // Clear onboarded flag so the new PIN setup can call markOnboardingComplete
+        await SecureStore.deleteItemAsync('aku_onboarded');
+        router.replace('/(onboarding)/pin-setup?returning=1');
+        return;
+      }
+
+      // Normal routing:
+      // 1. hasOnboarded = true → same device, has PIN → lock screen
+      // 2. hasOnboarded = false, profile.isNew = true → brand-new account → full onboarding
+      // 3. hasOnboarded = false, profile.isNew = false → new device, returning user → PIN-only
       if (hasOnboarded) {
-        // Returning user — nav guard will show the lock screen
         router.replace('/(auth)');
-      } else {
-        // New user — continue onboarding (PIN setup)
+      } else if (profile.isNew) {
         router.replace('/(onboarding)/pin-setup');
+      } else {
+        router.replace('/(onboarding)/pin-setup?returning=1');
       }
     })();
   }, [token, userParam]);

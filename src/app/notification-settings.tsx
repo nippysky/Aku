@@ -32,6 +32,7 @@ import {
 import { useTheme } from '../theme';
 import { Palette } from '../theme/colors';
 import { Divider } from '../components/ui/Divider';
+import { useNotifPrefsStore } from '../store/notif-prefs.store';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -42,13 +43,6 @@ type LucideIcon = React.ComponentType<{
 }>;
 
 type PermissionStatus = 'granted' | 'denied' | 'undetermined';
-
-interface NotifPrefs {
-  billReminders:  boolean;
-  budgetAlerts:   boolean;
-  goalMilestones: boolean;
-  dailyDigest:    boolean;
-}
 
 // ─── Toggle row ───────────────────────────────────────────────────────────────
 
@@ -166,15 +160,13 @@ export default function NotificationSettingsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
 
+  const { billReminders, budgetAlerts, goalMilestones, dailyDigest, load, set: setPref, isLoaded } =
+    useNotifPrefsStore();
+
   const [permStatus, setPermStatus] = useState<PermissionStatus>('undetermined');
-  const [prefs, setPrefs] = useState<NotifPrefs>({
-    billReminders:  true,
-    budgetAlerts:   true,
-    goalMilestones: true,
-    dailyDigest:    false,
-  });
 
   useEffect(() => {
+    if (!isLoaded) load();
     Notifications.getPermissionsAsync()
       .then((r) =>
         setPermStatus(r.granted ? 'granted' : r.canAskAgain ? 'undetermined' : 'denied')
@@ -186,10 +178,6 @@ export default function NotificationSettingsScreen() {
     const r = await Notifications.requestPermissionsAsync();
     setPermStatus(r.granted ? 'granted' : !r.canAskAgain ? 'denied' : 'undetermined');
   }, []);
-
-  function setPref<K extends keyof NotifPrefs>(key: K, value: boolean) {
-    setPrefs((prev) => ({ ...prev, [key]: value }));
-  }
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
@@ -264,7 +252,7 @@ export default function NotificationSettingsScreen() {
             icon={Receipt}
             label="Bill reminders"
             sublabel="Get notified before bills are due"
-            value={prefs.billReminders}
+            value={billReminders}
             onChange={(v) => setPref('billReminders', v)}
             disabled={permStatus !== 'granted'}
             isFirst
@@ -273,7 +261,7 @@ export default function NotificationSettingsScreen() {
             icon={Wallet}
             label="Budget alerts"
             sublabel="Warns when you're approaching your limit"
-            value={prefs.budgetAlerts}
+            value={budgetAlerts}
             onChange={(v) => setPref('budgetAlerts', v)}
             disabled={permStatus !== 'granted'}
           />
@@ -281,7 +269,7 @@ export default function NotificationSettingsScreen() {
             icon={Target}
             label="Goal milestones"
             sublabel="Celebrate 25%, 50%, 75% and 100% progress"
-            value={prefs.goalMilestones}
+            value={goalMilestones}
             onChange={(v) => setPref('goalMilestones', v)}
             disabled={permStatus !== 'granted'}
           />
@@ -289,7 +277,7 @@ export default function NotificationSettingsScreen() {
             icon={Sun}
             label="Daily digest"
             sublabel="Morning summary of what's due today"
-            value={prefs.dailyDigest}
+            value={dailyDigest}
             onChange={(v) => setPref('dailyDigest', v)}
             disabled={permStatus !== 'granted'}
             isLast

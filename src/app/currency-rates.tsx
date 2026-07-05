@@ -12,7 +12,7 @@
  *   Then 1 NGN = (1/1500) USD = (1/1500) × 0.79 GBP = 0.000527 GBP
  *   Equivalently: 1 NGN → GBP = rates['GBP'] / rates['NGN']
  */
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -149,6 +149,9 @@ export default function CurrencyRatesScreen() {
 
   const [search,      setSearch]      = useState('');
   const [refreshing,  setRefreshing]  = useState(false);
+
+  // Fetch rates when the screen mounts (lazy — not on cold start)
+  useEffect(() => { void fetchExchangeRates(); }, []);
 
   // The base code is the user's selected display currency
   const baseCode = currency.code;

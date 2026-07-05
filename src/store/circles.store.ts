@@ -9,7 +9,7 @@
  * see circle.store.ts.
  */
 import { create } from 'zustand';
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { getDatabase, schema } from '../lib/database/client';
 import { generateUUID } from '../lib/uuid';
 import type { Household, HouseholdMember, CircleFrequency, ContributionType } from '../types';
@@ -84,30 +84,23 @@ export const useCirclesStore = create<CirclesState>()((set, get) => ({
         return;
       }
 
-      const circleRows = await Promise.all(
-        memberships.map((m) =>
-          db
-            .select()
-            .from(schema.households)
-            .where(eq(schema.households.id, m.householdId))
-            .then((rows) => rows[0]),
-        ),
-      );
+      // Single JOIN — no N+1
+      const householdIds = memberships.map((m) => m.householdId);
+      const householdRows = await db
+        .select()
+        .from(schema.households)
+        .where(inArray(schema.households.id, householdIds));
 
-      const circles: Household[] = circleRows
-        .filter(Boolean)
-        .map((h) => ({
-          id:         h!.id,
-          name:       h!.name,
-          ownerId:    h!.ownerId,
-          inviteCode: (h as any).inviteCode ?? null,
-          createdAt:  h!.createdAt,
-        }));
+      const circles: Household[] = householdRows.map((h) => ({
+        id:         h.id,
+        name:       h.name,
+        ownerId:    h.ownerId,
+        inviteCode: (h as any).inviteCode ?? null,
+        createdAt:  h.createdAt,
+      }));
 
       const activeCircle = circles[0] ?? null;
       set({ circles, activeCircle });
-
-      if (activeCircle) await get().loadMembers(activeCircle.id);
     } catch (e: any) {
       set({ error: e?.message ?? 'Failed to load circles' });
     } finally {

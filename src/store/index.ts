@@ -6,4 +6,4 @@ export { useGoalsStore }    from './goals.store';
 export { useCirclesStore }  from './circles.store';
 export { useCircleStore }   from './circle.store';
 export { useUIStore }       from './ui.store';
-export type { SheetName, Toast } from './ui.store';
+export type { Toast } from './ui.store';

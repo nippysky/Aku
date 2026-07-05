@@ -2,12 +2,20 @@
  * circle/[id].tsx — Contribution Group Detail
  *
  * Two tabs:
- *  [Members]  — member payment status, circle goal progress, invite button
- *  [Activity] — leaderboard, pending approvals (owner only), my contributions
+ *  [Members]  — member payment status, goal progress, payment details
+ *  [Activity] — leaderboard, pending approvals (admin only), my contributions
  *
- * Settings gear (owner only) → dropdown: "Edit Circle" | "Edit Payment Details"
- * Invite button → ActionSheet: "Share Code" | "Share Link"
- * Copy button → toast "Account details copied"
+ * Admin (circle owner):
+ *   - Settings gear → Edit Circle / Edit Payment Details
+ *   - Verify / reject pending contributions in Activity tab
+ *   - Remove members from Members tab
+ *
+ * Members:
+ *   - Log Contribution FAB on Activity tab
+ *   - Invite others via Share Code / Share Link
+ *
+ * Push notifications: all circle members receive a push when contributions
+ * are logged or verified (via server-side fan-out by user IDs).
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -15,7 +23,6 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
-  Image,
   Platform,
   Pressable,
   ScrollView,
@@ -37,16 +44,15 @@ import {
   Check,
   Copy,
   Crown,
-  Link,
   Plus,
   Settings2,
   ShieldCheck,
   Trash2,
   TrendingUp,
+  UserMinus,
   UserPlus,
   Users,
   Activity,
-  ChevronDown,
   CreditCard,
 } from 'lucide-react-native';
 import {
@@ -62,6 +68,7 @@ import { useCirclesStore } from '../../store/circles.store';
 import { useCircleStore } from '../../store/circle.store';
 import { useUIStore } from '../../store/ui.store';
 import { useCurrencyFormat } from '../../hooks/useCurrencyFormat';
+import { InitialsAvatar } from '../../components/ui/InitialsAvatar';
 import { Divider } from '../../components/ui/Divider';
 import { Button } from '../../components/ui/Button';
 import { AmountInput } from '../../components/ui/AmountInput';
@@ -94,13 +101,6 @@ const STATUS_CONFIG = {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function getInitials(name: string) {
-  const p = name.trim().split(/\s+/);
-  if (!p[0]) return '?';
-  if (p.length === 1) return (p[0][0] ?? '?').toUpperCase();
-  return ((p[0][0] ?? '') + (p[p.length - 1][0] ?? '')).toUpperCase();
-}
-
 function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 }
@@ -116,18 +116,8 @@ function todayString() {
 
 // ─── Avatar ───────────────────────────────────────────────────────────────────
 
-function Avatar({ name, avatarUrl, size = 40 }: { name: string; avatarUrl: string | null; size?: number }) {
-  const { colors, font } = useTheme();
-  if (avatarUrl) {
-    return <Image source={{ uri: avatarUrl }} style={{ width: size, height: size, borderRadius: size / 2 }} />;
-  }
-  return (
-    <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: colors.primary + '20', alignItems: 'center', justifyContent: 'center' }}>
-      <Text style={{ fontFamily: font.sansSemiBold, fontSize: size * 0.34, color: colors.primary }}>
-        {getInitials(name)}
-      </Text>
-    </View>
-  );
+function Avatar({ name, size = 40 }: { name: string; size?: number }) {
+  return <InitialsAvatar name={name} size={size} />;
 }
 
 // ─── Section label ────────────────────────────────────────────────────────────
@@ -135,15 +125,39 @@ function Avatar({ name, avatarUrl, size = 40 }: { name: string; avatarUrl: strin
 function SectionLabel({ label }: { label: string }) {
   const { colors, text } = useTheme();
   return (
-    <Text style={[text.labelCaps, { color: colors.textTertiary, marginTop: 22, marginBottom: 10, marginLeft: 2 }]}>
+    <Text style={[text.labelCaps, {
+      color: colors.textTertiary, marginTop: 22, marginBottom: 10, marginLeft: 2,
+    }]}>
       {label}
     </Text>
   );
 }
 
+// ─── Admin pill ───────────────────────────────────────────────────────────────
+
+function AdminPill() {
+  const { font, fontSize } = useTheme();
+  return (
+    <View style={styles.adminPill}>
+      <Crown size={9} color="#C4E07A" strokeWidth={2} />
+      <Text style={{ fontFamily: font.sansSemiBold, fontSize: 9, color: '#C4E07A', letterSpacing: 0.5 }}>
+        ADMIN
+      </Text>
+    </View>
+  );
+}
+
 // ─── Tab switcher ─────────────────────────────────────────────────────────────
 
-function TabSwitcher({ active, onChange }: { active: 'members' | 'activity'; onChange: (t: 'members' | 'activity') => void }) {
+function TabSwitcher({
+  active,
+  onChange,
+  pendingCount,
+}: {
+  active: 'members' | 'activity';
+  onChange: (t: 'members' | 'activity') => void;
+  pendingCount: number;
+}) {
   const { font, fontSize } = useTheme();
   const tabs = [
     { key: 'members'  as const, label: 'Members',  Icon: Users    },
@@ -153,6 +167,7 @@ function TabSwitcher({ active, onChange }: { active: 'members' | 'activity'; onC
     <View style={{ flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 100, padding: 3, marginTop: 14, alignSelf: 'flex-start' }}>
       {tabs.map(({ key, label, Icon }) => {
         const isActive = active === key;
+        const showBadge = key === 'activity' && pendingCount > 0;
         return (
           <Pressable
             key={key}
@@ -163,6 +178,11 @@ function TabSwitcher({ active, onChange }: { active: 'members' | 'activity'; onC
             <Text style={{ fontFamily: font.sansSemiBold, fontSize: fontSize.sm, color: isActive ? '#FAF9F5' : 'rgba(250,249,245,0.55)', letterSpacing: 0.2 }}>
               {label}
             </Text>
+            {showBadge && (
+              <View style={{ backgroundColor: '#FF6B6B', borderRadius: 8, minWidth: 16, height: 16, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 }}>
+                <Text style={{ fontFamily: font.sansSemiBold, fontSize: 9, color: '#fff' }}>{pendingCount}</Text>
+              </View>
+            )}
           </Pressable>
         );
       })}
@@ -172,19 +192,24 @@ function TabSwitcher({ active, onChange }: { active: 'members' | 'activity'; onC
 
 // ─── Member payment row ───────────────────────────────────────────────────────
 
-function MemberRow({ ms, fmt, isLast }: { ms: MemberPaymentStatus; fmt: (n: number) => string; isLast: boolean }) {
+function MemberRow({
+  ms, fmt, isLast, isOwner, onRemove,
+}: {
+  ms: MemberPaymentStatus;
+  fmt: (n: number) => string;
+  isLast: boolean;
+  isOwner: boolean;
+  onRemove?: () => void;
+}) {
   const { colors, font, fontSize, text } = useTheme();
 
-  // Overpayment: verified > expected
-  const isGenerous = ms.expectedAmount > 0 && ms.verifiedAmount > ms.expectedAmount;
-  const paidPct    = ms.expectedAmount > 0
+  const isGenerous  = ms.expectedAmount > 0 && ms.verifiedAmount > ms.expectedAmount;
+  const paidPct     = ms.expectedAmount > 0
     ? Math.round((ms.verifiedAmount / ms.expectedAmount) * 100)
     : 0;
-  // Bar fills to 100% for normal; overflow shown as a second accent segment
-  const basePct    = Math.min(paidPct, 100);
-  const overflowPct = isGenerous ? Math.min(paidPct - 100, 60) : 0; // capped visually
+  const basePct     = Math.min(paidPct, 100);
+  const overflowPct = isGenerous ? Math.min(paidPct - 100, 60) : 0;
 
-  // Badge
   const sc = isGenerous
     ? { bg: '#EEF9EC', fg: '#166534', label: `${paidPct}% 🎉` }
     : STATUS_CONFIG[ms.status];
@@ -192,8 +217,9 @@ function MemberRow({ ms, fmt, isLast }: { ms: MemberPaymentStatus; fmt: (n: numb
   return (
     <View>
       <View style={[styles.memberRow, { paddingHorizontal: 14 }]}>
+        {/* Avatar + owner crown */}
         <View style={{ position: 'relative', marginRight: 10 }}>
-          <Avatar name={ms.name} avatarUrl={ms.avatarUrl} size={40} />
+          <Avatar name={ms.name} size={40} />
           {ms.role === 'owner' && (
             <View style={{ position: 'absolute', bottom: -2, right: -2, backgroundColor: '#163A2F', borderRadius: 8, padding: 2 }}>
               <Crown size={8} color="#C4E07A" strokeWidth={2} />
@@ -201,32 +227,20 @@ function MemberRow({ ms, fmt, isLast }: { ms: MemberPaymentStatus; fmt: (n: numb
           )}
         </View>
 
+        {/* Info */}
         <View style={{ flex: 1 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
             <Text style={{ fontFamily: font.sansSemiBold, fontSize: fontSize.sm, color: colors.text }} numberOfLines={1}>
               {ms.name}
             </Text>
-            {isGenerous && (
-              <Text style={{ fontSize: 12 }}>✨</Text>
-            )}
+            {isGenerous && <Text style={{ fontSize: 12 }}>✨</Text>}
           </View>
-          {ms.expectedAmount > 0 && (
+          {ms.expectedAmount > 0 ? (
             <>
-              {/* Progress bar — base (green) + overflow (gold) */}
               <View style={{ height: 4, borderRadius: 2, backgroundColor: colors.border, marginTop: 5, overflow: 'hidden', flexDirection: 'row' }}>
-                {/* Base fill: green up to 100% */}
-                <View style={{
-                  height: 4,
-                  backgroundColor: ms.status === 'partial' ? '#F59E0B' : '#16C172',
-                  width: `${basePct}%`,
-                }} />
-                {/* Overflow fill: gold beyond 100% */}
+                <View style={{ height: 4, backgroundColor: ms.status === 'partial' ? '#F59E0B' : '#16C172', width: `${basePct}%` }} />
                 {isGenerous && overflowPct > 0 && (
-                  <View style={{
-                    height: 4,
-                    backgroundColor: '#C4E07A',
-                    width: `${overflowPct}%`,
-                  }} />
+                  <View style={{ height: 4, backgroundColor: '#C4E07A', width: `${overflowPct}%` }} />
                 )}
               </View>
               <Text style={[text.caption, { color: colors.textTertiary, marginTop: 2 }]}>
@@ -234,14 +248,26 @@ function MemberRow({ ms, fmt, isLast }: { ms: MemberPaymentStatus; fmt: (n: numb
                 {isGenerous ? ` · ${paidPct - 100}% extra 🙌` : ms.pendingAmount > 0 ? ` · ${fmt(ms.pendingAmount)} pending` : ''}
               </Text>
             </>
+          ) : (
+            <Text style={[text.caption, { color: colors.textTertiary, marginTop: 2 }]}>
+              {ms.role === 'owner' ? 'Admin' : 'Member'}
+            </Text>
           )}
         </View>
 
+        {/* Status badge */}
         <View style={[styles.badge, { backgroundColor: sc.bg, marginLeft: 8 }]}>
           <Text style={{ fontFamily: font.sansSemiBold, fontSize: 9, color: sc.fg, letterSpacing: 0.3 }}>
             {isGenerous ? sc.label : sc.label.toUpperCase()}
           </Text>
         </View>
+
+        {/* Admin: remove member icon (non-owner members only) */}
+        {isOwner && ms.role !== 'owner' && onRemove && (
+          <Pressable onPress={onRemove} hitSlop={10} style={{ marginLeft: 6, padding: 4 }}>
+            <UserMinus size={15} color={colors.textTertiary} strokeWidth={1.8} />
+          </Pressable>
+        )}
       </View>
       {!isLast && <Divider style={{ marginLeft: 64 }} />}
     </View>
@@ -267,6 +293,7 @@ export default function CircleDetailScreen() {
     isLoading, isSaving,
     loadCircle, saveSettings,
     logContribution, verifyContribution, deleteContribution,
+    removeMember,
   } = useCircleStore();
 
   const circle  = useMemo(() => circles.find((c) => c.id === circleId) ?? null, [circles, circleId]);
@@ -275,15 +302,13 @@ export default function CircleDetailScreen() {
   const [activeTab, setActiveTab] = useState<'members' | 'activity'>('members');
 
   useEffect(() => {
-    if (circleId) {
-      loadCircle(circleId, user ? { id: user.id, name: user.name, email: user.email, avatarUrl: user.avatarUrl } : undefined);
-    }
+    if (circleId) loadCircle(circleId);
   }, [circleId]);
 
   // ── Sheet refs ────────────────────────────────────────────────────────────
-  const logSheetRef     = useRef<BottomSheetModal>(null);
-  const editSheetRef    = useRef<BottomSheetModal>(null);
-  const paySheetRef     = useRef<BottomSheetModal>(null);
+  const logSheetRef  = useRef<BottomSheetModal>(null);
+  const editSheetRef = useRef<BottomSheetModal>(null);
+  const paySheetRef  = useRef<BottomSheetModal>(null);
 
   const renderBackdrop = useCallback(
     (props: BottomSheetBackdropProps) => (
@@ -291,7 +316,7 @@ export default function CircleDetailScreen() {
     ), [],
   );
 
-  // ── Log form ──────────────────────────────────────────────────────────────
+  // ── Log contribution form ─────────────────────────────────────────────────
   const [logAmountKobo, setLogAmountKobo] = useState(0);
   const [logNote,       setLogNote]       = useState('');
 
@@ -305,10 +330,10 @@ export default function CircleDetailScreen() {
     logSheetRef.current?.dismiss();
     setLogAmountKobo(0);
     setLogNote('');
-    showToast('success', 'Logged — awaiting owner verification');
+    showToast('success', 'Logged — awaiting admin verification');
   }, [user, circleId, logAmountKobo, logNote, logContribution, showToast]);
 
-  // ── Circle details form (emoji, description, goal, frequency, per-member, deadline) ──
+  // ── Circle details form (admin only) ─────────────────────────────────────
   const [editEmoji,          setEditEmoji]          = useState('💰');
   const [editDesc,           setEditDesc]           = useState('');
   const [editTargetKobo,     setEditTargetKobo]     = useState(0);
@@ -331,7 +356,7 @@ export default function CircleDetailScreen() {
     if (!circleId) return;
     await saveSettings(circleId, {
       emoji:            editEmoji || null,
-      description:      editDesc.trim()       || null,
+      description:      editDesc.trim()   || null,
       targetAmount:     editTargetKobo > 0 ? editTargetKobo : null,
       frequency:        editFrequency,
       perMemberAmount:  editPerMember > 0 ? editPerMember : null,
@@ -342,17 +367,17 @@ export default function CircleDetailScreen() {
     showToast('success', 'Circle updated');
   }, [circleId, editEmoji, editDesc, editTargetKobo, editFrequency, editPerMember, editDeadline, saveSettings, showToast]);
 
-  // ── Payment details form ──────────────────────────────────────────────────
+  // ── Payment details form (admin only) ─────────────────────────────────────
   const [editAcctName,   setEditAcctName]   = useState('');
   const [editAcctNumber, setEditAcctNumber] = useState('');
   const [editBankName,   setEditBankName]   = useState('');
   const [editNotes,      setEditNotes]      = useState('');
 
   const openPaySheet = useCallback(() => {
-    setEditAcctName(settings?.accountName   ?? '');
+    setEditAcctName(settings?.accountName    ?? '');
     setEditAcctNumber(settings?.accountNumber ?? '');
-    setEditBankName(settings?.bankName      ?? '');
-    setEditNotes(settings?.notes            ?? '');
+    setEditBankName(settings?.bankName       ?? '');
+    setEditNotes(settings?.notes             ?? '');
     paySheetRef.current?.present();
   }, [settings]);
 
@@ -368,20 +393,20 @@ export default function CircleDetailScreen() {
     showToast('success', 'Payment details saved');
   }, [circleId, editAcctName, editAcctNumber, editBankName, editNotes, saveSettings, showToast]);
 
-  // ── Settings dropdown (gear icon) ─────────────────────────────────────────
+  // ── Admin settings menu ───────────────────────────────────────────────────
   const handleSettingsMenu = useCallback(() => {
     Haptics.selectionAsync();
     const options = ['Edit Circle Details', 'Edit Payment Details', 'Cancel'];
     if (Platform.OS === 'ios') {
       ActionSheetIOS.showActionSheetWithOptions(
-        { options, cancelButtonIndex: 2, title: 'Circle Settings' },
+        { options, cancelButtonIndex: 2, title: 'Admin Settings' },
         (idx) => {
           if (idx === 0) openEditSheet();
           if (idx === 1) openPaySheet();
         },
       );
     } else {
-      Alert.alert('Circle Settings', undefined, [
+      Alert.alert('Admin Settings', undefined, [
         { text: 'Edit Circle Details',  onPress: openEditSheet },
         { text: 'Edit Payment Details', onPress: openPaySheet  },
         { text: 'Cancel', style: 'cancel' },
@@ -398,16 +423,16 @@ export default function CircleDetailScreen() {
     const shareCode = async () => {
       if (inviteCode) {
         await Clipboard.setStringAsync(inviteCode);
-        showToast('success', `Code ${inviteCode} copied — share it!`);
+        showToast('success', `Code ${inviteCode} copied!`);
       } else {
-        showToast('info', 'No invite code yet — try recreating this circle');
+        showToast('info', 'No invite code available');
       }
     };
 
     const shareLink = async () => {
       try {
         await Share.share({
-          message: `Join my ${circleEmoji} ${circle?.name ?? 'Circle'} on Akù!\n\nTap to join: ${deepLink}\n\nOr enter code: ${inviteCode}`,
+          message: `Join my ${circleEmoji} ${circle?.name ?? 'Circle'} on Akù!\n\nTap: ${deepLink}\n\nOr enter code: ${inviteCode}`,
           title:   `Join ${circle?.name ?? 'Circle'} on Akù`,
           url:     deepLink,
         });
@@ -418,16 +443,13 @@ export default function CircleDetailScreen() {
 
     if (Platform.OS === 'ios') {
       ActionSheetIOS.showActionSheetWithOptions(
-        { options: ['Share Code', 'Share Invite Link', 'Cancel'], cancelButtonIndex: 2 },
-        (idx) => {
-          if (idx === 0) shareCode();
-          if (idx === 1) shareLink();
-        },
+        { options: ['Copy Invite Code', 'Share Invite Link', 'Cancel'], cancelButtonIndex: 2 },
+        (idx) => { if (idx === 0) shareCode(); if (idx === 1) shareLink(); },
       );
     } else {
-      Alert.alert('Invite Members', 'How would you like to invite?', [
-        { text: 'Copy Invite Code', onPress: shareCode  },
-        { text: 'Share Link',       onPress: shareLink  },
+      Alert.alert('Invite Members', undefined, [
+        { text: 'Copy Invite Code', onPress: shareCode },
+        { text: 'Share Link',       onPress: shareLink },
         { text: 'Cancel', style: 'cancel' },
       ]);
     }
@@ -437,10 +459,10 @@ export default function CircleDetailScreen() {
   const handleCopy = useCallback(async () => {
     if (!settings?.accountNumber) return;
     const details = [
-      settings.bankName    ? `Institution: ${settings.bankName}`     : null,
+      settings.bankName     ? `Institution: ${settings.bankName}`   : null,
       settings.accountNumber ? `Account: ${settings.accountNumber}` : null,
-      settings.accountName ? `Name: ${settings.accountName}`         : null,
-      settings.notes       ? `Notes: ${settings.notes}`              : null,
+      settings.accountName  ? `Name: ${settings.accountName}`       : null,
+      settings.notes        ? `Notes: ${settings.notes}`            : null,
     ].filter(Boolean).join('\n');
     await Clipboard.setStringAsync(details || settings.accountNumber);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -450,20 +472,53 @@ export default function CircleDetailScreen() {
   // ── Verify / delete contribution ──────────────────────────────────────────
   const handleVerify = useCallback(async (c: CircleContribution) => {
     if (!user) return;
-    Alert.alert('Verify Entry', `Mark ${fmt(c.amount)} as verified?`, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Verify', onPress: async () => { await verifyContribution(c.id, user.id); showToast('success', 'Verified'); } },
-    ]);
+    Alert.alert(
+      'Verify Contribution',
+      `Mark ${fmt(c.amount)} from ${c.userName} as verified?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Verify',
+          onPress: async () => {
+            await verifyContribution(c.id, user.id);
+            showToast('success', 'Verified ✓');
+          },
+        },
+      ],
+    );
   }, [user, verifyContribution, showToast, fmt]);
 
-  const handleDelete = useCallback(async (c: CircleContribution) => {
+  const handleDeleteContribution = useCallback(async (c: CircleContribution) => {
     Alert.alert('Remove Entry', `Remove ${fmt(c.amount)} entry?`, [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Remove', style: 'destructive', onPress: async () => { await deleteContribution(c.id); showToast('info', 'Removed'); } },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: async () => { await deleteContribution(c.id); showToast('info', 'Removed'); },
+      },
     ]);
   }, [deleteContribution, showToast, fmt]);
 
-  // ── Computed ──────────────────────────────────────────────────────────────
+  // ── Remove member (admin only) ────────────────────────────────────────────
+  const handleRemoveMember = useCallback((memberId: string, memberName: string) => {
+    Alert.alert(
+      'Remove Member',
+      `Remove ${memberName} from this circle?\n\nTheir contribution history will remain.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            await removeMember(memberId);
+            showToast('info', `${memberName} removed`);
+          },
+        },
+      ],
+    );
+  }, [removeMember, showToast]);
+
+  // ── Computed values ───────────────────────────────────────────────────────
   const myContributions = useMemo(
     () => contributions.filter((c) => c.userId === user?.id), [contributions, user],
   );
@@ -478,7 +533,6 @@ export default function CircleDetailScreen() {
     ? Math.min(Math.round((grandVerified / settings.targetAmount) * 100), 100)
     : null;
 
-  // Effective per-member amount: explicit > auto-split from goal
   const effectivePerMember = useMemo(() => {
     if (settings?.perMemberAmount && settings.perMemberAmount > 0) return settings.perMemberAmount;
     if (settings?.targetAmount && settings.targetAmount > 0 && members.length > 0) {
@@ -503,10 +557,10 @@ export default function CircleDetailScreen() {
       contentContainerStyle={[styles.tabBody, { paddingBottom: insets.bottom + layout.tabBarHeight + 40, paddingHorizontal: layout.screenPadding }]}
       showsVerticalScrollIndicator={false}
     >
-      {/* Frequency / deadline / per-member meta bar */}
-      {(settings?.frequency || settings?.deadline || settings?.perMemberAmount) ? (
+      {/* Frequency / per-member / deadline meta bar */}
+      {(settings?.frequency || settings?.deadline || effectivePerMember > 0) ? (
         <View style={[styles.metaRow, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          {settings.frequency && (
+          {settings?.frequency && (
             <View style={styles.metaCell}>
               <Text style={[text.caption, { color: colors.textTertiary }]}>Frequency</Text>
               <Text style={{ fontFamily: font.sansSemiBold, fontSize: fontSize.sm, color: colors.text }}>
@@ -514,33 +568,38 @@ export default function CircleDetailScreen() {
               </Text>
             </View>
           )}
-          {effectivePerMember > 0 ? (
+          {effectivePerMember > 0 && (
             <>
-              {settings.frequency && <View style={{ width: 1, backgroundColor: colors.border, alignSelf: 'stretch', marginHorizontal: 12 }} />}
+              {settings?.frequency && <View style={{ width: 1, backgroundColor: colors.border, alignSelf: 'stretch', marginHorizontal: 12 }} />}
               <View style={styles.metaCell}>
                 <Text style={[text.caption, { color: colors.textTertiary }]}>
                   Per member{!settings?.perMemberAmount ? ' (split)' : ''}
                 </Text>
-                <Text style={{ fontFamily: font.sansSemiBold, fontSize: fontSize.sm, color: colors.primary }}>{fmt(effectivePerMember)}</Text>
+                <Text style={{ fontFamily: font.sansSemiBold, fontSize: fontSize.sm, color: colors.primary }}>
+                  {fmt(effectivePerMember)}
+                </Text>
               </View>
             </>
-          ) : null}
-          {settings.deadline ? (
+          )}
+          {settings?.deadline && (
             <>
               <View style={{ width: 1, backgroundColor: colors.border, alignSelf: 'stretch', marginHorizontal: 12 }} />
               <View style={styles.metaCell}>
                 <Text style={[text.caption, { color: colors.textTertiary }]}>Deadline</Text>
-                <Text style={{ fontFamily: font.sansSemiBold, fontSize: fontSize.sm, color: colors.text }}>{fmtShortDate(settings.deadline)}</Text>
+                <Text style={{ fontFamily: font.sansSemiBold, fontSize: fontSize.sm, color: colors.text }}>
+                  {fmtShortDate(settings.deadline)}
+                </Text>
               </View>
             </>
-          ) : null}
+          )}
         </View>
       ) : null}
 
-      {/* Members */}
+      {/* Members header */}
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 22, marginBottom: 10 }}>
-        <Text style={[text.labelCaps, { color: colors.textTertiary, marginLeft: 2 }]}>Members · {members.length}</Text>
-        {/* Invite button for ALL members */}
+        <Text style={[text.labelCaps, { color: colors.textTertiary, marginLeft: 2 }]}>
+          Members · {members.length}
+        </Text>
         <Pressable
           onPress={handleInvite}
           style={[styles.inviteBtn, { backgroundColor: colors.primary + '14', borderColor: colors.primary + '30' }]}
@@ -558,15 +617,26 @@ export default function CircleDetailScreen() {
           </Text>
         </View>
       ) : (
-        <Animated.View entering={FadeInDown.duration(280)} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, padding: 0, overflow: 'hidden' }]}>
-          {memberStatuses.map((ms, idx) => (
-            <MemberRow
-              key={ms.memberId}
-              ms={ms}
-              fmt={fmt}
-              isLast={idx === memberStatuses.length - 1}
-            />
-          ))}
+        <Animated.View
+          entering={FadeInDown.duration(280)}
+          style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, padding: 0, overflow: 'hidden' }]}
+        >
+          {memberStatuses.map((ms, idx) => {
+            const memberRecord = members.find((m) => m.userId === ms.userId);
+            return (
+              <MemberRow
+                key={ms.memberId}
+                ms={ms}
+                fmt={fmt}
+                isLast={idx === memberStatuses.length - 1}
+                isOwner={isOwner}
+                onRemove={memberRecord && ms.role !== 'owner'
+                  ? () => handleRemoveMember(memberRecord.id, ms.name)
+                  : undefined
+                }
+              />
+            );
+          })}
         </Animated.View>
       )}
 
@@ -581,7 +651,10 @@ export default function CircleDetailScreen() {
               </Pressable>
             )}
           </View>
-          <Animated.View entering={FadeInDown.duration(280)} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Animated.View
+            entering={FadeInDown.duration(280)}
+            style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
+          >
             {settings.bankName ? (
               <View style={styles.acctRow}>
                 <Building2 size={16} color={colors.textTertiary} strokeWidth={1.8} />
@@ -632,7 +705,7 @@ export default function CircleDetailScreen() {
           <Pressable onPress={openPaySheet} style={[styles.emptyCard, { borderColor: colors.border, borderStyle: 'dashed' }]}>
             <CreditCard size={20} color={colors.textTertiary} strokeWidth={1.5} />
             <Text style={[text.bodySm, { color: colors.textTertiary, marginTop: 6, textAlign: 'center' }]}>
-              Add payment details if members need to transfer funds{'\n'}(optional — tap to configure)
+              Add payment details so members know where to send funds{'\n'}(optional — tap to set up)
             </Text>
           </Pressable>
         </>
@@ -646,17 +719,62 @@ export default function CircleDetailScreen() {
       contentContainerStyle={[styles.tabBody, { paddingBottom: insets.bottom + layout.tabBarHeight + 80, paddingHorizontal: layout.screenPadding }]}
       showsVerticalScrollIndicator={false}
     >
+      {/* Admin: Pending Approvals — shown first so admin acts quickly */}
+      {isOwner && pendingAll.length > 0 && (
+        <>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8, marginBottom: 10 }}>
+            <Text style={[text.labelCaps, { color: colors.textTertiary, marginLeft: 2 }]}>
+              Pending Approvals · {pendingAll.length}
+            </Text>
+            <AdminPill />
+          </View>
+          <Animated.View
+            entering={FadeInDown.duration(280)}
+            style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, padding: 0, overflow: 'hidden' }]}
+          >
+            {pendingAll.map((c, idx) => (
+              <View key={c.id}>
+                <View style={[styles.pendingRow, { paddingHorizontal: 14 }]}>
+                  <Avatar name={c.userName} size={34} />
+                  <View style={{ flex: 1, marginLeft: 10 }}>
+                    <Text style={{ fontFamily: font.sansSemiBold, fontSize: fontSize.sm, color: colors.text }} numberOfLines={1}>
+                      {c.userName || 'Member'}
+                    </Text>
+                    <Text style={[text.caption, { color: colors.textTertiary }]}>
+                      {fmtDate(c.createdAt)}{c.note ? ` · ${c.note}` : ''}
+                    </Text>
+                  </View>
+                  <Text style={{ fontFamily: font.sansSemiBold, fontSize: fontSize.sm, color: colors.text, marginRight: 10 }}>
+                    {fmt(c.amount)}
+                  </Text>
+                  <Pressable onPress={() => handleVerify(c)} style={[styles.iconBtn, { backgroundColor: colors.primary }]} disabled={isSaving}>
+                    <ShieldCheck size={14} color="#FAF9F5" strokeWidth={2} />
+                  </Pressable>
+                  <Pressable onPress={() => handleDeleteContribution(c)} style={[styles.iconBtn, { backgroundColor: colors.dangerBg, marginLeft: 6 }]} disabled={isSaving}>
+                    <Trash2 size={14} color={colors.danger} strokeWidth={2} />
+                  </Pressable>
+                </View>
+                {idx < pendingAll.length - 1 && <Divider style={{ marginLeft: 58 }} />}
+              </View>
+            ))}
+          </Animated.View>
+        </>
+      )}
+
       {/* Leaderboard */}
       <SectionLabel label="Leaderboard" />
       {leaderboard.length === 0 ? (
         <Animated.View entering={FadeInDown.duration(280)} style={[styles.emptyCard, { borderColor: colors.border }]}>
           <TrendingUp size={24} color={colors.textTertiary} strokeWidth={1.4} />
           <Text style={[text.bodySm, { color: colors.textTertiary, marginTop: 6, textAlign: 'center' }]}>
-            No activity yet.{'\n'}Tap "Log Contribution" to get started.
+            No contributions yet.{'\n'}Tap "Log Contribution" to get started.
           </Text>
         </Animated.View>
       ) : (
-        <Animated.View entering={FadeInDown.duration(280)} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, padding: 0, overflow: 'hidden' }]}>
+        <Animated.View
+          entering={FadeInDown.duration(280)}
+          style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, padding: 0, overflow: 'hidden' }]}
+        >
           {leaderboard.map((entry, idx) => {
             const medal  = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : null;
             const isLast = idx === leaderboard.length - 1;
@@ -668,7 +786,7 @@ export default function CircleDetailScreen() {
                       ? <Text style={{ fontSize: 18 }}>{medal}</Text>
                       : <Text style={{ fontFamily: font.sansSemiBold, fontSize: fontSize.sm, color: colors.textTertiary }}>#{entry.rank}</Text>}
                   </View>
-                  <Avatar name={entry.userName} avatarUrl={entry.avatarUrl} size={36} />
+                  <Avatar name={entry.userName} size={36} />
                   <View style={{ flex: 1, marginLeft: 10 }}>
                     <Text style={{ fontFamily: font.sansSemiBold, fontSize: fontSize.sm, color: colors.text }} numberOfLines={1}>
                       {entry.userName || 'Member'}
@@ -693,41 +811,7 @@ export default function CircleDetailScreen() {
         </Animated.View>
       )}
 
-      {/* Pending Approvals — owner only */}
-      {isOwner && pendingAll.length > 0 && (
-        <>
-          <SectionLabel label={`Pending Approvals · ${pendingAll.length}`} />
-          <Animated.View entering={FadeInDown.duration(280)} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, padding: 0, overflow: 'hidden' }]}>
-            {pendingAll.map((c, idx) => (
-              <View key={c.id}>
-                <View style={[styles.pendingRow, { paddingHorizontal: 14 }]}>
-                  <Avatar name={c.userName} avatarUrl={c.avatarUrl} size={34} />
-                  <View style={{ flex: 1, marginLeft: 10 }}>
-                    <Text style={{ fontFamily: font.sansSemiBold, fontSize: fontSize.sm, color: colors.text }} numberOfLines={1}>
-                      {c.userName || 'Member'}
-                    </Text>
-                    <Text style={[text.caption, { color: colors.textTertiary }]}>
-                      {fmtDate(c.createdAt)}{c.note ? ` · ${c.note}` : ''}
-                    </Text>
-                  </View>
-                  <Text style={{ fontFamily: font.sansSemiBold, fontSize: fontSize.sm, color: colors.text, marginRight: 10 }}>
-                    {fmt(c.amount)}
-                  </Text>
-                  <Pressable onPress={() => handleVerify(c)} style={[styles.iconBtn, { backgroundColor: colors.primary }]} disabled={isSaving}>
-                    <ShieldCheck size={14} color="#FAF9F5" strokeWidth={2} />
-                  </Pressable>
-                  <Pressable onPress={() => handleDelete(c)} style={[styles.iconBtn, { backgroundColor: colors.dangerBg, marginLeft: 6 }]} disabled={isSaving}>
-                    <Trash2 size={14} color={colors.danger} strokeWidth={2} />
-                  </Pressable>
-                </View>
-                {idx < pendingAll.length - 1 && <Divider style={{ marginLeft: 58 }} />}
-              </View>
-            ))}
-          </Animated.View>
-        </>
-      )}
-
-      {/* My Activity */}
+      {/* My Contributions */}
       <SectionLabel label="My Contributions" />
       {myContributions.length === 0 ? (
         <View style={[styles.emptyCard, { borderColor: colors.border }]}>
@@ -736,7 +820,10 @@ export default function CircleDetailScreen() {
           </Text>
         </View>
       ) : (
-        <Animated.View entering={FadeInDown.duration(280)} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, padding: 0, overflow: 'hidden' }]}>
+        <Animated.View
+          entering={FadeInDown.duration(280)}
+          style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, padding: 0, overflow: 'hidden' }]}
+        >
           {myContributions.map((c, idx) => (
             <View key={c.id}>
               <View style={[styles.myRow, { paddingHorizontal: 14 }]}>
@@ -756,7 +843,7 @@ export default function CircleDetailScreen() {
                   </Text>
                 </View>
                 {c.status === 'pending' && (
-                  <Pressable onPress={() => handleDelete(c)} hitSlop={8} disabled={isSaving}>
+                  <Pressable onPress={() => handleDeleteContribution(c)} hitSlop={8} disabled={isSaving}>
                     <Trash2 size={16} color={colors.textTertiary} strokeWidth={1.6} />
                   </Pressable>
                 )}
@@ -774,27 +861,32 @@ export default function CircleDetailScreen() {
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
 
-      {/* ── Header ── */}
+      {/* ── Header band ── */}
       <View style={[styles.headerBand, { paddingTop: insets.top + 10 }]}>
         <View style={styles.headerRow}>
           <Pressable onPress={() => router.back()} hitSlop={8} style={styles.headerBtn}>
             <ArrowLeft size={22} color="#FAF9F5" strokeWidth={1.8} />
           </Pressable>
+
           <View style={{ flex: 1, marginHorizontal: 10, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
             <Text style={{ fontSize: 26 }}>{circleEmoji}</Text>
             <View style={{ flex: 1 }}>
-              <Text style={{ fontFamily: font.displayLight, fontSize: fontSize['2xl'], color: '#FAF9F5', letterSpacing: -0.5 }} numberOfLines={1}>
+              <Text
+                style={{ fontFamily: font.displayLight, fontSize: fontSize['2xl'], color: '#FAF9F5', letterSpacing: -0.5 }}
+                numberOfLines={1}
+              >
                 {circle.name}
               </Text>
               {isOwner && (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 1 }}>
                   <Crown size={10} color="#C4E07A" strokeWidth={2} />
-                  <Text style={{ fontFamily: font.sansSemiBold, fontSize: 10, color: '#C4E07A', letterSpacing: 0.4 }}>OWNER</Text>
+                  <Text style={{ fontFamily: font.sansSemiBold, fontSize: 10, color: '#C4E07A', letterSpacing: 0.4 }}>ADMIN</Text>
                 </View>
               )}
             </View>
           </View>
-          {/* Settings gear — owner only — opens dropdown */}
+
+          {/* Admin-only settings gear */}
           {isOwner && (
             <Pressable onPress={handleSettingsMenu} hitSlop={8} style={styles.headerBtn}>
               <Settings2 size={20} color="#FAF9F5" strokeWidth={1.8} />
@@ -808,44 +900,61 @@ export default function CircleDetailScreen() {
           </Text>
         )}
 
-        {/* Progress toward goal */}
+        {/* Goal progress bar */}
         {settings?.targetAmount && settings.targetAmount > 0 && targetPct !== null && (
           <View style={styles.progressCard}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
-              <Text style={{ fontFamily: font.sansMedium, fontSize: fontSize.sm, color: 'rgba(250,249,245,0.7)' }}>Group Goal</Text>
-              <Text style={{ fontFamily: font.sansSemiBold, fontSize: fontSize.sm, color: '#C4E07A' }}>{targetPct}%</Text>
+              <Text style={{ fontFamily: font.sansMedium, fontSize: fontSize.sm, color: 'rgba(250,249,245,0.7)' }}>
+                Group Goal
+              </Text>
+              <Text style={{ fontFamily: font.sansSemiBold, fontSize: fontSize.sm, color: '#C4E07A' }}>
+                {targetPct}%
+              </Text>
             </View>
             <View style={styles.bigBarWrap}>
               <View style={[styles.bigBar, { width: `${targetPct}%`, backgroundColor: targetPct >= 100 ? '#16C172' : '#C4E07A' }]} />
             </View>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 }}>
-              <Text style={{ fontFamily: font.sansSemiBold, fontSize: fontSize.sm, color: '#FAF9F5' }}>{fmt(grandVerified)} verified</Text>
-              <Text style={{ fontFamily: font.sansRegular, fontSize: fontSize.sm, color: 'rgba(250,249,245,0.5)' }}>of {fmt(settings.targetAmount)}</Text>
+              <Text style={{ fontFamily: font.sansSemiBold, fontSize: fontSize.sm, color: '#FAF9F5' }}>
+                {fmt(grandVerified)} verified
+              </Text>
+              <Text style={{ fontFamily: font.sansRegular, fontSize: fontSize.sm, color: 'rgba(250,249,245,0.5)' }}>
+                of {fmt(settings.targetAmount)}
+              </Text>
             </View>
           </View>
         )}
 
-        <TabSwitcher active={activeTab} onChange={setActiveTab} />
+        <TabSwitcher
+          active={activeTab}
+          onChange={setActiveTab}
+          pendingCount={isOwner ? pendingAll.length : 0}
+        />
       </View>
 
       {isLoading
         ? <ActivityIndicator color={colors.primary} style={{ marginTop: 40 }} />
         : activeTab === 'members' ? MembersTab : ActivityTab}
 
-      {/* FAB on Activity tab */}
+      {/* Log Contribution FAB (Activity tab — all members) */}
       {activeTab === 'activity' && (
         <View style={[styles.fab, { bottom: insets.bottom + layout.tabBarHeight + 16, right: layout.screenPadding }]}>
           <Pressable
-            onPress={() => { logSheetRef.current?.present(); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); }}
+            onPress={() => {
+              logSheetRef.current?.present();
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            }}
             style={[styles.fabBtn, { backgroundColor: colors.primary }]}
           >
             <Plus size={22} color="#FAF9F5" strokeWidth={2} />
-            <Text style={{ fontFamily: font.sansSemiBold, fontSize: fontSize.sm, color: '#FAF9F5' }}>Log Contribution</Text>
+            <Text style={{ fontFamily: font.sansSemiBold, fontSize: fontSize.sm, color: '#FAF9F5' }}>
+              Log Contribution
+            </Text>
           </Pressable>
         </View>
       )}
 
-      {/* ── Log Contribution Sheet ── */}
+      {/* ── Log Contribution Sheet (all members) ── */}
       <BottomSheetModal
         ref={logSheetRef}
         snapPoints={['52%']}
@@ -860,7 +969,7 @@ export default function CircleDetailScreen() {
             Log Contribution
           </Text>
           <Text style={[text.caption, { color: colors.textTertiary, marginBottom: 20 }]}>
-            Enter the amount you've paid. The owner will verify it.
+            Enter the amount you've contributed. The admin will verify it.
           </Text>
           <AmountInput label="Amount" value={logAmountKobo} onChange={setLogAmountKobo} size="md" style={{ marginBottom: 12 }} />
           <View style={[styles.inputWrap, { borderColor: colors.border, backgroundColor: colors.inputBackground, marginBottom: 20 }]}>
@@ -872,11 +981,16 @@ export default function CircleDetailScreen() {
               style={{ fontFamily: font.sansRegular, fontSize: fontSize.sm, color: colors.text, padding: 14 }}
             />
           </View>
-          <Button variant="primary" label={isSaving ? 'Saving…' : 'Submit'} onPress={handleLog} disabled={isSaving || logAmountKobo <= 0} />
+          <Button
+            variant="primary"
+            label={isSaving ? 'Saving…' : 'Submit'}
+            onPress={handleLog}
+            disabled={isSaving || logAmountKobo <= 0}
+          />
         </BottomSheetView>
       </BottomSheetModal>
 
-      {/* ── Circle Details Sheet ── */}
+      {/* ── Edit Circle Sheet (admin only) ── */}
       <BottomSheetModal
         ref={editSheetRef}
         snapPoints={['85%']}
@@ -887,11 +1001,12 @@ export default function CircleDetailScreen() {
         keyboardBlurBehavior="restore"
       >
         <BottomSheetScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: insets.bottom + 24 }}>
-          <Text style={{ fontFamily: font.displayLight, fontSize: fontSize.xl, color: colors.text, marginBottom: 4 }}>
-            Edit Circle
-          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+            <Text style={{ fontFamily: font.displayLight, fontSize: fontSize.xl, color: colors.text }}>Edit Circle</Text>
+            <AdminPill />
+          </View>
           <Text style={[text.caption, { color: colors.textTertiary, marginBottom: 20 }]}>
-            Update your group's name, goal, and contribution rules.
+            Update goal, frequency, and contribution rules.
           </Text>
 
           {/* Emoji */}
@@ -912,14 +1027,19 @@ export default function CircleDetailScreen() {
             )}
           />
 
-          {/* Description */}
+          {/* Purpose */}
           <Text style={[text.label, { color: colors.textSecondary, marginBottom: 6 }]}>Purpose (optional)</Text>
           <View style={[styles.inputWrap, { borderColor: colors.border, backgroundColor: colors.inputBackground, marginBottom: 16 }]}>
-            <TextInput value={editDesc} onChangeText={setEditDesc} placeholder="e.g. Monthly house savings, Trip fund" placeholderTextColor={colors.inputPlaceholder}
-              style={{ fontFamily: font.sansRegular, fontSize: fontSize.sm, color: colors.text, padding: 14 }} />
+            <TextInput
+              value={editDesc}
+              onChangeText={setEditDesc}
+              placeholder="e.g. Monthly house savings, Trip fund"
+              placeholderTextColor={colors.inputPlaceholder}
+              style={{ fontFamily: font.sansRegular, fontSize: fontSize.sm, color: colors.text, padding: 14 }}
+            />
           </View>
 
-          {/* Group Goal */}
+          {/* Goal */}
           <AmountInput label="Group Goal (optional)" value={editTargetKobo} onChange={setEditTargetKobo} size="md" style={{ marginBottom: 16 }} />
 
           {/* Frequency */}
@@ -948,7 +1068,7 @@ export default function CircleDetailScreen() {
           <Text style={[text.label, { color: colors.textSecondary, marginBottom: 6 }]}>Deadline (optional)</Text>
           <Pressable
             onPress={() => setShowDeadlinePicker(true)}
-            style={[styles.inputWrap, { borderColor: colors.border, backgroundColor: colors.inputBackground, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 14, marginBottom: 20 }]}
+            style={[styles.inputWrap, { borderColor: colors.border, backgroundColor: colors.inputBackground, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 14, marginBottom: 24 }]}
           >
             <Text style={{ flex: 1, fontFamily: font.sansRegular, fontSize: fontSize.sm, color: editDeadline ? colors.text : colors.inputPlaceholder }}>
               {editDeadline ? fmtShortDate(editDeadline) : 'No deadline'}
@@ -958,13 +1078,11 @@ export default function CircleDetailScreen() {
               : <Calendar size={16} color={colors.textTertiary} strokeWidth={1.8} />}
           </Pressable>
 
-          <View style={{ marginTop: 8 }}>
-            <Button variant="primary" label={isSaving ? 'Saving…' : 'Save Circle Details'} onPress={handleSaveDetails} disabled={isSaving} />
-          </View>
+          <Button variant="primary" label={isSaving ? 'Saving…' : 'Save Circle Details'} onPress={handleSaveDetails} disabled={isSaving} />
         </BottomSheetScrollView>
       </BottomSheetModal>
 
-      {/* ── Payment Details Sheet ── */}
+      {/* ── Payment Details Sheet (admin only) ── */}
       <BottomSheetModal
         ref={paySheetRef}
         snapPoints={['70%']}
@@ -975,11 +1093,12 @@ export default function CircleDetailScreen() {
         keyboardBlurBehavior="restore"
       >
         <BottomSheetScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: insets.bottom + 24 }}>
-          <Text style={{ fontFamily: font.displayLight, fontSize: fontSize.xl, color: colors.text, marginBottom: 4 }}>
-            Payment Details
-          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+            <Text style={{ fontFamily: font.displayLight, fontSize: fontSize.xl, color: colors.text }}>Payment Details</Text>
+            <AdminPill />
+          </View>
           <Text style={[text.caption, { color: colors.textTertiary, marginBottom: 20, lineHeight: 18 }]}>
-            Where should members send their contributions? Fill in only if needed.
+            Where should members send their contributions?
           </Text>
 
           {([
@@ -991,8 +1110,13 @@ export default function CircleDetailScreen() {
             <View key={f.label} style={{ marginBottom: 14 }}>
               <Text style={[text.label, { color: colors.textSecondary, marginBottom: 6 }]}>{f.label}</Text>
               <View style={[styles.inputWrap, { borderColor: colors.border, backgroundColor: colors.inputBackground }]}>
-                <TextInput value={f.value} onChangeText={f.setter} placeholder={f.placeholder} placeholderTextColor={colors.inputPlaceholder}
-                  style={{ fontFamily: font.sansRegular, fontSize: fontSize.sm, color: colors.text, padding: 14 }} />
+                <TextInput
+                  value={f.value}
+                  onChangeText={f.setter}
+                  placeholder={f.placeholder}
+                  placeholderTextColor={colors.inputPlaceholder}
+                  style={{ fontFamily: font.sansRegular, fontSize: fontSize.sm, color: colors.text, padding: 14 }}
+                />
               </View>
             </View>
           ))}
@@ -1021,6 +1145,13 @@ const styles = StyleSheet.create({
   headerBand:  { backgroundColor: '#163A2F', paddingHorizontal: 16, paddingBottom: 16 },
   headerRow:   { flexDirection: 'row', alignItems: 'center', paddingBottom: 4 },
   headerBtn:   { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  adminPill:   {
+    flexDirection: 'row', alignItems: 'center', gap: 3,
+    backgroundColor: 'rgba(196,224,122,0.12)',
+    paddingHorizontal: 8, paddingVertical: 3,
+    borderRadius: 20, borderWidth: 1,
+    borderColor: 'rgba(196,224,122,0.25)',
+  },
   progressCard:{ backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 14, padding: 14, marginTop: 12 },
   bigBarWrap:  { backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 6, height: 10, overflow: 'hidden' },
   bigBar:      { height: 10, borderRadius: 6 },

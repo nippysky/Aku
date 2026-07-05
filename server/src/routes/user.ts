@@ -1,16 +1,18 @@
 /**
  * User profile routes (all protected)
  *
- * GET  /api/user/me      — Get current user's profile
- * PUT  /api/user/me      — Update name
- * POST /api/user/avatar  — Upload avatar to Cloudinary, returns { avatarUrl }
+ * GET /api/user/me           — Get current user's profile
+ * PUT /api/user/me           — Update name
+ * PUT /api/user/avatar-data  — Sync base64 avatar (fire-and-forget from device)
+ * GET /api/user/dek          — Fetch the user's DEK (decrypted) — new-device restore
+ * POST /api/user/dek         — Store/update the user's DEK (encrypted at rest)
  */
 import { Hono } from 'hono';
 import { eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { users } from '../db/schema.js';
-import { uploadAvatar } from '../lib/cloudinary.js';
 import { authMiddleware, type AuthContext } from '../middleware/auth.js';
+import { encryptDekForStorage, decryptDekFromStorage } from '../lib/server-crypto.js';
 
 const router = new Hono<{ Variables: AuthContext }>();
 
@@ -31,11 +33,12 @@ router.get('/me', async (c) => {
   if (!user) return c.json({ error: 'User not found' }, 404);
 
   return c.json({
-    id:        user.id,
-    name:      user.name,
-    email:     user.email,
-    avatarUrl: user.avatarUrl,
-    createdAt: user.createdAt,
+    id:         user.id,
+    name:       user.name,
+    email:      user.email,
+    avatarUrl:  user.avatarUrl,
+    avatarData: user.avatarData,
+    createdAt:  user.createdAt,
   });
 });
 
@@ -64,52 +67,100 @@ router.put('/me', async (c) => {
   return c.json({ success: true, name });
 });
 
-// ─── POST /api/user/avatar ────────────────────────────────────────────────────
-// Accepts multipart/form-data with field "avatar" (image file, max 5 MB).
+// ─── PUT /api/user/avatar-data ───────────────────────────────────────────────
+// Receives a base64 data URI from the device and stores it in the DB.
+// The device is authoritative — this is a background sync, not a blocking upload.
+// Payload: { avatarData: "data:image/jpeg;base64,..." }
 
-router.post('/avatar', async (c) => {
+router.put('/avatar-data', async (c) => {
   const { sub: userId } = c.get('jwtPayload');
 
-  // Parse multipart form
-  let formData: FormData;
+  let body: { avatarData?: string };
   try {
-    formData = await c.req.formData();
+    body = await c.req.json();
   } catch {
-    return c.json({ error: 'Expected multipart/form-data' }, 400);
+    return c.json({ error: 'Invalid JSON body' }, 400);
   }
 
-  const file = formData.get('avatar');
-  if (!file || !(file instanceof File)) {
-    return c.json({ error: 'Field "avatar" (image file) is required' }, 400);
+  const avatarData = body.avatarData?.trim();
+
+  // Accept null/empty to allow avatar removal
+  if (avatarData !== undefined && avatarData !== '' && !avatarData.startsWith('data:image/')) {
+    return c.json({ error: 'avatarData must be a valid image data URI' }, 400);
   }
 
-  // Size check (5 MB)
-  if (file.size > 5 * 1024 * 1024) {
-    return c.json({ error: 'Image must be under 5 MB' }, 413);
+  // Soft cap: ~100 KB base64 ≈ 75 KB image ≈ a 300×300 JPEG. More than enough.
+  if (avatarData && avatarData.length > 150_000) {
+    return c.json({ error: 'Avatar data is too large (max ~100 KB)' }, 413);
   }
 
-  // Type check
-  const allowed = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/heic'];
-  if (!allowed.includes(file.type)) {
-    return c.json({ error: 'Only JPEG, PNG, WebP and HEIC images are allowed' }, 415);
-  }
-
-  let avatarUrl: string;
-  try {
-    const buffer = Buffer.from(await file.arrayBuffer());
-    avatarUrl = await uploadAvatar(buffer, userId, file.type);
-  } catch (err) {
-    console.error('[avatar] Cloudinary upload failed:', err);
-    return c.json({ error: 'Upload failed. Please try again.' }, 500);
-  }
-
-  // Persist the URL in the DB
   await db
     .update(users)
-    .set({ avatarUrl, updatedAt: new Date() })
+    .set({ avatarData: avatarData ?? null, updatedAt: new Date() })
     .where(eq(users.id, userId));
 
-  return c.json({ avatarUrl });
+  return c.json({ success: true });
+});
+
+// ─── GET /api/user/dek ───────────────────────────────────────────────────────
+// Returns the user's plaintext DEK (hex) so a new device can decrypt its data.
+// Auth-gated — only the owner can fetch their own DEK.
+
+router.get('/dek', async (c) => {
+  const { sub: userId } = c.get('jwtPayload');
+
+  const [user] = await db
+    .select({ encryptedDek: users.encryptedDek })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+
+  if (!user) return c.json({ error: 'User not found' }, 404);
+  if (!user.encryptedDek) return c.json({ dek: null });
+
+  try {
+    const dek = decryptDekFromStorage(user.encryptedDek);
+    return c.json({ dek });
+  } catch (err) {
+    console.error('[dek] Failed to decrypt DEK for user', userId, err);
+    return c.json({ error: 'Failed to decrypt DEK' }, 500);
+  }
+});
+
+// ─── POST /api/user/dek ──────────────────────────────────────────────────────
+// Store or update the user's DEK. The server encrypts it before persisting.
+// Called once at first PIN setup, and again if the initial upload failed.
+// Body: { dek: "<64-char hex string>" }
+
+router.post('/dek', async (c) => {
+  const { sub: userId } = c.get('jwtPayload');
+
+  let body: { dek?: unknown };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: 'Invalid JSON body' }, 400);
+  }
+
+  const dek = body.dek;
+  if (typeof dek !== 'string' || !/^[0-9a-f]{64}$/i.test(dek)) {
+    return c.json({ error: 'dek must be a 64-character lowercase hex string' }, 400);
+  }
+
+  let encryptedDek: string;
+  try {
+    encryptedDek = encryptDekForStorage(dek);
+  } catch (err) {
+    console.error('[dek] Encryption failed — check SERVER_DEK_MASTER_KEY', err);
+    return c.json({ error: 'Server encryption misconfigured' }, 500);
+  }
+
+  await db
+    .update(users)
+    .set({ encryptedDek, updatedAt: new Date() })
+    .where(eq(users.id, userId));
+
+  return c.json({ success: true });
 });
 
 export default router;

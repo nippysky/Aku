@@ -67,7 +67,7 @@ export default function VerifyScreen() {
   const params = useLocalSearchParams<{ email: string }>();
   const email  = params.email ?? 'your inbox';
 
-  const { createLocalUser } = useAuthStore();
+  const { createLocalUser, signIn } = useAuthStore();
 
   const [resent, setResent]       = useState(false);
   const [resending, setResending] = useState(false);
@@ -91,12 +91,18 @@ export default function VerifyScreen() {
   const handleResend = useCallback(async () => {
     if (resending) return;
     setResending(true);
-    // Simulated resend delay — wire to real email API later
-    await new Promise<void>((resolve) => setTimeout(resolve, 1200));
-    setResending(false);
-    setResent(true);
-    setTimeout(() => setResent(false), 4000);
-  }, [resending]);
+    try {
+      const name        = OnboardingStorage.getName() ?? undefined;
+      const storedEmail = OnboardingStorage.getEmail() ?? email;
+      await signIn(storedEmail, name);
+      setResent(true);
+      setTimeout(() => setResent(false), 4000);
+    } catch {
+      // Non-fatal — user can try again
+    } finally {
+      setResending(false);
+    }
+  }, [resending, email, signIn]);
 
   // In a real app, a deep-link listener would call router.replace('/(onboarding)/pin-setup')
   // when the magic link is tapped. Here we provide a manual dev shortcut via the dev button.

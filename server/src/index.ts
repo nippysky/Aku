@@ -14,8 +14,18 @@ import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 import { prettyJSON } from 'hono/pretty-json';
 
-import authRouter from './routes/auth.js';
-import userRouter from './routes/user.js';
+import authRouter          from './routes/auth.js';
+import userRouter          from './routes/user.js';
+import syncRouter          from './routes/sync.js';
+import notificationsRouter from './routes/notifications.js';
+import statementRouter     from './routes/statement.js';
+import receiptRouter       from './routes/receipt.js';
+
+import {
+  globalRateLimit,
+  magicLinkRateLimit,
+  strictRateLimit,
+} from './middleware/rate-limit.js';
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 
@@ -43,6 +53,9 @@ app.use(
   }),
 );
 
+// Global rate limit — 200 req / 15 min per IP (all routes)
+app.use('*', globalRateLimit());
+
 // ── Health check ──────────────────────────────────────────────────────────────
 
 app.get('/', (c) => c.json({ status: 'ok', service: 'aku-api', version: '1.0.0' }));
@@ -50,8 +63,18 @@ app.get('/health', (c) => c.json({ status: 'ok', ts: new Date().toISOString() })
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 
-app.route('/api/auth', authRouter);
-app.route('/api/user', userRouter);
+// Magic-link send gets its own per-email limit (5 / 15 min)
+app.use('/api/auth/magic-link', magicLinkRateLimit());
+
+// Auth verify (token → session) gets a strict per-IP limit (10 / 1 min)
+app.use('/api/auth/magic-link/verify', strictRateLimit());
+
+app.route('/api/auth',          authRouter);
+app.route('/api/user',          userRouter);
+app.route('/api/sync',          syncRouter);
+app.route('/api/notifications', notificationsRouter);
+app.route('/api/statement',     statementRouter);
+app.route('/api/receipt',       receiptRouter);
 
 // ── 404 ───────────────────────────────────────────────────────────────────────
 
