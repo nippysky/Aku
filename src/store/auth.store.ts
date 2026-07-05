@@ -70,6 +70,12 @@ interface AuthState {
   updateUser:              (patch: Partial<User>) => void;
   markOnboardingComplete:  () => Promise<void>;
   /**
+   * Atomically marks onboarding complete AND unlocks in a single Zustand set().
+   * Use in pin-setup.tsx to avoid the nav-guard seeing hasOnboarded:true + isLocked:true
+   * as two separate updates — on Android that intermediate state triggers a stray redirect.
+   */
+  completeOnboardingAndUnlock: () => Promise<void>;
+  /**
    * Save a new avatar (base64 data URI) locally and sync to server.
    * avatarData is stored in SQLite only — never SecureStore (size limit).
    */
@@ -434,6 +440,15 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
   markOnboardingComplete: async () => {
     await SecureStore.setItemAsync(KEYS.ONBOARDED, 'true');
     set({ hasOnboarded: true });
+  },
+
+  // ── Complete onboarding AND unlock in one atomic set() ────────────────
+  // Use this instead of calling markOnboardingComplete() + unlock() separately.
+  // Two separate set() calls cause the nav guard to see hasOnboarded:true + isLocked:true
+  // between them, which on Android triggers a stray redirect to /(auth).
+  completeOnboardingAndUnlock: async () => {
+    await SecureStore.setItemAsync(KEYS.ONBOARDED, 'true');
+    set({ hasOnboarded: true, isLocked: false });
   },
 
   // ── Setup PIN ─────────────────────────────────────────────────────────

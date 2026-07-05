@@ -45,9 +45,7 @@
   "submit": {
     "production": {
       "ios": {
-        "appleId": "nsinfo247@gmail.com",
-        "ascAppId": "",
-        "appleTeamId": ""
+        "appleId": "nsinfo247@gmail.com"
       },
       "android": {
         "serviceAccountKeyPath": "./google-services.json",

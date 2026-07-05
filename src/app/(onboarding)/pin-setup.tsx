@@ -30,7 +30,7 @@ export default function PinSetupScreen() {
   // returning=1 → user has an existing account on another device
   const isReturning = params.returning === '1';
 
-  const { setupPin, markOnboardingComplete, unlock } = useAuthStore();
+  const { setupPin, completeOnboardingAndUnlock } = useAuthStore();
 
   const [phase, setPhase]         = useState<PinPhase>('create');
   const [firstPin, setFirstPin]   = useState('');
@@ -63,8 +63,10 @@ export default function PinSetupScreen() {
         setIsLoading(true);
         setErrorMsg('');
         await setupPin(pin);
-        await markOnboardingComplete();
-        unlock();
+        // Atomic: sets hasOnboarded:true + isLocked:false in one set() call.
+        // Two separate calls cause the nav guard to see the intermediate state
+        // hasOnboarded:true + isLocked:true, which triggers a stray /(auth) redirect on Android.
+        await completeOnboardingAndUnlock();
 
         if (isReturning) {
           // Returning user — skip onboarding, show syncing state, pull data
@@ -78,7 +80,7 @@ export default function PinSetupScreen() {
           router.replace('/(tabs)');
         } else {
           // New user — continue to biometric setup
-          router.push('/(onboarding)/biometric');
+          router.replace('/(onboarding)/biometric');
         }
       } catch {
         setErrorMsg('Something went wrong. Please try again.');
@@ -86,7 +88,7 @@ export default function PinSetupScreen() {
         setIsLoading(false);
       }
     },
-    [firstPin, setupPin, markOnboardingComplete, unlock, isReturning, router],
+    [firstPin, setupPin, completeOnboardingAndUnlock, isReturning, router],
   );
 
   // Copy — different for returning vs new user

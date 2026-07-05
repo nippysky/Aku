@@ -222,12 +222,18 @@ export default function RootLayout() {
   useEffect(() => {
     if (!isInitialized || !fontsLoaded) return;
 
-    const inAuth       = segments[0] === '(auth)';
-    const inOnboarding = segments[0] === '(onboarding)';
-    const inTabs       = segments[0] === '(tabs)';
+    const inAuth        = segments[0] === '(auth)';
+    const inOnboarding  = segments[0] === '(onboarding)';
+    const inTabs        = segments[0] === '(tabs)';
     // sign-in.tsx lives at root level — allow it so returning users on a new
     // device can authenticate without being bounced back to onboarding.
-    const inSignIn     = segments[0] === 'sign-in';
+    const inSignIn      = segments[0] === 'sign-in';
+    // auth-callback.tsx handles its own routing after processing the magic-link
+    // deep link. The guard must never redirect mid-callback or the token is lost
+    // and the user gets bounced back to the welcome screen.
+    const inAuthCallback = segments[0] === 'auth-callback';
+
+    if (inAuthCallback) return;
 
     const hasSession = !!session && !!user;
 

@@ -5,6 +5,12 @@ module.exports = {
   owner: 'nippysky',
   version: '1.0.0',
   orientation: 'portrait',
+  updates: {
+    url: 'https://u.expo.dev/14785830-cdce-4dfe-8ea3-aac56faeb62a',
+  },
+  runtimeVersion: {
+    policy: 'appVersion',
+  },
   icon: './assets/images/icon.png',
   scheme: 'aku',
   userInterfaceStyle: 'automatic',
@@ -55,6 +61,7 @@ module.exports = {
   },
   plugins: [
     'expo-router',
+    'expo-updates',
     'expo-local-authentication',
     'expo-secure-store',
     'expo-sqlite',
@@ -99,7 +106,7 @@ module.exports = {
   // Get yours: npx eas project:info  (then paste the ID below)
   extra: {
     eas: {
-      projectId: process.env.EAS_PROJECT_ID ?? '',
+      projectId: '14785830-cdce-4dfe-8ea3-aac56faeb62a',
     },
   },
 };
