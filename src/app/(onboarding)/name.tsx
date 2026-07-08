@@ -13,7 +13,8 @@ import { useRouter } from 'expo-router';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Button, Input, KeyboardWrapper, OnboardingHeader } from '../../components/ui';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
+import { Button, Input, OnboardingHeader } from '../../components/ui';
 import { useTheme } from '../../theme';
 import { OnboardingStorage } from '../../lib/onboarding-storage';
 
@@ -53,20 +54,22 @@ export default function NameScreen() {
   }
 
   return (
-    <KeyboardWrapper style={{ backgroundColor: colors.background }}>
-      <View
-        style={[
-          styles.container,
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <KeyboardAwareScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={[
+          styles.scrollContent,
           {
             paddingTop:        insets.top + spacing[2],
-            paddingBottom:     Math.max(insets.bottom, spacing[6]) + spacing[4],
             paddingHorizontal: layout.screenPadding,
           },
         ]}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+        bottomOffset={20}
       >
         <OnboardingHeader step={1} total={9} dark={false} />
 
-        {/* Content */}
         <View style={styles.content}>
           <Animated.View entering={FadeInDown.delay(80).duration(500)}>
             <Text style={[text.onboardingTitle, { color: colors.text }]}>
@@ -104,33 +107,44 @@ export default function NameScreen() {
             />
           </Animated.View>
         </View>
+      </KeyboardAwareScrollView>
 
-        {/* Continue button */}
-        <Animated.View entering={FadeInUp.delay(300).duration(500)}>
-          <Button
-            label="Continue"
-            variant="primary"
-            size="lg"
-            fullWidth
-            disabled={!isValid}
-            onPress={handleSubmit(onSubmit)}
-          />
-        </Animated.View>
-      </View>
-    </KeyboardWrapper>
+      {/* Fixed footer — never pushed up by keyboard */}
+      <Animated.View
+        entering={FadeInUp.delay(300).duration(500)}
+        style={[
+          styles.footer,
+          {
+            paddingHorizontal: layout.screenPadding,
+            paddingBottom:     Math.max(insets.bottom, spacing[6]) + spacing[4],
+          },
+        ]}
+      >
+        <Button
+          label="Continue"
+          variant="primary"
+          size="lg"
+          fullWidth
+          disabled={!isValid}
+          onPress={handleSubmit(onSubmit)}
+        />
+      </Animated.View>
+    </View>
   );
 }
 
 // ─── Styles ────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  container: {
-    flex:           1,
-    justifyContent: 'space-between',
+  scrollContent: {
+    flexGrow: 1,
   },
   content: {
     flex:           1,
     justifyContent: 'center',
-    paddingBottom:  24,
+    paddingBottom:  32,
+  },
+  footer: {
+    paddingTop: 8,
   },
 });

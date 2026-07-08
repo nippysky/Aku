@@ -255,12 +255,14 @@ function MemberRow({
           )}
         </View>
 
-        {/* Status badge */}
-        <View style={[styles.badge, { backgroundColor: sc.bg, marginLeft: 8 }]}>
-          <Text style={{ fontFamily: font.sansSemiBold, fontSize: 9, color: sc.fg, letterSpacing: 0.3 }}>
-            {isGenerous ? sc.label : sc.label.toUpperCase()}
-          </Text>
-        </View>
+        {/* Status badge — hide for owner with no contribution expectation */}
+        {!(ms.role === 'owner' && ms.expectedAmount === 0 && ms.verifiedAmount === 0) && (
+          <View style={[styles.badge, { backgroundColor: sc.bg, marginLeft: 8 }]}>
+            <Text style={{ fontFamily: font.sansSemiBold, fontSize: 9, color: sc.fg, letterSpacing: 0.3 }}>
+              {isGenerous ? sc.label : sc.label.toUpperCase()}
+            </Text>
+          </View>
+        )}
 
         {/* Admin: remove member icon (non-owner members only) */}
         {isOwner && ms.role !== 'owner' && onRemove && (
@@ -282,10 +284,11 @@ export default function CircleDetailScreen() {
   const insets   = useSafeAreaInsets();
   const { colors, font, fontSize, text, layout } = useTheme();
 
-  const { user }      = useAuthStore();
-  const { circles }   = useCirclesStore();
-  const { showToast } = useUIStore();
-  const { fmt }       = useCurrencyFormat();
+  const { user }                    = useAuthStore();
+  const { circles, syncVersion }    = useCirclesStore();
+  const { updateName: updateCircleName } = useCirclesStore();
+  const { showToast }               = useUIStore();
+  const { fmt }                     = useCurrencyFormat();
 
   const {
     settings, contributions, leaderboard,
@@ -304,6 +307,11 @@ export default function CircleDetailScreen() {
   useEffect(() => {
     if (circleId) loadCircle(circleId);
   }, [circleId]);
+
+  // Reload when WS sync brings in new members (syncVersion bumps in circles.store)
+  useEffect(() => {
+    if (circleId && syncVersion > 0) loadCircle(circleId);
+  }, [syncVersion]);
 
   // ── Sheet refs ────────────────────────────────────────────────────────────
   const logSheetRef  = useRef<BottomSheetModal>(null);
@@ -334,6 +342,7 @@ export default function CircleDetailScreen() {
   }, [user, circleId, logAmountKobo, logNote, logContribution, showToast]);
 
   // ── Circle details form (admin only) ─────────────────────────────────────
+  const [editName,           setEditName]           = useState('');
   const [editEmoji,          setEditEmoji]          = useState('💰');
   const [editDesc,           setEditDesc]           = useState('');
   const [editTargetKobo,     setEditTargetKobo]     = useState(0);
@@ -343,6 +352,7 @@ export default function CircleDetailScreen() {
   const [showDeadlinePicker, setShowDeadlinePicker] = useState(false);
 
   const openEditSheet = useCallback(() => {
+    setEditName(circle?.name ?? '');
     setEditEmoji(settings?.emoji ?? '💰');
     setEditDesc(settings?.description ?? '');
     setEditTargetKobo(settings?.targetAmount ?? 0);
@@ -350,10 +360,14 @@ export default function CircleDetailScreen() {
     setEditPerMember(settings?.perMemberAmount ?? 0);
     setEditDeadline(settings?.deadline ?? '');
     editSheetRef.current?.present();
-  }, [settings]);
+  }, [circle, settings]);
 
   const handleSaveDetails = useCallback(async () => {
     if (!circleId) return;
+    const trimmedName = editName.trim();
+    if (trimmedName && trimmedName !== circle?.name) {
+      await updateCircleName(circleId, trimmedName);
+    }
     await saveSettings(circleId, {
       emoji:            editEmoji || null,
       description:      editDesc.trim()   || null,
@@ -365,7 +379,7 @@ export default function CircleDetailScreen() {
     });
     editSheetRef.current?.dismiss();
     showToast('success', 'Circle updated');
-  }, [circleId, editEmoji, editDesc, editTargetKobo, editFrequency, editPerMember, editDeadline, saveSettings, showToast]);
+  }, [circleId, circle, editName, editEmoji, editDesc, editTargetKobo, editFrequency, editPerMember, editDeadline, updateCircleName, saveSettings, showToast]);
 
   // ── Payment details form (admin only) ─────────────────────────────────────
   const [editAcctName,   setEditAcctName]   = useState('');
@@ -1011,8 +1025,21 @@ export default function CircleDetailScreen() {
             <AdminPill />
           </View>
           <Text style={[text.caption, { color: colors.textTertiary, marginBottom: 20 }]}>
-            Update goal, frequency, and contribution rules.
+            Update name, goal, frequency, and contribution rules.
           </Text>
+
+          {/* Circle Name */}
+          <Text style={[text.label, { color: colors.textSecondary, marginBottom: 6 }]}>Circle Name</Text>
+          <View style={[styles.inputWrap, { borderColor: colors.border, backgroundColor: colors.inputBackground, marginBottom: 20 }]}>
+            <TextInput
+              value={editName}
+              onChangeText={setEditName}
+              placeholder="e.g. Family Fund, Trip Savings"
+              placeholderTextColor={colors.inputPlaceholder}
+              maxLength={60}
+              style={{ fontFamily: font.sansRegular, fontSize: fontSize.sm, color: colors.text, padding: 14 }}
+            />
+          </View>
 
           {/* Emoji */}
           <Text style={[text.label, { color: colors.textSecondary, marginBottom: 8 }]}>Circle Icon</Text>

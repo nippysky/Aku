@@ -24,10 +24,11 @@ import * as Notifications from 'expo-notifications';
 // ─── Notification data payload (shared with server worker) ────────────────────
 
 export interface NotificationData {
-  type?:   string;   // 'bill_reminder' | 'budget_alert' | 'goal_milestone' | …
-  screen?: string;   // legacy / override: 'bill' | 'budgets' | 'goal' | 'expense' | 'home'
-  id?:     string;   // entity ID — bill/budget/goal primary key
-  action?: string;   // optional action hint ('log', 'review', 'pay')
+  type?:     string;   // 'bill_reminder' | 'budget_alert' | 'goal_milestone' | 'circle_member_joined' | …
+  screen?:   string;   // legacy / override: 'bill' | 'budgets' | 'goal' | 'circle' | 'home'
+  id?:       string;   // entity ID — bill/budget/goal primary key
+  circleId?: string;   // circle ID — for circle_member_joined + circle_event notifications
+  action?:   string;   // optional action hint ('log', 'review', 'pay')
 }
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
@@ -112,7 +113,7 @@ interface ResolvedRoute {
  *  3. Home tab fallback
  */
 function resolveRoute(data: NotificationData): ResolvedRoute | null {
-  const { type, screen, id } = data;
+  const { type, screen, id, circleId } = data;
 
   // ── Type-based routing (preferred) ──────────────────────────────────────
 
@@ -154,6 +155,16 @@ function resolveRoute(data: NotificationData): ResolvedRoute | null {
     case 'household_invite':
     case 'circle_invite':
       return { href: '/circle/join', type: 'detail' };
+
+    // New member joined a circle — navigate to that specific circle
+    case 'circle_member_joined':
+      if (circleId) return { href: `/circle/${circleId}`, type: 'detail' };
+      return { href: '/(tabs)/index', type: 'tab' };
+
+    // Contribution logged/verified in a circle
+    case 'circle_event':
+      if (circleId) return { href: `/circle/${circleId}`, type: 'detail' };
+      return { href: '/(tabs)/index', type: 'tab' };
   }
 
   // ── Legacy screen-field routing (backwards compatibility) ────────────────
@@ -187,6 +198,10 @@ function resolveRoute(data: NotificationData): ResolvedRoute | null {
 
       case 'notifications':
         return { href: '/notifications', type: 'detail' };
+
+      case 'circle':
+        if (circleId) return { href: `/circle/${circleId}`, type: 'detail' };
+        return { href: '/(tabs)/index', type: 'tab' };
 
       case 'home':
       default:

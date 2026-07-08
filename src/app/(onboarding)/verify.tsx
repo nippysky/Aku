@@ -6,9 +6,8 @@ import {
   TextInput,
   View,
   Pressable,
-  KeyboardAvoidingView,
-  Platform,
 } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import Animated, {
   FadeInDown,
   FadeInUp,
@@ -159,20 +158,20 @@ export default function VerifyScreen() {
   }, [otp, email, handleAuthCallback]);
 
   return (
-    <KeyboardAvoidingView
-      style={{ flex: 1 }}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      <View
-        style={[
-          styles.container,
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      {/* Scroll area — auto-scrolls OTP input above keyboard */}
+      <KeyboardAwareScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={[
+          styles.scrollContent,
           {
-            backgroundColor:   colors.background,
             paddingTop:        insets.top + spacing[2],
-            paddingBottom:     Math.max(insets.bottom, spacing[6]) + spacing[4],
             paddingHorizontal: layout.screenPadding,
           },
         ]}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+        bottomOffset={20}
       >
         <OnboardingHeader
           step={3}
@@ -204,7 +203,6 @@ export default function VerifyScreen() {
           </Animated.View>
 
           {!showOtp && (
-            /* Loading spinner — awaiting deep-link */
             <Animated.View
               entering={FadeInDown.delay(340).duration(500)}
               style={[styles.spinnerRow, { marginTop: spacing[8] }]}
@@ -216,7 +214,7 @@ export default function VerifyScreen() {
             </Animated.View>
           )}
 
-          {/* OTP input section */}
+          {/* OTP input — scrolls into view above keyboard automatically */}
           {showOtp && (
             <Animated.View entering={FadeIn.duration(250)} style={{ marginTop: spacing[8], width: '100%' }}>
               <Text style={[text.label, { color: colors.textSecondary, marginBottom: spacing[2] }]}>
@@ -269,111 +267,115 @@ export default function VerifyScreen() {
             </Animated.View>
           )}
         </View>
+      </KeyboardAwareScrollView>
 
-        {/* Bottom actions */}
-        <Animated.View entering={FadeInUp.delay(400).duration(500)} style={styles.bottomActions}>
-          {showOtp ? (
-            <>
-              <Button
-                label={verifying ? 'Verifying…' : 'Verify code'}
-                variant="primary"
-                size="lg"
-                fullWidth
-                loading={verifying}
-                disabled={verifying || otp.length !== 6}
-                onPress={handleVerifyOtp}
-              />
-              <Pressable onPress={handleToggleOtp} style={styles.backLink}>
-                <Text style={[text.bodySm, { color: colors.textSecondary }]}>
-                  Back to waiting for link
-                </Text>
-              </Pressable>
-            </>
-          ) : (
-            <>
-              {/* Resend */}
-              <Button
-                label={resending ? 'Sending…' : resent ? 'Email sent!' : 'Resend email'}
-                variant="secondary"
-                size="lg"
-                fullWidth
-                loading={resending}
-                disabled={resending}
-                onPress={handleResend}
-              />
-
-              {/* Enter code instead */}
-              <Pressable onPress={handleToggleOtp} style={styles.backLink}>
-                <Text style={[text.bodySm, { color: colors.textSecondary }]}>
-                  Got the email on a different device?{' '}
-                  <Text style={{ color: colors.primary }}>Enter the code</Text>
-                </Text>
-              </Pressable>
-
-              {/* Wrong email */}
-              <Pressable
-                onPress={() => router.back()}
-                accessibilityRole="button"
-                style={styles.backLink}
-              >
-                <Text style={[text.bodySm, { color: colors.textSecondary }]}>
-                  Wrong email?{' '}
-                  <Text style={{ color: colors.primary }}>Go back</Text>
-                </Text>
-              </Pressable>
-            </>
-          )}
-
-          {/* DEV-only skip — invisible in production builds */}
-          {__DEV__ && (
-            <Pressable
-              onPress={handleDevSkip}
-              accessibilityRole="button"
-              disabled={skipping}
-              style={[styles.devSkipBtn, { borderColor: Palette.gold, opacity: skipping ? 0.6 : 1 }]}
-            >
-              <Text style={[text.bodySm, { color: Palette.gold, fontFamily: 'PlusJakartaSans_500Medium' }]}>
-                {skipping ? 'Creating account…' : '⚡ Skip (Dev only)'}
+      {/* Fixed bottom actions — never pushed up by keyboard */}
+      <Animated.View
+        entering={FadeInUp.delay(400).duration(500)}
+        style={[
+          styles.bottomActions,
+          {
+            paddingHorizontal: layout.screenPadding,
+            paddingBottom:     Math.max(insets.bottom, spacing[6]) + spacing[4],
+          },
+        ]}
+      >
+        {showOtp ? (
+          <>
+            <Button
+              label={verifying ? 'Verifying…' : 'Verify code'}
+              variant="primary"
+              size="lg"
+              fullWidth
+              loading={verifying}
+              disabled={verifying || otp.length !== 6}
+              onPress={handleVerifyOtp}
+            />
+            <Pressable onPress={handleToggleOtp} style={styles.backLink}>
+              <Text style={[text.bodySm, { color: colors.textSecondary }]}>
+                Back to waiting for link
               </Text>
             </Pressable>
-          )}
-        </Animated.View>
-      </View>
-    </KeyboardAvoidingView>
+          </>
+        ) : (
+          <>
+            <Button
+              label={resending ? 'Sending…' : resent ? 'Email sent!' : 'Resend email'}
+              variant="secondary"
+              size="lg"
+              fullWidth
+              loading={resending}
+              disabled={resending}
+              onPress={handleResend}
+            />
+            <Pressable onPress={handleToggleOtp} style={styles.backLink}>
+              <Text style={[text.bodySm, { color: colors.textSecondary }]}>
+                Got the email on a different device?{' '}
+                <Text style={{ color: colors.primary }}>Enter the code</Text>
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => router.back()}
+              accessibilityRole="button"
+              style={styles.backLink}
+            >
+              <Text style={[text.bodySm, { color: colors.textSecondary }]}>
+                Wrong email?{' '}
+                <Text style={{ color: colors.primary }}>Go back</Text>
+              </Text>
+            </Pressable>
+          </>
+        )}
+
+        {/* DEV-only skip */}
+        {__DEV__ && (
+          <Pressable
+            onPress={handleDevSkip}
+            accessibilityRole="button"
+            disabled={skipping}
+            style={[styles.devSkipBtn, { borderColor: Palette.gold, opacity: skipping ? 0.6 : 1 }]}
+          >
+            <Text style={[text.bodySm, { color: Palette.gold, fontFamily: 'PlusJakartaSans_500Medium' }]}>
+              {skipping ? 'Creating account…' : '⚡ Skip (Dev only)'}
+            </Text>
+          </Pressable>
+        )}
+      </Animated.View>
+    </View>
   );
 }
 
 // ─── Styles ────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: 'space-between',
+  scrollContent: {
+    flexGrow: 1,
   },
   content: {
-    flex: 1,
+    flex:          1,
     justifyContent: 'center',
-    paddingBottom: 24,
+    paddingBottom:  16,
   },
   illustration: {
     alignSelf: 'flex-start',
   },
   spinnerRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems:    'center',
   },
   otpWrap: {
-    borderWidth:    1.5,
-    height:         64,
+    borderWidth:       1.5,
+    height:            64,
     paddingHorizontal: 18,
-    justifyContent: 'center',
+    justifyContent:    'center',
   },
   otpInput: {
     height: '100%',
   },
   bottomActions: {
-    gap: 16,
+    gap:        16,
     alignItems: 'center',
+    paddingTop: 8,
   },
   backLink: {
     paddingVertical: 4,

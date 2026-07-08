@@ -6,6 +6,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import Animated, {
   FadeInDown,
   FadeInUp,
@@ -14,7 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Calendar } from 'lucide-react-native';
 import { format, parseISO } from 'date-fns';
-import { Button, AmountInput, KeyboardWrapper, OnboardingHeader } from '../../components/ui';
+import { Button, AmountInput, OnboardingHeader } from '../../components/ui';
 import { AkuDatePicker } from '../../components/ui/AkuDatePicker';
 import { Input } from '../../components/ui/Input';
 import { useAuthStore, useBillsStore } from '../../store';
@@ -129,16 +130,19 @@ export default function FirstBillScreen() {
   }
 
   return (
-    <KeyboardWrapper scrollable style={{ backgroundColor: colors.background }}>
+    <KeyboardAwareScrollView
+      style={{ flex: 1, backgroundColor: colors.background }}
+      contentContainerStyle={{
+        paddingTop:        insets.top + spacing[2],
+        paddingBottom:     Math.max(insets.bottom, spacing[6]) + spacing[4],
+        paddingHorizontal: layout.screenPadding,
+      }}
+      keyboardShouldPersistTaps="handled"
+      showsVerticalScrollIndicator={false}
+      bottomOffset={20}
+    >
       <View
-        style={[
-          styles.container,
-          {
-            paddingTop:        insets.top + spacing[2],
-            paddingBottom:     Math.max(insets.bottom, spacing[6]) + spacing[4],
-            paddingHorizontal: layout.screenPadding,
-          },
-        ]}
+        style={styles.container}
       >
         <OnboardingHeader
           step={7}
@@ -331,7 +335,7 @@ export default function FirstBillScreen() {
         minDate={todayString()}
         title="Select due date"
       />
-    </KeyboardWrapper>
+    </KeyboardAwareScrollView>
   );
 }
 
@@ -339,7 +343,7 @@ export default function FirstBillScreen() {
 
 const styles = StyleSheet.create({
   container: {
-    flexGrow: 1,
+    flex: 1,
   },
   chips: {
     flexDirection: 'row',

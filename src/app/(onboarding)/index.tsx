@@ -142,7 +142,7 @@ export default function WelcomeScreen() {
       <Animated.View style={[styles.bottomSection, buttonContainerStyle]}>
         <Animated.View style={buttonScaleStyle}>
           <AnimatedPressable
-            onPress={() => router.push('/(onboarding)/name')}
+            onPress={() => router.push('/(onboarding)/slides' as never)}
             onPressIn={handlePressIn}
             onPressOut={handlePressOut}
             accessibilityRole="button"

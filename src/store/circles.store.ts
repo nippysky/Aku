@@ -12,7 +12,7 @@ import { create } from 'zustand';
 import { eq, and, inArray } from 'drizzle-orm';
 import { getDatabase, schema } from '../lib/database/client';
 import { generateUUID } from '../lib/uuid';
-import { registerCircle, joinCircleByCode, fetchUserCircles } from '../lib/api-client';
+import { registerCircle, joinCircleByCode, fetchUserCircles, fetchCircleMembers } from '../lib/api-client';
 import type { Household, HouseholdMember, CircleFrequency, ContributionType } from '../types';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -50,13 +50,19 @@ interface CirclesState {
   members:      HouseholdMember[];
   isLoading:    boolean;
   error:        string | null;
+  /**
+   * Incremented whenever syncFromServer completes.
+   * circle/[id].tsx watches this to reload the active circle when
+   * a WS nudge causes a member to be added by another device.
+   */
+  syncVersion: number;
 
   load:             (userId: string) => Promise<void>;
   syncFromServer:   (userId: string) => Promise<void>;
   create:           (name: string, ownerId: string, settings?: CircleCreateSettings) => Promise<Household>;
   joinByCode:       (code: string, userId: string) => Promise<{ circleId: string; circleName: string }>;
   joinById:         (circleId: string, userId: string) => Promise<void>;
-  updateName:       (name: string) => Promise<void>;
+  updateName:       (circleId: string, name: string) => Promise<void>;
   loadMembers:      (circleId: string) => Promise<void>;
   clearError:       () => void;
 }
@@ -69,6 +75,7 @@ export const useCirclesStore = create<CirclesState>()((set, get) => ({
   members:      [],
   isLoading:    false,
   error:        null,
+  syncVersion:  0,
 
   // ── Load all circles user belongs to ─────────────────────────────────────
   load: async (userId) => {
@@ -112,6 +119,7 @@ export const useCirclesStore = create<CirclesState>()((set, get) => ({
 
   // ── Sync circles from server → seed local SQLite → reload ────────────────
   // Called by the WS client when another device creates/joins a circle.
+  // IMPORTANT: also syncs all circle members so the admin can see new joiners.
   syncFromServer: async (userId) => {
     try {
       const serverCircles = await fetchUserCircles();
@@ -119,7 +127,7 @@ export const useCirclesStore = create<CirclesState>()((set, get) => ({
       const now = new Date().toISOString();
 
       for (const c of serverCircles) {
-        // Upsert the household row
+        // ── Upsert the household (circle) row ──────────────────────────────
         const existing = await db
           .select({ id: schema.households.id })
           .from(schema.households)
@@ -148,9 +156,15 @@ export const useCirclesStore = create<CirclesState>()((set, get) => ({
             notes:            null,
             updatedAt:        now,
           });
+        } else {
+          // Update name/inviteCode in case they changed on server
+          await db
+            .update(schema.households)
+            .set({ name: c.name })
+            .where(eq(schema.households.id, c.id));
         }
 
-        // Upsert membership
+        // ── Upsert OWN membership ──────────────────────────────────────────
         const existingMember = await db
           .select({ id: schema.householdMembers.id })
           .from(schema.householdMembers)
@@ -170,9 +184,64 @@ export const useCirclesStore = create<CirclesState>()((set, get) => ({
             joinedAt:    now,
           });
         }
+
+        // ── Sync ALL members of this circle ───────────────────────────────
+        // This is the critical fix: without this, when someone joins the admin's
+        // circle, the admin never gets the new member's user record or membership
+        // into their local SQLite, so they never show up in the Members tab.
+        try {
+          const allMembers = await fetchCircleMembers(c.id);
+          for (const m of allMembers) {
+            // Upsert the member's user record so LEFT JOIN resolves their name
+            try {
+              await db.insert(schema.users).values({
+                id:        m.userId,
+                name:      m.name,
+                email:     `${m.userId}@aku.internal`,   // placeholder — name is what matters
+                avatarUrl: null,
+                avatarData: m.avatarData ?? null,
+                createdAt: now,
+                updatedAt: now,
+              });
+            } catch {
+              // Already exists — update name + avatar in case they changed
+              try {
+                await db
+                  .update(schema.users)
+                  .set({ name: m.name, avatarData: m.avatarData ?? null, updatedAt: now })
+                  .where(eq(schema.users.id, m.userId));
+              } catch { /* ignore */ }
+            }
+
+            // Upsert the membership record
+            const existingRow = await db
+              .select({ id: schema.householdMembers.id })
+              .from(schema.householdMembers)
+              .where(
+                and(
+                  eq(schema.householdMembers.householdId, c.id),
+                  eq(schema.householdMembers.userId, m.userId),
+                ),
+              );
+
+            if (existingRow.length === 0) {
+              await db.insert(schema.householdMembers).values({
+                id:          generateUUID(),
+                householdId: c.id,
+                userId:      m.userId,
+                role:        m.role as 'owner' | 'member',
+                joinedAt:    m.joinedAt ?? now,
+              });
+            }
+          }
+        } catch {
+          // Non-fatal — member sync fails if user isn't in this circle yet
+        }
       }
 
       await get().load(userId);
+      // Bump syncVersion so circle/[id].tsx reloads to show new members
+      set((s) => ({ syncVersion: s.syncVersion + 1 }));
     } catch {
       // Non-fatal — circles will load normally on next app open
     }
@@ -321,17 +390,15 @@ export const useCirclesStore = create<CirclesState>()((set, get) => ({
     await get().load(userId);
   },
 
-  updateName: async (name) => {
-    const { activeCircle } = get();
-    if (!activeCircle) return;
+  updateName: async (circleId, name) => {
     const db = getDatabase();
     await db
       .update(schema.households)
       .set({ name })
-      .where(eq(schema.households.id, activeCircle.id));
+      .where(eq(schema.households.id, circleId));
     set((s) => ({
-      activeCircle: { ...activeCircle, name },
-      circles: s.circles.map((c) => c.id === activeCircle.id ? { ...c, name } : c),
+      activeCircle: s.activeCircle?.id === circleId ? { ...s.activeCircle, name } : s.activeCircle,
+      circles: s.circles.map((c) => c.id === circleId ? { ...c, name } : c),
     }));
   },
 

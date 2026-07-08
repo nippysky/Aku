@@ -28,7 +28,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import Svg, { Path } from 'react-native-svg';
-import { Button, Input, KeyboardWrapper } from '../../components/ui';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
+import { Button, Input } from '../../components/ui';
 import { useAuthStore } from '../../store';
 import { requestMagicLink } from '../../lib/api-client';
 import { useTheme } from '../../theme';
@@ -127,15 +128,14 @@ export default function ForgotPinScreen() {
   if (screenState === 'success') {
     return (
       <View
-        style={[
-          styles.container,
-          {
-            backgroundColor:   colors.background,
-            paddingTop:        insets.top + spacing[8],
-            paddingBottom:     Math.max(insets.bottom, spacing[6]) + spacing[4],
-            paddingHorizontal: layout.screenPadding,
-          },
-        ]}
+        style={{
+          flex:              1,
+          justifyContent:    'space-between',
+          backgroundColor:   colors.background,
+          paddingTop:        insets.top + spacing[8],
+          paddingBottom:     Math.max(insets.bottom, spacing[6]) + spacing[4],
+          paddingHorizontal: layout.screenPadding,
+        }}
       >
         <View style={styles.successContent}>
           <Animated.View entering={FadeIn.duration(500)} style={styles.illustration}>
@@ -190,18 +190,20 @@ export default function ForgotPinScreen() {
   // ── Form state ───────────────────────────────────────────────────────────────
 
   return (
-    <KeyboardWrapper style={{ backgroundColor: colors.background }}>
-      <View
-        style={[
-          styles.container,
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <KeyboardAwareScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={[
+          styles.scrollContent,
           {
             paddingTop:        insets.top + spacing[4],
-            paddingBottom:     Math.max(insets.bottom, spacing[6]) + spacing[4],
             paddingHorizontal: layout.screenPadding,
           },
         ]}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+        bottomOffset={20}
       >
-        {/* Content */}
         <View style={styles.content}>
           <Animated.View entering={FadeInDown.delay(60).duration(500)}>
             <Text style={[text.onboardingTitle, { color: colors.text }]}>
@@ -238,42 +240,50 @@ export default function ForgotPinScreen() {
             />
           </Animated.View>
         </View>
+      </KeyboardAwareScrollView>
 
-        {/* Buttons */}
-        <Animated.View entering={FadeInUp.delay(300).duration(500)} style={styles.buttons}>
-          <Button
-            label="Send reset link"
-            variant="primary"
-            size="lg"
-            fullWidth
-            loading={isLoading}
-            disabled={!isValidEmail(email) || isLoading}
-            onPress={handleSend}
-          />
-          <Button
-            label="Back"
-            variant="ghost"
-            size="lg"
-            fullWidth
-            onPress={() => router.back()}
-          />
-        </Animated.View>
-      </View>
-    </KeyboardWrapper>
+      {/* Fixed footer — buttons never pushed up by keyboard */}
+      <Animated.View
+        entering={FadeInUp.delay(300).duration(500)}
+        style={[
+          styles.buttons,
+          {
+            paddingHorizontal: layout.screenPadding,
+            paddingBottom:     Math.max(insets.bottom, spacing[6]) + spacing[4],
+          },
+        ]}
+      >
+        <Button
+          label="Send reset link"
+          variant="primary"
+          size="lg"
+          fullWidth
+          loading={isLoading}
+          disabled={!isValidEmail(email) || isLoading}
+          onPress={handleSend}
+        />
+        <Button
+          label="Back"
+          variant="ghost"
+          size="lg"
+          fullWidth
+          onPress={() => router.back()}
+        />
+      </Animated.View>
+    </View>
   );
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  container: {
-    flex:           1,
-    justifyContent: 'space-between',
+  scrollContent: {
+    flexGrow: 1,
   },
   content: {
     flex:           1,
     justifyContent: 'center',
-    paddingBottom:  24,
+    paddingBottom:  32,
   },
   successContent: {
     flex:           1,

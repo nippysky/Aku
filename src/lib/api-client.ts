@@ -381,6 +381,41 @@ export async function fetchUserCircles(): Promise<ServerCircle[]> {
   return res.circles;
 }
 
+export type CirclePreview = {
+  id:            string;
+  name:          string;
+  emoji:         string;
+  memberCount:   number;
+  ownerName:     string;
+  members:       { name: string; avatarData: string | null }[];
+  alreadyMember: boolean;
+};
+
+/**
+ * Preview a circle by its 8-char invite code — no membership created.
+ * Use before the final "Join" confirmation step.
+ */
+export async function previewCircle(code: string): Promise<CirclePreview> {
+  return apiFetch<CirclePreview>(`/api/circles/preview/${encodeURIComponent(code)}`);
+}
+
+export type CircleMemberInfo = {
+  userId:    string;
+  name:      string;
+  avatarData: string | null;
+  role:      string;
+  joinedAt:  string;
+};
+
+/**
+ * Fetch all members of a circle the authenticated user belongs to.
+ * Used by syncFromServer to seed other members' profiles into local SQLite.
+ */
+export async function fetchCircleMembers(circleId: string): Promise<CircleMemberInfo[]> {
+  const res = await apiFetch<{ members: CircleMemberInfo[] }>(`/api/circles/${circleId}/members`);
+  return res.members;
+}
+
 // ─── Sync endpoints ───────────────────────────────────────────────────────────
 
 export type SyncPushRecord = {

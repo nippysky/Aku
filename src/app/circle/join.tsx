@@ -1,12 +1,15 @@
 /**
- * circle/join.tsx — Join a Circle by invite code or deep link
+ * circle/join.tsx — Join a Circle by invite code
  *
- * Deep link entry points (from nippysky.com/ventures/aku/join?code=XXXXXXXX):
- *   aku://circle/join?code=XXXXXXXX          → pre-fills code input
- *   aku://circle/join?circleId=UUID&code=XX  → shows circle preview + Confirm button
+ * Three-step flow:
+ *   1. Code entry   — user types / pastes 8-char code
+ *   2. Preview      — previewCircle() fetches circle info; shows emoji, name,
+ *                     owner, member count + avatar strip. No membership created yet.
+ *   3. Success      — joinByCode() records membership → auto-navigate to circle
  *
- * Single TextInput for code entry — supports paste, autofill, SwiftUI QuickType
- * and Android clipboard suggestions natively.
+ * Deep-link entry:
+ *   aku://circle/join?code=XXXXXXXX   → pre-fills code + immediately previews
+ *   aku://circle/join?circleId=UUID   → shows simple local preview + confirm
  */
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
@@ -20,73 +23,68 @@ import {
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import Animated, { FadeInDown } from 'react-native-reanimated';
-import { ArrowLeft, Users, CheckCircle, Hash } from 'lucide-react-native';
+import Animated, { FadeInDown, FadeIn } from 'react-native-reanimated';
+import { ArrowLeft, CheckCircle, Hash, Users, Crown, AlertCircle } from 'lucide-react-native';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
-import { getDatabase, schema } from '../../lib/database/client';
-import { eq } from 'drizzle-orm';
 import { useTheme } from '../../theme';
 import { useAuthStore } from '../../store/auth.store';
 import { useUIStore } from '../../store/ui.store';
 import { useCirclesStore } from '../../store/circles.store';
+import { previewCircle, type CirclePreview } from '../../lib/api-client';
 import { Button } from '../../components/ui/Button';
+import { InitialsAvatar } from '../../components/ui/InitialsAvatar';
 
 const CODE_LENGTH = 8;
+
+type Mode = 'code' | 'preview' | 'deeplink' | 'success';
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function JoinCircleScreen() {
-  const { colors, font, fontSize, text, layout, radius } = useTheme();
+  const { colors, font, fontSize, text, layout, radius, spacing } = useTheme();
   const insets  = useSafeAreaInsets();
   const router  = useRouter();
   const params  = useLocalSearchParams<{ code?: string; circleId?: string }>();
 
-  const { user }                       = useAuthStore();
-  const { showToast }                  = useUIStore();
-  const { joinByCode, joinById } = useCirclesStore();
+  const { user }                              = useAuthStore();
+  const { showToast }                         = useUIStore();
+  const { circles, joinByCode, joinById }     = useCirclesStore();
 
   const inputRef = useRef<TextInput>(null);
 
-  // ── Mode: code input vs. deep link preview ───────────────────────────────
-  const [mode, setMode] = useState<'code' | 'preview'>('code');
+  const [mode, setMode] = useState<Mode>('code');
 
   // code input
   const [code,      setCode]      = useState(params.code?.toUpperCase() ?? '');
   const [codeError, setCodeError] = useState('');
+  const [previewing, setPreviewing] = useState(false);
 
-  // preview mode (from deep link with circleId)
-  const [previewName,   setPreviewName]   = useState('');
-  const [previewEmoji,  setPreviewEmoji]  = useState('💰');
-  const [previewLoaded, setPreviewLoaded] = useState(false);
+  // preview data (from previewCircle API)
+  const [preview, setPreview] = useState<CirclePreview | null>(null);
 
+  // deep-link preview (from in-memory circles store)
+  const [dlName,  setDlName]  = useState('');
+  const [dlLoaded, setDlLoaded] = useState(false);
+
+  // joining
   const [isJoining,  setIsJoining]  = useState(false);
-  const [joined,     setJoined]     = useState(false);
   const [joinedName, setJoinedName] = useState('');
 
-  // Pre-fill from deep-link
+  // Pre-fill from deep-link code param
   useEffect(() => {
     if (params.code) setCode(params.code.toUpperCase().substring(0, CODE_LENGTH));
   }, [params.code]);
 
-  // If circleId provided, load preview
+  // If circleId provided (deep link), look up circle name from store
   useEffect(() => {
     const cid = params.circleId;
     if (!cid) return;
-    setMode('preview');
-    (async () => {
-      try {
-        const db   = getDatabase();
-        const rows = await db.select().from(schema.households).where(eq(schema.households.id, cid));
-        if (rows[0]) {
-          setPreviewName(rows[0].name);
-          const sr = await db.select().from(schema.circleSettings).where(eq(schema.circleSettings.id, cid));
-          setPreviewEmoji((sr[0] as any)?.emoji ?? '💰');
-        }
-      } catch { /* silently ignore */ }
-      finally   { setPreviewLoaded(true); }
-    })();
-  }, [params.circleId]);
+    setMode('deeplink');
+    const found = circles.find((c) => c.id === cid);
+    if (found) setDlName(found.name);
+    setDlLoaded(true);
+  }, [params.circleId, circles]);
 
   const handleChangeCode = useCallback((raw: string) => {
     const clean = raw.replace(/[^A-Za-z0-9]/g, '').substring(0, CODE_LENGTH).toUpperCase();
@@ -94,7 +92,6 @@ export default function JoinCircleScreen() {
     if (codeError) setCodeError('');
   }, [codeError]);
 
-  // Paste button — reads clipboard and drops it into the field
   const handlePaste = useCallback(async () => {
     const str = await Clipboard.getStringAsync();
     if (str) handleChangeCode(str);
@@ -103,36 +100,57 @@ export default function JoinCircleScreen() {
 
   const isReady = code.length === CODE_LENGTH;
 
-  // ── Join by code ──────────────────────────────────────────────────────────
-  const handleJoinByCode = useCallback(async () => {
-    if (!isReady || !user) return;
+  // ── Step 1: Fetch preview ─────────────────────────────────────────────────
+  const handlePreview = useCallback(async () => {
+    if (!isReady || previewing) return;
     setCodeError('');
+    setPreviewing(true);
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      const data = await previewCircle(code);
+      if (data.alreadyMember) {
+        setCodeError('You\'re already a member of this circle.');
+        return;
+      }
+      setPreview(data);
+      setMode('preview');
+    } catch (e: any) {
+      setCodeError(e?.message ?? 'Invalid or expired code. Check and try again.');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    } finally {
+      setPreviewing(false);
+    }
+  }, [code, isReady, previewing]);
+
+  // ── Step 2: Confirm join ──────────────────────────────────────────────────
+  const handleJoin = useCallback(async () => {
+    if (!user || isJoining) return;
     setIsJoining(true);
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       const result = await joinByCode(code, user.id);
       setJoinedName(result.circleName);
-      setJoined(true);
+      setMode('success');
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setTimeout(() => router.replace(`/circle/${result.circleId}` as never), 1800);
     } catch (e: any) {
-      setCodeError(e?.message ?? 'Invalid or expired code. Check and try again.');
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      showToast('error', e?.message ?? 'Could not join circle');
+      setMode('code'); // back to code entry
     } finally {
       setIsJoining(false);
     }
-  }, [code, isReady, user, joinByCode, router]);
+  }, [code, user, joinByCode, showToast, router, isJoining]);
 
-  // ── Confirm join via deep link preview ───────────────────────────────────
-  const handleConfirmJoin = useCallback(async () => {
+  // ── Deep link confirm ─────────────────────────────────────────────────────
+  const handleDeepLinkJoin = useCallback(async () => {
     const cid = params.circleId;
-    if (!cid || !user) return;
+    if (!cid || !user || isJoining) return;
     setIsJoining(true);
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       await joinById(cid, user.id);
-      setJoinedName(previewName);
-      setJoined(true);
+      setJoinedName(dlName);
+      setMode('success');
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setTimeout(() => router.replace(`/circle/${cid}` as never), 1800);
     } catch (e: any) {
@@ -140,14 +158,33 @@ export default function JoinCircleScreen() {
     } finally {
       setIsJoining(false);
     }
-  }, [params.circleId, user, joinById, previewName, showToast, router]);
+  }, [params.circleId, user, joinById, dlName, showToast, router, isJoining]);
 
-  // ── Success state ─────────────────────────────────────────────────────────
-  if (joined) {
+  // ─── Shared header ─────────────────────────────────────────────────────────
+
+  const Header = ({ title }: { title: string }) => (
+    <View style={[styles.header, { paddingTop: insets.top + 12, borderBottomColor: colors.borderLight }]}>
+      <Pressable
+        onPress={mode === 'preview' ? () => setMode('code') : () => router.back()}
+        hitSlop={8}
+        style={styles.headerBack}
+      >
+        <ArrowLeft size={22} color={colors.text} strokeWidth={1.8} />
+      </Pressable>
+      <Text style={[styles.headerTitle, { fontFamily: font.displayLight, fontSize: fontSize['2xl'], color: colors.text }]}>
+        {title}
+      </Text>
+      <View style={styles.headerBack} />
+    </View>
+  );
+
+  // ─── Success ───────────────────────────────────────────────────────────────
+
+  if (mode === 'success') {
     return (
       <View style={[styles.screen, { backgroundColor: colors.background }]}>
         <View style={styles.successWrap}>
-          <Animated.View entering={FadeInDown.duration(300)}>
+          <Animated.View entering={FadeIn.duration(300)}>
             <CheckCircle size={72} color={colors.success} strokeWidth={1.4} />
           </Animated.View>
           <Animated.Text
@@ -167,46 +204,38 @@ export default function JoinCircleScreen() {
     );
   }
 
-  // ── Preview mode ──────────────────────────────────────────────────────────
-  if (mode === 'preview') {
+  // ─── Deep-link preview ─────────────────────────────────────────────────────
+
+  if (mode === 'deeplink') {
     return (
       <View style={[styles.screen, { backgroundColor: colors.background }]}>
-        <View style={[styles.header, { paddingTop: insets.top + 12, borderBottomColor: colors.borderLight }]}>
-          <Pressable onPress={() => router.back()} hitSlop={8} style={styles.headerBack}>
-            <ArrowLeft size={22} color={colors.text} strokeWidth={1.8} />
-          </Pressable>
-          <Text style={[styles.headerTitle, { fontFamily: font.displayLight, fontSize: fontSize['2xl'], color: colors.text }]}>
-            Join Circle
-          </Text>
-          <View style={styles.headerBack} />
-        </View>
-
+        <Header title="Join Circle" />
         <View style={[styles.body, { paddingHorizontal: layout.screenPadding, paddingBottom: insets.bottom + 32 }]}>
-          {!previewLoaded ? (
+          {!dlLoaded ? (
             <ActivityIndicator color={colors.primary} style={{ marginTop: 60 }} />
           ) : (
             <Animated.View entering={FadeInDown.duration(300)} style={styles.previewWrap}>
               <View style={[styles.previewEmoji, { backgroundColor: colors.primary + '14', borderRadius: radius.xl }]}>
-                <Text style={{ fontSize: 56 }}>{previewEmoji}</Text>
+                <Text style={{ fontSize: 56 }}>{'💰'}</Text>
               </View>
               <Text style={{ fontFamily: font.displayLight, fontSize: fontSize['2xl'], color: colors.text, marginTop: 20, textAlign: 'center' }}>
-                {previewName || 'A Circle'}
+                {dlName || 'A Circle'}
               </Text>
               <Text style={[text.body, { color: colors.textSecondary, textAlign: 'center', marginTop: 8, lineHeight: 22, paddingHorizontal: 24 }]}>
-                You've been invited to join this circle. Tap below to confirm.
+                You've been invited to join this circle.
               </Text>
-              <View style={{ marginTop: 36, width: '100%' }}>
+              <View style={{ marginTop: 36, width: '100%', gap: 12 }}>
                 <Button
-                  label={isJoining ? 'Joining…' : `Join ${previewName || 'Circle'}`}
-                  onPress={handleConfirmJoin}
+                  label={isJoining ? 'Joining…' : `Join ${dlName || 'Circle'}`}
+                  onPress={handleDeepLinkJoin}
                   disabled={isJoining}
                   size="lg"
                   variant="primary"
                 />
+                <Pressable onPress={() => router.back()} style={{ alignSelf: 'center', padding: 10 }}>
+                  <Text style={[text.bodySm, { color: colors.textTertiary }]}>Not now</Text>
+                </Pressable>
               </View>
-              <Pressable onPress={() => router.back()} style={{ marginTop: 16, alignSelf: 'center', padding: 10 }}>
-                <Text style={[text.bodySm, { color: colors.textTertiary }]}>Not now</Text>
-              </Pressable>
             </Animated.View>
           )}
         </View>
@@ -214,18 +243,141 @@ export default function JoinCircleScreen() {
     );
   }
 
-  // ── Code input mode ───────────────────────────────────────────────────────
+  // ─── Circle Preview ────────────────────────────────────────────────────────
+
+  if (mode === 'preview' && preview) {
+    return (
+      <View style={[styles.screen, { backgroundColor: colors.background }]}>
+        <Header title="Preview" />
+        <KeyboardAwareScrollView
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{
+            flexGrow: 1,
+            paddingHorizontal: layout.screenPadding,
+            paddingTop: 32,
+            paddingBottom: insets.bottom + 32,
+          }}
+        >
+          {/* Emoji + name */}
+          <Animated.View entering={FadeIn.duration(300)} style={styles.previewWrap}>
+            <View style={[styles.previewEmoji, { backgroundColor: colors.primary + '14', borderRadius: radius.xl }]}>
+              <Text style={{ fontSize: 64 }}>{preview.emoji}</Text>
+            </View>
+
+            <Text
+              style={{
+                fontFamily: font.displayLight,
+                fontSize:   fontSize['2xl'],
+                color:      colors.text,
+                marginTop:  20,
+                textAlign:  'center',
+              }}
+            >
+              {preview.name}
+            </Text>
+
+            {/* Owner */}
+            <View style={[styles.ownerRow, { marginTop: spacing[3] }]}>
+              <Crown size={13} color={colors.primary} strokeWidth={1.8} />
+              <Text style={[text.bodySm, { color: colors.textSecondary, marginLeft: 5 }]}>
+                Created by <Text style={{ color: colors.text, fontFamily: font.sansMedium }}>{preview.ownerName}</Text>
+              </Text>
+            </View>
+
+            {/* Stat pill */}
+            <View style={[styles.memberPill, { backgroundColor: colors.backgroundSecondary, borderColor: colors.border, marginTop: spacing[4] }]}>
+              <Users size={14} color={colors.textSecondary} strokeWidth={1.8} />
+              <Text style={[text.bodySm, { color: colors.textSecondary, marginLeft: 6, fontFamily: font.sansMedium }]}>
+                {preview.memberCount} {preview.memberCount === 1 ? 'member' : 'members'}
+              </Text>
+            </View>
+
+            {/* Member avatars */}
+            {preview.members.length > 0 && (
+              <View style={[styles.avatarStrip, { marginTop: spacing[6] }]}>
+                {preview.members.map((m, i) => (
+                  <View
+                    key={i}
+                    style={[
+                      styles.avatarWrap,
+                      {
+                        marginLeft:   i > 0 ? -14 : 0,
+                        borderColor:  colors.background,
+                        borderRadius: 999,
+                        zIndex:       preview.members.length - i,
+                      },
+                    ]}
+                  >
+                    <InitialsAvatar name={m.name} size={40} />
+                  </View>
+                ))}
+                {preview.memberCount > preview.members.length && (
+                  <View
+                    style={[
+                      styles.avatarWrap,
+                      styles.avatarMore,
+                      {
+                        marginLeft:      -14,
+                        backgroundColor: colors.backgroundSecondary,
+                        borderColor:     colors.border,
+                      },
+                    ]}
+                  >
+                    <Text style={{ fontFamily: font.sansMedium, fontSize: fontSize.xs, color: colors.textSecondary }}>
+                      +{preview.memberCount - preview.members.length}
+                    </Text>
+                  </View>
+                )}
+              </View>
+            )}
+
+            {/* Invite description */}
+            <Text
+              style={[
+                text.body,
+                {
+                  color:       colors.textSecondary,
+                  textAlign:   'center',
+                  marginTop:   spacing[6],
+                  lineHeight:  24,
+                  paddingHorizontal: 16,
+                },
+              ]}
+            >
+              Joining means you'll contribute to the shared goal and see the group's progress in real time.
+            </Text>
+          </Animated.View>
+
+          {/* CTA */}
+          <Animated.View entering={FadeInDown.delay(120).duration(280)} style={{ marginTop: spacing[8], gap: 12 }}>
+            <Button
+              label={isJoining ? 'Joining…' : `Join ${preview.name}`}
+              onPress={handleJoin}
+              disabled={isJoining}
+              loading={isJoining}
+              size="lg"
+              variant="primary"
+            />
+            <Pressable
+              onPress={() => setMode('code')}
+              style={{ alignSelf: 'center', paddingVertical: 10 }}
+            >
+              <Text style={[text.bodySm, { color: colors.textTertiary }]}>
+                Use a different code
+              </Text>
+            </Pressable>
+          </Animated.View>
+        </KeyboardAwareScrollView>
+      </View>
+    );
+  }
+
+  // ─── Code entry ────────────────────────────────────────────────────────────
+
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
-      <View style={[styles.header, { paddingTop: insets.top + 12, borderBottomColor: colors.borderLight }]}>
-        <Pressable onPress={() => router.back()} hitSlop={8} style={styles.headerBack}>
-          <ArrowLeft size={22} color={colors.text} strokeWidth={1.8} />
-        </Pressable>
-        <Text style={[styles.headerTitle, { fontFamily: font.displayLight, fontSize: fontSize['2xl'], color: colors.text }]}>
-          Join a Circle
-        </Text>
-        <View style={styles.headerBack} />
-      </View>
+      <Header title="Join a Circle" />
 
       <KeyboardAwareScrollView
         keyboardShouldPersistTaps="handled"
@@ -246,7 +398,7 @@ export default function JoinCircleScreen() {
           </Text>
         </Animated.View>
 
-        {/* Single clean text input */}
+        {/* Code input */}
         <Animated.View entering={FadeInDown.delay(80).duration(280)} style={{ marginTop: 28 }}>
           <View
             style={[
@@ -271,7 +423,7 @@ export default function JoinCircleScreen() {
               keyboardType="default"
               maxLength={CODE_LENGTH}
               returnKeyType="done"
-              onSubmitEditing={isReady ? handleJoinByCode : undefined}
+              onSubmitEditing={isReady ? handlePreview : undefined}
               autoFocus
               style={[
                 styles.codeInput,
@@ -284,7 +436,6 @@ export default function JoinCircleScreen() {
               ]}
               accessibilityLabel="Invite code input"
             />
-            {/* Explicit paste button — works alongside native long-press paste */}
             <Pressable
               onPress={handlePaste}
               hitSlop={8}
@@ -297,9 +448,12 @@ export default function JoinCircleScreen() {
           </View>
 
           {codeError ? (
-            <Text style={[text.caption, { color: colors.danger, marginTop: 8, marginLeft: 2 }]}>
-              {codeError}
-            </Text>
+            <View style={[styles.errorRow, { marginTop: 8 }]}>
+              <AlertCircle size={13} color={colors.danger} strokeWidth={1.8} />
+              <Text style={[text.caption, { color: colors.danger, marginLeft: 4 }]}>
+                {codeError}
+              </Text>
+            </View>
           ) : (
             <Text style={[text.caption, { color: colors.textTertiary, marginTop: 8, marginLeft: 2 }]}>
               {code.length}/{CODE_LENGTH} characters
@@ -307,13 +461,13 @@ export default function JoinCircleScreen() {
           )}
         </Animated.View>
 
-        {/* Join button */}
+        {/* Continue button */}
         <Animated.View entering={FadeInDown.delay(140).duration(280)} style={{ marginTop: 24 }}>
           <Button
-            label="Join Circle"
-            onPress={handleJoinByCode}
-            loading={isJoining}
-            disabled={!isReady || isJoining}
+            label={previewing ? 'Loading…' : 'Continue'}
+            onPress={handlePreview}
+            loading={previewing}
+            disabled={!isReady || previewing}
             size="lg"
           />
         </Animated.View>
@@ -323,7 +477,7 @@ export default function JoinCircleScreen() {
           style={[text.caption, { color: colors.textTertiary, textAlign: 'center', marginTop: 20, lineHeight: 18 }]}
         >
           Codes are 8 characters — letters and numbers only.{'\n'}
-          You can long-press the input or tap "Paste" to paste from a message.
+          Long-press the field or tap "Paste" to paste from a message.
         </Animated.Text>
       </KeyboardAwareScrollView>
     </View>
@@ -333,7 +487,7 @@ export default function JoinCircleScreen() {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  screen:       { flex: 1 },
+  screen: { flex: 1 },
   header: {
     flexDirection:     'row',
     alignItems:        'center',
@@ -342,14 +496,37 @@ const styles = StyleSheet.create({
     paddingBottom:     12,
     borderBottomWidth: 1,
   },
-  headerBack:   { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-  headerTitle:  { flex: 1, textAlign: 'center', letterSpacing: -0.5 },
-  body:         { flex: 1, paddingTop: 32 },
-  iconWrap:     { alignItems: 'center' },
-  iconCircle:   { width: 84, height: 84, alignItems: 'center', justifyContent: 'center' },
-  successWrap:  { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 },
-  previewWrap:  { flex: 1, alignItems: 'center', paddingTop: 32 },
+  headerBack:  { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  headerTitle: { flex: 1, textAlign: 'center', letterSpacing: -0.5 },
+
+  body:        { flex: 1, paddingTop: 32 },
+  iconWrap:    { alignItems: 'center' },
+  iconCircle:  { width: 84, height: 84, alignItems: 'center', justifyContent: 'center' },
+  successWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 },
+
+  // Preview
+  previewWrap:  { alignItems: 'center' },
   previewEmoji: { width: 120, height: 120, alignItems: 'center', justifyContent: 'center' },
+  ownerRow:     { flexDirection: 'row', alignItems: 'center' },
+  memberPill: {
+    flexDirection:     'row',
+    alignItems:        'center',
+    paddingHorizontal: 14,
+    paddingVertical:   7,
+    borderRadius:      999,
+    borderWidth:       1,
+  },
+  avatarStrip: { flexDirection: 'row', alignItems: 'center' },
+  avatarWrap:  { borderWidth: 2 },
+  avatarMore: {
+    width:          40,
+    height:         40,
+    borderRadius:   999,
+    borderWidth:    1,
+    alignItems:     'center',
+    justifyContent: 'center',
+  },
+  errorRow: { flexDirection: 'row', alignItems: 'center', marginLeft: 2 },
 
   // Code input
   codeInputWrap: {
@@ -360,8 +537,8 @@ const styles = StyleSheet.create({
     gap:           10,
   },
   codeInput: {
-    flex:   1,
-    height: '100%',
+    flex:        1,
+    height:      '100%',
     paddingLeft: 4,
   },
   pasteBtn: {

@@ -8,13 +8,14 @@ import Animated, {
   FadeInDown,
   FadeInUp,
 } from 'react-native-reanimated';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Mail } from 'lucide-react-native';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Button, Input, KeyboardWrapper, OnboardingHeader } from '../../components/ui';
+import { Button, Input, OnboardingHeader } from '../../components/ui';
 import { useTheme } from '../../theme';
 import { OnboardingStorage } from '../../lib/onboarding-storage';
 import { useAuthStore } from '../../store/auth.store';
@@ -75,16 +76,20 @@ export default function EmailScreen() {
   }
 
   return (
-    <KeyboardWrapper style={{ backgroundColor: colors.background }}>
-      <View
-        style={[
-          styles.container,
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      {/* Scroll area — auto-scrolls to keep the email input above keyboard */}
+      <KeyboardAwareScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={[
+          styles.scrollContent,
           {
             paddingTop:        insets.top + spacing[2],
-            paddingBottom:     Math.max(insets.bottom, spacing[6]) + spacing[4],
             paddingHorizontal: layout.screenPadding,
           },
         ]}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+        bottomOffset={20}
       >
         <OnboardingHeader
           step={2}
@@ -93,7 +98,7 @@ export default function EmailScreen() {
           dark={false}
         />
 
-        {/* Content */}
+        {/* Centred content */}
         <View style={styles.content}>
           {/* Mail icon */}
           <Animated.View entering={FadeInDown.delay(60).duration(500)} style={styles.iconWrap}>
@@ -107,9 +112,7 @@ export default function EmailScreen() {
           </Animated.View>
 
           <Animated.View entering={FadeInDown.delay(200).duration(500)}>
-            <Text
-              style={[text.body, { color: colors.textSecondary, marginTop: spacing[3] }]}
-            >
+            <Text style={[text.body, { color: colors.textSecondary, marginTop: spacing[3] }]}>
               Only used to verify your account and reset your passcode. No spam, ever.
             </Text>
           </Animated.View>
@@ -141,42 +144,53 @@ export default function EmailScreen() {
             />
           </Animated.View>
         </View>
+      </KeyboardAwareScrollView>
 
-        {/* Continue */}
-        <Animated.View entering={FadeInUp.delay(350).duration(500)}>
-          {sendError ? (
-            <Text style={[text.bodySm, { color: colors.danger, textAlign: 'center', marginBottom: 12 }]}>
-              {sendError}
-            </Text>
-          ) : null}
-          <Button
-            label="Continue"
-            variant="primary"
-            size="lg"
-            fullWidth
-            disabled={!isValid || isLoading}
-            loading={isLoading}
-            onPress={handleSubmit(onSubmit)}
-          />
-        </Animated.View>
-      </View>
-    </KeyboardWrapper>
+      {/* Fixed footer — never pushed up by keyboard */}
+      <Animated.View
+        entering={FadeInUp.delay(350).duration(500)}
+        style={[
+          styles.footer,
+          {
+            paddingHorizontal: layout.screenPadding,
+            paddingBottom:     Math.max(insets.bottom, spacing[6]) + spacing[4],
+          },
+        ]}
+      >
+        {sendError ? (
+          <Text style={[text.bodySm, { color: colors.danger, textAlign: 'center', marginBottom: 12 }]}>
+            {sendError}
+          </Text>
+        ) : null}
+        <Button
+          label="Continue"
+          variant="primary"
+          size="lg"
+          fullWidth
+          disabled={!isValid || isLoading}
+          loading={isLoading}
+          onPress={handleSubmit(onSubmit)}
+        />
+      </Animated.View>
+    </View>
   );
 }
 
 // ─── Styles ────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  container: {
-    flex:           1,
-    justifyContent: 'space-between',
+  scrollContent: {
+    flexGrow: 1,
   },
   content: {
     flex:           1,
     justifyContent: 'center',
-    paddingBottom:  24,
+    paddingBottom:  32,
   },
   iconWrap: {
     alignSelf: 'flex-start',
+  },
+  footer: {
+    paddingTop: 8,
   },
 });
