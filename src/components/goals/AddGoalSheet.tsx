@@ -213,6 +213,7 @@ export function AddGoalSheet({ isOpen, onClose, onSuccess }: AddGoalSheetProps) 
               onChangeText={field.onChange}
               error={errors.name?.message}
               style={styles.field}
+              asBottomSheetInput
             />
           )}
         />
@@ -229,6 +230,7 @@ export function AddGoalSheet({ isOpen, onClose, onSuccess }: AddGoalSheetProps) 
               onChange={field.onChange}
               error={errors.amount?.message}
               style={styles.field}
+              asBottomSheetInput
             />
           )}
         />
@@ -307,6 +309,7 @@ export function AddGoalSheet({ isOpen, onClose, onSuccess }: AddGoalSheetProps) 
               multiline
               numberOfLines={3}
               style={styles.field}
+              asBottomSheetInput
             />
           )}
         />

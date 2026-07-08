@@ -12,9 +12,11 @@ export interface FormatOptions {
 
 /**
  * Full formatted amount. e.g. kobo=100000 → "₦1,000"
+ * Guards against NaN / Infinity so we never render "₦NaN" or "₦Infinity".
  */
 export function formatAmount(kobo: number, symbol = '₦'): string {
-  const naira = kobo / 100;
+  const safe  = isFinite(kobo) ? kobo : 0;
+  const naira = safe / 100;
   return `${symbol}${naira.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
 }
 
@@ -23,7 +25,7 @@ export function formatAmount(kobo: number, symbol = '₦'): string {
  * Max 2 decimal places, trailing zeros stripped.
  */
 export function formatCompact(kobo: number, symbol = '₦'): string {
-  const naira = kobo / 100;
+  const naira = isFinite(kobo) ? kobo / 100 : 0;
   if (naira >= 1_000_000_000) {
     const v = naira / 1_000_000_000;
     return `${symbol}${trimDecimals(v, 2)}B`;
@@ -67,5 +69,6 @@ export function convertKobo(
   const fromRate = rates[fromCode];
   const toRate   = rates[toCode];
   if (!fromRate || !toRate) return kobo;
-  return Math.round(kobo * (toRate / fromRate));
+  const result = Math.round(kobo * (toRate / fromRate));
+  return isFinite(result) ? result : kobo;
 }

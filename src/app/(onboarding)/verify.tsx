@@ -1,23 +1,29 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   StyleSheet,
   Text,
+  TextInput,
   View,
   Pressable,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import Animated, {
   FadeInDown,
   FadeInUp,
+  FadeIn,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import * as Haptics from 'expo-haptics';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { Button, OnboardingHeader } from '../../components/ui';
 import { useTheme } from '../../theme';
 import { Palette } from '../../theme/colors';
 import { useAuthStore } from '../../store/auth.store';
 import { OnboardingStorage } from '../../lib/onboarding-storage';
+import { verifyMagicOTP } from '../../lib/api-client';
 
 // ─── Envelope + Check SVG ──────────────────────────────────────────────────
 
@@ -60,21 +66,27 @@ function EnvelopeCheckIllustration() {
 // ─── Screen ────────────────────────────────────────────────────────────────
 
 export default function VerifyScreen() {
-  const { colors, spacing, text, layout } = useTheme();
+  const { colors, spacing, text, layout, font, fontSize, radius } = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
 
   const params = useLocalSearchParams<{ email: string }>();
-  const email  = params.email ?? 'your inbox';
+  const email  = params.email ?? OnboardingStorage.getEmail() ?? '';
 
-  const { createLocalUser, signIn } = useAuthStore();
+  const { createLocalUser, signIn, handleAuthCallback, hasOnboarded } = useAuthStore();
 
   const [resent, setResent]       = useState(false);
   const [resending, setResending] = useState(false);
   const [skipping, setSkipping]   = useState(false);
 
+  // OTP toggle state
+  const [showOtp, setShowOtp]     = useState(false);
+  const [otp, setOtp]             = useState('');
+  const [otpError, setOtpError]   = useState('');
+  const [verifying, setVerifying] = useState(false);
+  const otpInputRef               = useRef<TextInput>(null);
+
   // DEV-only: bypass email verification so you can test the app locally.
-  // This button is stripped from production builds automatically.
   const handleDevSkip = useCallback(async () => {
     if (!__DEV__ || skipping) return;
     setSkipping(true);
@@ -104,104 +116,230 @@ export default function VerifyScreen() {
     }
   }, [resending, email, signIn]);
 
-  // In a real app, a deep-link listener would call router.replace('/(onboarding)/pin-setup')
-  // when the magic link is tapped. Here we provide a manual dev shortcut via the dev button.
+  const handleToggleOtp = useCallback(() => {
+    setShowOtp((v) => !v);
+    setOtp('');
+    setOtpError('');
+    setTimeout(() => otpInputRef.current?.focus(), 100);
+    Haptics.selectionAsync();
+  }, []);
+
+  const handleVerifyOtp = useCallback(async () => {
+    const trimmed = otp.trim();
+    if (trimmed.length !== 6) {
+      setOtpError('Enter the 6-digit code from your email.');
+      return;
+    }
+    setOtpError('');
+    setVerifying(true);
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      const storedEmail = OnboardingStorage.getEmail() ?? email;
+      const res = await verifyMagicOTP(storedEmail, trimmed);
+
+      // handleAuthCallback persists the JWT + user and sets isLocked=true
+      await handleAuthCallback(res.jwt, { ...res.user, isNew: res.isNew });
+
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+
+      // Mirror the routing logic from auth-callback.tsx
+      if (hasOnboarded) {
+        router.replace('/(auth)');
+      } else if (res.isNew) {
+        router.replace('/(onboarding)/pin-setup');
+      } else {
+        router.replace('/(onboarding)/pin-setup?returning=1');
+      }
+    } catch (e: any) {
+      setOtpError(e?.message ?? 'Invalid or expired code. Request a new link and try again.');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    } finally {
+      setVerifying(false);
+    }
+  }, [otp, email, handleAuthCallback]);
 
   return (
-    <View
-      style={[
-        styles.container,
-        {
-          backgroundColor:   colors.background,
-          paddingTop:        insets.top + spacing[2],
-          paddingBottom:     Math.max(insets.bottom, spacing[6]) + spacing[4],
-          paddingHorizontal: layout.screenPadding,
-        },
-      ]}
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <OnboardingHeader
-        step={3}
-        total={9}
-        onBack={() => router.back()}
-        dark={false}
-      />
-
-      {/* Main content */}
-      <View style={styles.content}>
-        <Animated.View entering={FadeInDown.delay(80).duration(600)} style={styles.illustration}>
-          <EnvelopeCheckIllustration />
-        </Animated.View>
-
-        <Animated.View entering={FadeInDown.delay(180).duration(500)}>
-          <Text style={[text.onboardingTitle, { color: colors.text, marginTop: spacing[8] }]}>
-            Check your{'\n'}inbox.
-          </Text>
-        </Animated.View>
-
-        <Animated.View entering={FadeInDown.delay(260).duration(500)}>
-          <Text
-            style={[text.body, { color: colors.textSecondary, marginTop: spacing[3] }]}
-          >
-            We sent a link to{' '}
-            <Text style={{ color: colors.primary, fontFamily: 'PlusJakartaSans_500Medium' }}>
-              {email}
-            </Text>
-            . Tap it to continue.
-          </Text>
-        </Animated.View>
-
-        {/* Loading spinner — awaiting deep-link */}
-        <Animated.View
-          entering={FadeInDown.delay(340).duration(500)}
-          style={[styles.spinnerRow, { marginTop: spacing[8] }]}
-        >
-          <ActivityIndicator size="small" color={colors.textTertiary} />
-          <Text style={[text.bodySm, { color: colors.textTertiary, marginLeft: spacing[2] }]}>
-            Waiting for you to tap the link…
-          </Text>
-        </Animated.View>
-      </View>
-
-      {/* Bottom actions */}
-      <Animated.View entering={FadeInUp.delay(400).duration(500)} style={styles.bottomActions}>
-        {/* Resend */}
-        <Button
-          label={resending ? 'Sending…' : resent ? 'Email sent!' : 'Resend email'}
-          variant="secondary"
-          size="lg"
-          fullWidth
-          loading={resending}
-          disabled={resending}
-          onPress={handleResend}
+      <View
+        style={[
+          styles.container,
+          {
+            backgroundColor:   colors.background,
+            paddingTop:        insets.top + spacing[2],
+            paddingBottom:     Math.max(insets.bottom, spacing[6]) + spacing[4],
+            paddingHorizontal: layout.screenPadding,
+          },
+        ]}
+      >
+        <OnboardingHeader
+          step={3}
+          total={9}
+          onBack={() => router.back()}
+          dark={false}
         />
 
-        {/* Wrong email */}
-        <Pressable
-          onPress={() => router.back()}
-          accessibilityRole="button"
-          style={styles.backLink}
-        >
-          <Text style={[text.bodySm, { color: colors.textSecondary }]}>
-            Wrong email?{' '}
-            <Text style={{ color: colors.primary }}>Go back</Text>
-          </Text>
-        </Pressable>
+        {/* Main content */}
+        <View style={styles.content}>
+          <Animated.View entering={FadeInDown.delay(80).duration(600)} style={styles.illustration}>
+            <EnvelopeCheckIllustration />
+          </Animated.View>
 
-        {/* DEV-only skip — invisible in production builds */}
-        {__DEV__ && (
-          <Pressable
-            onPress={handleDevSkip}
-            accessibilityRole="button"
-            disabled={skipping}
-            style={[styles.devSkipBtn, { borderColor: Palette.gold, opacity: skipping ? 0.6 : 1 }]}
-          >
-            <Text style={[text.bodySm, { color: Palette.gold, fontFamily: 'PlusJakartaSans_500Medium' }]}>
-              {skipping ? 'Creating account…' : '⚡ Skip (Dev only)'}
+          <Animated.View entering={FadeInDown.delay(180).duration(500)}>
+            <Text style={[text.onboardingTitle, { color: colors.text, marginTop: spacing[8] }]}>
+              Check your{'\n'}inbox.
             </Text>
-          </Pressable>
-        )}
-      </Animated.View>
-    </View>
+          </Animated.View>
+
+          <Animated.View entering={FadeInDown.delay(260).duration(500)}>
+            <Text style={[text.body, { color: colors.textSecondary, marginTop: spacing[3] }]}>
+              We sent a link to{' '}
+              <Text style={{ color: colors.primary, fontFamily: 'PlusJakartaSans_500Medium' }}>
+                {email || 'your email'}
+              </Text>
+              . Tap it to continue.
+            </Text>
+          </Animated.View>
+
+          {!showOtp && (
+            /* Loading spinner — awaiting deep-link */
+            <Animated.View
+              entering={FadeInDown.delay(340).duration(500)}
+              style={[styles.spinnerRow, { marginTop: spacing[8] }]}
+            >
+              <ActivityIndicator size="small" color={colors.textTertiary} />
+              <Text style={[text.bodySm, { color: colors.textTertiary, marginLeft: spacing[2] }]}>
+                Waiting for you to tap the link…
+              </Text>
+            </Animated.View>
+          )}
+
+          {/* OTP input section */}
+          {showOtp && (
+            <Animated.View entering={FadeIn.duration(250)} style={{ marginTop: spacing[8], width: '100%' }}>
+              <Text style={[text.label, { color: colors.textSecondary, marginBottom: spacing[2] }]}>
+                Enter the 6-digit code from your email
+              </Text>
+              <View
+                style={[
+                  styles.otpWrap,
+                  {
+                    borderColor:     otpError ? colors.danger : otp.length === 6 ? colors.primary : colors.border,
+                    borderRadius:    radius.lg,
+                    backgroundColor: colors.inputBackground,
+                  },
+                ]}
+              >
+                <TextInput
+                  ref={otpInputRef}
+                  value={otp}
+                  onChangeText={(v) => {
+                    setOtp(v.replace(/\D/g, '').substring(0, 6));
+                    if (otpError) setOtpError('');
+                  }}
+                  placeholder="123456"
+                  placeholderTextColor={colors.inputPlaceholder}
+                  keyboardType="number-pad"
+                  autoComplete="one-time-code"
+                  maxLength={6}
+                  returnKeyType="done"
+                  onSubmitEditing={handleVerifyOtp}
+                  style={[
+                    styles.otpInput,
+                    {
+                      fontFamily:    font.sansSemiBold,
+                      fontSize:      fontSize['2xl'],
+                      color:         otp.length === 6 ? colors.primary : colors.text,
+                      letterSpacing: 8,
+                    },
+                  ]}
+                />
+              </View>
+              {otpError ? (
+                <Text style={[text.caption, { color: colors.danger, marginTop: spacing[1] }]}>
+                  {otpError}
+                </Text>
+              ) : (
+                <Text style={[text.caption, { color: colors.textTertiary, marginTop: spacing[1] }]}>
+                  The code expires in 15 minutes.
+                </Text>
+              )}
+            </Animated.View>
+          )}
+        </View>
+
+        {/* Bottom actions */}
+        <Animated.View entering={FadeInUp.delay(400).duration(500)} style={styles.bottomActions}>
+          {showOtp ? (
+            <>
+              <Button
+                label={verifying ? 'Verifying…' : 'Verify code'}
+                variant="primary"
+                size="lg"
+                fullWidth
+                loading={verifying}
+                disabled={verifying || otp.length !== 6}
+                onPress={handleVerifyOtp}
+              />
+              <Pressable onPress={handleToggleOtp} style={styles.backLink}>
+                <Text style={[text.bodySm, { color: colors.textSecondary }]}>
+                  Back to waiting for link
+                </Text>
+              </Pressable>
+            </>
+          ) : (
+            <>
+              {/* Resend */}
+              <Button
+                label={resending ? 'Sending…' : resent ? 'Email sent!' : 'Resend email'}
+                variant="secondary"
+                size="lg"
+                fullWidth
+                loading={resending}
+                disabled={resending}
+                onPress={handleResend}
+              />
+
+              {/* Enter code instead */}
+              <Pressable onPress={handleToggleOtp} style={styles.backLink}>
+                <Text style={[text.bodySm, { color: colors.textSecondary }]}>
+                  Got the email on a different device?{' '}
+                  <Text style={{ color: colors.primary }}>Enter the code</Text>
+                </Text>
+              </Pressable>
+
+              {/* Wrong email */}
+              <Pressable
+                onPress={() => router.back()}
+                accessibilityRole="button"
+                style={styles.backLink}
+              >
+                <Text style={[text.bodySm, { color: colors.textSecondary }]}>
+                  Wrong email?{' '}
+                  <Text style={{ color: colors.primary }}>Go back</Text>
+                </Text>
+              </Pressable>
+            </>
+          )}
+
+          {/* DEV-only skip — invisible in production builds */}
+          {__DEV__ && (
+            <Pressable
+              onPress={handleDevSkip}
+              accessibilityRole="button"
+              disabled={skipping}
+              style={[styles.devSkipBtn, { borderColor: Palette.gold, opacity: skipping ? 0.6 : 1 }]}
+            >
+              <Text style={[text.bodySm, { color: Palette.gold, fontFamily: 'PlusJakartaSans_500Medium' }]}>
+                {skipping ? 'Creating account…' : '⚡ Skip (Dev only)'}
+              </Text>
+            </Pressable>
+          )}
+        </Animated.View>
+      </View>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -223,6 +361,15 @@ const styles = StyleSheet.create({
   spinnerRow: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  otpWrap: {
+    borderWidth:    1.5,
+    height:         64,
+    paddingHorizontal: 18,
+    justifyContent: 'center',
+  },
+  otpInput: {
+    height: '100%',
   },
   bottomActions: {
     gap: 16,

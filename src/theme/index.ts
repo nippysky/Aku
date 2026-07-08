@@ -1,6 +1,6 @@
 import { useColorScheme } from 'react-native';
 import { DarkColors, LightColors, type ColorScheme } from './colors';
-import { FontFamily, FontSize, LineHeight, LetterSpacing, TextStyle } from './typography';
+import { FontFamily, FontSize, TextStyle } from './typography';
 import { Spacing, Radius, Shadow, Layout } from './spacing';
 import { useUIStore } from '../store/ui.store';
 import { IS_IOS } from '../lib/platform';

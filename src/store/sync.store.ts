@@ -26,6 +26,14 @@ interface SyncState {
   lastSyncAt:  string | null;
   isSyncing:   boolean;
   syncError:   string | null;
+  /**
+   * Incremented after every successful pull from the server.
+   * Tab screens watch this value and silently reload their store data
+   * when it changes — giving real-time cross-device UI refresh without
+   * skeleton flashes (screens only show skeletons on first load when
+   * there is no data yet).
+   */
+  syncVersion: number;
 
   // Actions
   /** Called after PIN setup or PIN verification. Derives + persists the DEK. */
@@ -40,15 +48,18 @@ interface SyncState {
   loadLastSyncAt:    () => Promise<void>;
   setSyncing:        (v: boolean) => void;
   setSyncError:      (e: string | null) => void;
+  /** Increment syncVersion to notify screens that pulled data is ready. */
+  bumpSyncVersion:   () => void;
 }
 
 const LAST_SYNC_KEY = 'aku_last_sync_at';
 
 export const useSyncStore = create<SyncState>()((set, get) => ({
-  dek:        null,
-  lastSyncAt: null,
-  isSyncing:  false,
-  syncError:  null,
+  dek:         null,
+  lastSyncAt:  null,
+  isSyncing:   false,
+  syncError:   null,
+  syncVersion: 0,
 
   setDek: async (dek: Uint8Array) => {
     // Persist to SecureStore so the next unlock can load it without re-deriving.
@@ -87,6 +98,7 @@ export const useSyncStore = create<SyncState>()((set, get) => ({
     } catch { /* ignore */ }
   },
 
-  setSyncing:   (v) => set({ isSyncing: v }),
-  setSyncError: (e) => set({ syncError: e }),
+  setSyncing:      (v) => set({ isSyncing: v }),
+  setSyncError:    (e) => set({ syncError: e }),
+  bumpSyncVersion: ()  => set((s) => ({ syncVersion: s.syncVersion + 1 })),
 }));

@@ -2,6 +2,7 @@ import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   Platform,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -27,6 +28,7 @@ import { AddBillSheet } from '../../components/bills/AddBillSheet';
 import { EditBillSheet } from '../../components/bills/EditBillSheet';
 import { useBillsStore } from '../../store/bills.store';
 import { useAuthStore } from '../../store/auth.store';
+import { useSyncStore } from '../../store/sync.store';
 import { useCurrencyFormat } from '../../hooks/useCurrencyFormat';
 import { FirstTimeHint } from '../../components/ui/FirstTimeHint';
 import { useFirstTimeHint } from '../../hooks/useFirstTimeHint';
@@ -257,6 +259,7 @@ export default function BillsScreen() {
 
   const { bills, load: loadBills, isLoading } = useBillsStore();
   const { user } = useAuthStore();
+  const syncVersion = useSyncStore((s) => s.syncVersion);
   const hintBill = useFirstTimeHint('hint_bills_paid');
 
   const [segment,     setSegment]     = useState<SegmentKey>('all');
@@ -265,9 +268,24 @@ export default function BillsScreen() {
   const [addOpen,     setAddOpen]     = useState(false);
   const [editBill,    setEditBill]    = useState<Bill | null>(null);
 
+  const [refreshing, setRefreshing] = useState(false);
+
   useEffect(() => {
     if (user) loadBills(user.id);
   }, [user]);
+
+  // ── Sync version watcher — reload silently when server pull lands ─────────
+  useEffect(() => {
+    if (!user || syncVersion === 0) return;
+    loadBills(user.id);
+  }, [syncVersion]);
+
+  const onRefresh = useCallback(async () => {
+    if (!user) return;
+    setRefreshing(true);
+    await loadBills(user.id);
+    setRefreshing(false);
+  }, [user, loadBills]);
 
   const handleSearchClose = useCallback(() => {
     setSearchOpen(false);
@@ -326,6 +344,14 @@ export default function BillsScreen() {
           { paddingBottom: insets.bottom + layout.tabBarHeight + 24 },
         ]}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+          />
+        }
       >
         {/* Snapshot banner */}
         {isLoading ? <SkeletonBanner /> : <SnapshotBanner bills={bills} />}

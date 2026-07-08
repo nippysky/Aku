@@ -4,10 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev":       "tsx watch src/index.ts",
-    "build":     "tsc",
-    "start":     "node dist/index.js",
-    "db:push":   "drizzle-kit push",
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
     "db:generate": "drizzle-kit generate"
   },
@@ -16,16 +16,19 @@
     "dotenv": "^16.4.7",
     "drizzle-orm": "^0.38.3",
     "hono": "^4.6.14",
+    "ioredis": "^5.11.1",
     "jose": "^5.9.6",
     "pdf-parse": "^1.1.1",
-    "tesseract.js": "^5.1.1",
     "pg": "^8.13.1",
-    "resend": "^4.0.1"
+    "resend": "^4.0.1",
+    "tesseract.js": "^5.1.1",
+    "ws": "^8.21.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
     "@types/pdf-parse": "^1.1.4",
     "@types/pg": "^8.11.10",
+    "@types/ws": "^8.18.1",
     "drizzle-kit": "^0.30.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"

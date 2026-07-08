@@ -92,6 +92,7 @@ export function AddContributionSheet({
         label="Amount"
         size="lg"
         style={styles.input}
+        asBottomSheetInput
       />
 
       {/* Add button */}

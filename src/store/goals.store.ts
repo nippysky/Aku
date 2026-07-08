@@ -4,6 +4,7 @@ import { getDatabase, schema } from '../lib/database/client';
 import { differenceInMonths, parseISO } from 'date-fns';
 import { generateUUID } from '../lib/uuid';
 import { notificationService } from '../lib/notifications';
+import { triggerPush } from '../lib/sync/trigger';
 import type {
   Goal, GoalWithProgress, GoalContribution,
   GoalCreateInput, GoalUpdateInput, ContributionCreateInput,
@@ -88,7 +89,8 @@ export const useGoalsStore = create<GoalsState>()((set, get) => ({
   error:         null,
 
   load: async (userId) => {
-    set({ isLoading: true, error: null });
+    const hasData = get().goals.length > 0;
+    if (!hasData) set({ isLoading: true, error: null });
     try {
       const db = getDatabase();
       const rows = await db
@@ -162,6 +164,7 @@ export const useGoalsStore = create<GoalsState>()((set, get) => ({
       };
       const withProg = withProgress(newGoal);
       set((s) => ({ goals: [...s.goals, withProg] }));
+      triggerPush();
       return withProg;
     } catch (e: any) {
       set({ error: e?.message ?? 'Failed to add goal' });
@@ -185,12 +188,14 @@ export const useGoalsStore = create<GoalsState>()((set, get) => ({
         g.id === id ? withProgress({ ...g, ...rest, updatedAt: now }) : g
       ),
     }));
+    triggerPush();
   },
 
   remove: async (id) => {
     const db = getDatabase();
     await db.delete(schema.goals).where(eq(schema.goals.id, id));
     set((s) => ({ goals: s.goals.filter((g) => g.id !== id) }));
+    triggerPush();
   },
 
   addContribution: async (input, userId) => {
@@ -254,6 +259,7 @@ export const useGoalsStore = create<GoalsState>()((set, get) => ({
         [input.goalId]: [...(s.contributions[input.goalId] ?? []), contribution],
       },
     }));
+    triggerPush();
   },
 
   removeContribution: async (contributionId, goalId, amount) => {
@@ -285,6 +291,7 @@ export const useGoalsStore = create<GoalsState>()((set, get) => ({
         [goalId]: (s.contributions[goalId] ?? []).filter((c) => c.id !== contributionId),
       },
     }));
+    triggerPush();
   },
 
   clearError: () => set({ error: null }),

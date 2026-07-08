@@ -68,6 +68,22 @@ interface AlertItem {
 }
 
 
+// ─── Deep link helper for push history items ─────────────────────────────────
+
+/**
+ * Derives an in-app route from the notification type + referenceId stored
+ * in the history. Returns null for broadcast-only notifications (daily/weekly)
+ * that don't map to a specific entity.
+ */
+function getHistoryHref(type: string, referenceId: string | null): string | null {
+  switch (type) {
+    case 'circle_event': return referenceId ? `/circle/${referenceId}` : null;
+    case 'daily_reminder': return '/expenses';
+    case 'weekly_summary': return '/analytics';
+    default: return null;
+  }
+}
+
 // ─── Smart alert derivation ───────────────────────────────────────────────────
 
 function useAlerts(
@@ -539,13 +555,17 @@ export default function NotificationsScreen() {
               ]}
             >
               {historyItems.map((item, idx) => {
-                const isFirst = idx === 0;
-                const isLast  = idx === historyItems.length - 1;
-                const ago     = formatDistanceToNow(parseISO(item.createdAt), { addSuffix: true });
+                const isFirst   = idx === 0;
+                const isLast    = idx === historyItems.length - 1;
+                const ago       = formatDistanceToNow(parseISO(item.createdAt), { addSuffix: true });
+                const histHref  = getHistoryHref(item.type, item.referenceId);
                 return (
                   <React.Fragment key={item.id}>
                     <Pressable
-                      onPress={() => markHistRead(item.id)}
+                      onPress={() => {
+                        markHistRead(item.id);
+                        if (histHref) navigate(histHref);
+                      }}
                       style={[
                         styles.alertRow,
                         {
@@ -584,6 +604,9 @@ export default function NotificationsScreen() {
                           {ago}
                         </Text>
                       </View>
+                      {histHref && (
+                        <ChevronRight size={16} color={colors.textTertiary} strokeWidth={1.6} />
+                      )}
                     </Pressable>
                     {!isLast && (
                       <View style={{ backgroundColor: colors.card }}>

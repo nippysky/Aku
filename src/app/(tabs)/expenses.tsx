@@ -1,9 +1,9 @@
-import React, { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import {
-  Alert,
   FlatList,
   Platform,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -13,23 +13,8 @@ import {
 import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { FadeInDown } from 'react-native-reanimated';
-import {
-  Plus,
-  Upload,
-  Wallet,
-  TrendingUp,
-  Search,
-  X,
-  UtensilsCrossed, Car, ShoppingBag, Tv, Home, Zap,
-  Heart, Users, BookOpen, PiggyBank, Gift, MoreHorizontal,
-  Briefcase, Building2, ArrowLeftRight, RotateCcw,
-} from 'lucide-react-native';
+import { Plus, Wallet, TrendingUp, Search, X } from 'lucide-react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system';
-import { parseCSV, fromServerTransactions } from '../../lib/statement-parser';
-import { setImportRows } from '../../lib/import-state';
-import { parseStatementPDF } from '../../lib/api-client';
 import { useTheme } from '../../theme';
 import { Palette } from '../../theme/colors';
 import { BannerAmount } from '../../components/ui/CompactAmountDisplay';
@@ -44,6 +29,7 @@ import { IncomeRow } from '../../components/income/IncomeRow';
 import { useExpensesStore } from '../../store/expenses.store';
 import { useIncomeStore } from '../../store/income.store';
 import { useAuthStore } from '../../store/auth.store';
+import { useSyncStore } from '../../store/sync.store';
 import { useCurrencyFormat } from '../../hooks/useCurrencyFormat';
 import { FirstTimeHint } from '../../components/ui/FirstTimeHint';
 import { useFirstTimeHint } from '../../hooks/useFirstTimeHint';
@@ -250,6 +236,7 @@ export default function ExpensesScreen() {
   const { user }             = useAuthStore();
   const { fmt, fmtCompact }  = useCurrencyFormat();
   const hintSwipe            = useFirstTimeHint('hint_expenses_swipe');
+  const syncVersion          = useSyncStore((s) => s.syncVersion);
 
   // ── Deep-link segment param (e.g. from home "Earned · Month" tap) ─────────
   const params = useLocalSearchParams<{ segment?: string }>();
@@ -261,7 +248,6 @@ export default function ExpensesScreen() {
   const [editExpense,    setEditExpense]    = useState<Expense | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('all');
   const [searchQuery,    setSearchQuery]    = useState('');
-  const [importing,      setImporting]      = useState(false);
 
   const monthOptions = useMemo(() => buildMonthOptions(), []);
 
@@ -285,6 +271,31 @@ export default function ExpensesScreen() {
       loadInc(user.id);
     }
   }, [user, viewMode]);
+
+  // ── Sync version watcher — reload silently when server pull lands ─────────
+  useEffect(() => {
+    if (!user || syncVersion === 0) return;
+    if (viewMode === 'all') {
+      loadAllExp(user.id);
+      loadAllInc(user.id);
+    } else {
+      loadExp(user.id);
+      loadInc(user.id);
+    }
+  }, [syncVersion]);
+
+  const [refreshing, setRefreshing] = useState(false);
+
+  const onRefresh = useCallback(async () => {
+    if (!user) return;
+    setRefreshing(true);
+    if (viewMode === 'all') {
+      await Promise.all([loadAllExp(user.id), loadAllInc(user.id)]);
+    } else {
+      await Promise.all([loadExp(user.id), loadInc(user.id)]);
+    }
+    setRefreshing(false);
+  }, [user, viewMode, loadAllExp, loadAllInc, loadExp, loadInc]);
 
   const isLoading = segment === 'expenses' ? expLoading : incLoading;
 
@@ -376,52 +387,6 @@ export default function ExpensesScreen() {
   const top3Exp     = useMemo(() => (expSummary ? getTop3Expenses(expSummary.byCategory) : []), [expSummary]);
   const top1Inc     = useMemo(() => (incSummary ? getTop3Income(incSummary.byCategory) : []), [incSummary]);
 
-  // ── Import handler ────────────────────────────────────────────────────────
-  const handleImportStatement = useCallback(async () => {
-    let result: DocumentPicker.DocumentPickerResult;
-    try {
-      result = await DocumentPicker.getDocumentAsync({
-        type: ['text/csv', 'text/comma-separated-values', 'application/pdf',
-               'application/octet-stream', '*/*'],
-        copyToCacheDirectory: true,
-      });
-    } catch { return; }
-    if (result.canceled || !result.assets?.[0]) return;
-
-    const asset = result.assets[0];
-    const name  = (asset.name ?? '').toLowerCase();
-    const isPDF = name.endsWith('.pdf') || asset.mimeType === 'application/pdf';
-
-    setImporting(true);
-    try {
-      if (isPDF) {
-        const base64 = await FileSystem.readAsStringAsync(asset.uri, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
-        const txns = await parseStatementPDF(base64);
-        if (txns.length === 0) {
-          Alert.alert('No transactions found', 'The PDF could not be parsed. Ensure it\'s a standard bank statement.');
-          return;
-        }
-        setImportRows(fromServerTransactions(txns));
-      } else {
-        const csvText = await FileSystem.readAsStringAsync(asset.uri, {
-          encoding: FileSystem.EncodingType.UTF8,
-        });
-        const rows = parseCSV(csvText);
-        if (rows.length === 0) {
-          Alert.alert('No transactions found', 'Could not detect Date or Amount columns in this CSV.');
-          return;
-        }
-        setImportRows(rows);
-      }
-      router.push('/import-statement' as never);
-    } catch {
-      Alert.alert('Import failed', 'Could not read the file. Please try again.');
-    } finally {
-      setImporting(false);
-    }
-  }, [router]);
 
   // ── Render helpers ────────────────────────────────────────────────────────
 
@@ -725,18 +690,6 @@ export default function ExpensesScreen() {
           <Text style={[text.bodySm, { color: colors.textSecondary }]}>
             {currentMonthLabel()}
           </Text>
-          {segment === 'expenses' && (
-            <Pressable
-              onPress={handleImportStatement}
-              disabled={importing}
-              style={[styles.headerIconBtn, { backgroundColor: colors.backgroundSecondary }]}
-              hitSlop={6}
-              accessibilityRole="button"
-              accessibilityLabel="Import bank statement"
-            >
-              <Upload size={18} color={colors.text} strokeWidth={1.8} />
-            </Pressable>
-          )}
           <Pressable
             onPress={() => segment === 'expenses' ? setAddExpOpen(true) : setAddIncOpen(true)}
             style={[styles.headerIconBtn, { backgroundColor: colors.backgroundSecondary }]}
@@ -853,6 +806,14 @@ export default function ExpensesScreen() {
           renderItem={renderExpenseItem}
           style={{ flex: 1 }}
           ListHeaderComponent={ExpListHeader}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor={colors.primary}
+              colors={[colors.primary]}
+            />
+          }
           ListEmptyComponent={
             isLoading ? (
               <View style={{ gap: 0 }}>
@@ -880,6 +841,14 @@ export default function ExpensesScreen() {
           renderItem={renderIncomeItem}
           style={{ flex: 1 }}
           ListHeaderComponent={IncListHeader}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor={colors.success}
+              colors={[colors.success]}
+            />
+          }
           ListEmptyComponent={
             isLoading ? (
               <View style={{ gap: 0 }}>

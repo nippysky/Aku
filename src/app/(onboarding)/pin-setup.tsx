@@ -82,7 +82,8 @@ export default function PinSetupScreen() {
           // New user — continue to biometric setup
           router.replace('/(onboarding)/biometric');
         }
-      } catch {
+      } catch (err) {
+        console.error('[pin-setup] handleConfirmComplete error:', err);
         setErrorMsg('Something went wrong. Please try again.');
         triggerShake();
         setIsLoading(false);

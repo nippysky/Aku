@@ -195,6 +195,7 @@ export function EditBillSheet({ bill, onClose, onSuccess }: EditBillSheetProps) 
               onChangeText={field.onChange}
               error={errors.name?.message}
               style={styles.field}
+              asBottomSheetInput
             />
           )}
         />
@@ -210,6 +211,7 @@ export function EditBillSheet({ bill, onClose, onSuccess }: EditBillSheetProps) 
               onChange={field.onChange}
               error={errors.amount?.message}
               style={styles.field}
+              asBottomSheetInput
             />
           )}
         />
@@ -366,6 +368,7 @@ export function EditBillSheet({ bill, onClose, onSuccess }: EditBillSheetProps) 
               multiline
               numberOfLines={3}
               style={styles.field}
+              asBottomSheetInput
             />
           )}
         />

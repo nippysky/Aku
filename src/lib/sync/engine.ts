@@ -14,7 +14,7 @@
 import { eq } from 'drizzle-orm';
 import { getDatabase, schema } from '../database/client';
 import { encryptRecord, decryptRecord } from './crypto';
-import { syncPush, syncPull } from '../api-client';
+import { syncPush, syncPull, reportInsight, type UserInsightPayload } from '../api-client';
 import { useSyncStore } from '../../store/sync.store';
 import { trackReviewEvent } from '../review';
 
@@ -139,6 +139,122 @@ export async function pullAndMerge(since?: string | null): Promise<void> {
 
     await upsertLocal(db, rec.entityType as EntityType, payload, serverTs, now);
   }
+
+  // Notify screens that new data is available — they watch syncVersion and
+  // silently reload their stores without showing skeleton loaders.
+  useSyncStore.getState().bumpSyncVersion();
+}
+
+// ─── Insight computation ──────────────────────────────────────────────────────
+//
+// Reads local SQLite (already decrypted in-app) and derives lightweight signals
+// for the server's notification personalisation engine. No raw amounts are sent
+// — only ratios, streaks, category names, and boolean flags.
+
+async function computeInsight(): Promise<UserInsightPayload> {
+  const db  = getDatabase();
+  const now = new Date();
+
+  // Date boundaries
+  const startOfMonth     = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+  const startOfWeekDate  = new Date(now);
+  startOfWeekDate.setUTCDate(now.getUTCDate() - now.getUTCDay()); // Sunday
+  startOfWeekDate.setUTCHours(0, 0, 0, 0);
+  const startOfWeekStr   = startOfWeekDate.toISOString().slice(0, 10);
+  const startOfLastWeek  = new Date(startOfWeekDate);
+  startOfLastWeek.setUTCDate(startOfLastWeek.getUTCDate() - 7);
+  const startOfLastWeekStr = startOfLastWeek.toISOString().slice(0, 10);
+
+  // Pull all expenses (amounts in kobo — only used for relative comparisons)
+  const allExpenses = await db.select().from(schema.expenses);
+
+  // Monthly expenses
+  const thisMonthExp = allExpenses.filter((e) => e.date >= startOfMonth);
+
+  // Top category by total amount this month
+  const categoryTotals: Record<string, number> = {};
+  for (const e of thisMonthExp) {
+    categoryTotals[e.category] = (categoryTotals[e.category] ?? 0) + e.amount;
+  }
+  const topCategory = Object.entries(categoryTotals)
+    .sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+
+  // Weekly change %
+  const thisWeekTotal  = allExpenses
+    .filter((e) => e.date >= startOfWeekStr)
+    .reduce((s, e) => s + e.amount, 0);
+  const lastWeekTotal  = allExpenses
+    .filter((e) => e.date >= startOfLastWeekStr && e.date < startOfWeekStr)
+    .reduce((s, e) => s + e.amount, 0);
+  const weeklyChangePct: number | null = lastWeekTotal > 0
+    ? Math.round(((thisWeekTotal - lastWeekTotal) / lastWeekTotal) * 100)
+    : null;
+
+  // Spending streak — consecutive days with ≥ 1 expense, counting back from today
+  const expenseDaySet = new Set(allExpenses.map((e) => e.date.slice(0, 10)));
+  let streak          = 0;
+  const checkDay      = new Date(now);
+  checkDay.setUTCHours(0, 0, 0, 0);
+  while (expenseDaySet.has(checkDay.toISOString().slice(0, 10))) {
+    streak++;
+    checkDay.setUTCDate(checkDay.getUTCDate() - 1);
+  }
+
+  // Budget utilization: compare each budget's category spend vs its limit
+  const allBudgets = await db.select().from(schema.budgets);
+  let maxUtilization: number | null = null;
+  let hasOverBudget                 = false;
+
+  for (const b of allBudgets) {
+    if (!b.amount || b.amount === 0) continue;
+
+    // Determine period start
+    let periodStart: string;
+    if (b.period === 'weekly') {
+      periodStart = startOfWeekStr;
+    } else if (b.period === 'monthly') {
+      periodStart = startOfMonth;
+    } else {
+      // yearly
+      periodStart = `${now.getFullYear()}-01-01`;
+    }
+
+    const spent = allExpenses
+      .filter((e) => e.category === b.category && e.date >= periodStart)
+      .reduce((s, e) => s + e.amount, 0);
+
+    const util = spent / b.amount;
+    if (maxUtilization === null || util > maxUtilization) maxUtilization = util;
+    if (util >= 1.0) hasOverBudget = true;
+  }
+
+  // Goals on track: saved ≥ 80 % of expected progress given deadline
+  const allGoals   = await db.select().from(schema.goals);
+  const activeGoals = allGoals.filter((g) => !g.isCompleted);
+  const goalsOnTrack = activeGoals.filter((g) => {
+    if (!g.targetDate) return true;          // no deadline → always on track
+    if (!g.targetAmount || g.targetAmount === 0) return false;
+    const deadline   = new Date(g.targetDate);
+    const created    = new Date(g.createdAt);
+    const totalMs    = deadline.getTime() - created.getTime();
+    if (totalMs <= 0) return false;
+    const elapsedMs  = now.getTime() - created.getTime();
+    const expectedPct = Math.min(elapsedMs / totalMs, 1);
+    const actualPct   = (g.savedAmount ?? 0) / g.targetAmount;
+    return actualPct >= expectedPct * 0.8;
+  }).length;
+
+  return {
+    budgetUtilization:   maxUtilization,
+    hasOverBudget,
+    spendingStreak:      streak,
+    weeklyChangePct,
+    monthlyExpenseCount: thisMonthExp.length,
+    topCategory,
+    totalGoalsCount:     activeGoals.length,
+    goalsOnTrack,
+    hasActiveGoals:      activeGoals.length > 0,
+  };
 }
 
 // ─── Full sync ────────────────────────────────────────────────────────────────
@@ -152,6 +268,13 @@ export async function fullSync(): Promise<void> {
     await pushAll();
     await pullAndMerge(store.lastSyncAt);
     store.setLastSyncAt(new Date().toISOString());
+
+    // Fire-and-forget: report insight signals to server for push personalisation.
+    // Non-critical — never blocks sync or surfaces an error to the user.
+    computeInsight()
+      .then((insight) => reportInsight(insight))
+      .catch(() => { /* silent — insight reporting is best-effort */ });
+
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Sync failed';
     store.setSyncError(msg);

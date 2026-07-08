@@ -28,15 +28,16 @@ function getFrom(): string {
 // ─── Magic Link Email ─────────────────────────────────────────────────────────
 
 export async function sendMagicLinkEmail(opts: {
-  to:   string;
-  name: string | null;
-  url:  string;
+  to:       string;
+  name:     string | null;
+  url:      string;
+  otpCode?: string;
 }): Promise<void> {
   const resend     = getResend();
   const firstName  = opts.name ? opts.name.split(' ')[0] : null;
   const expiryMins = process.env.MAGIC_LINK_EXPIRY_MINUTES ?? '15';
 
-  const html = magicLinkTemplate({ firstName, url: opts.url, expiryMins });
+  const html = magicLinkTemplate({ firstName, url: opts.url, expiryMins, otpCode: opts.otpCode });
 
   const { error } = await resend.emails.send({
     from:    getFrom(),
@@ -53,11 +54,12 @@ export async function sendMagicLinkEmail(opts: {
 // ─── Template ─────────────────────────────────────────────────────────────────
 
 function magicLinkTemplate(opts: {
-  firstName: string | null;
-  url:       string;
+  firstName:  string | null;
+  url:        string;
   expiryMins: string;
+  otpCode?:   string;
 }): string {
-  const { firstName, url, expiryMins } = opts;
+  const { firstName, url, expiryMins, otpCode } = opts;
   const greeting = firstName ? `Hi ${firstName}` : 'Hi there';
 
   return `<!DOCTYPE html>
@@ -197,6 +199,25 @@ function magicLinkTemplate(opts: {
                 Button not working? Copy this link into your browser:
               </p>
               <p style="margin:0;font-size:11px;color:#CBD5E0;word-break:break-all;line-height:1.6;">${url}</p>
+
+              ${otpCode ? `
+              <!-- OTP code block -->
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:28px;">
+                <tr><td style="border-top:1px solid #EDF2F7;font-size:0;">&nbsp;</td></tr>
+              </table>
+              <p style="margin:20px 0 4px;font-size:13px;color:#718096;line-height:1.65;">
+                Got the email on a different device? Enter this code on the device where you started sign-in:
+              </p>
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:12px 0 0;">
+                <tr>
+                  <td style="background:#F0F7F4;border:1px solid #C6E1D5;border-radius:12px;padding:16px 28px;text-align:center;">
+                    <p style="margin:0 0 4px;font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#52B788;">One-time code</p>
+                    <p style="margin:0;font-size:32px;font-weight:700;letter-spacing:10px;color:#163A2F;font-family:'Courier New',Courier,monospace;">${otpCode}</p>
+                    <p style="margin:6px 0 0;font-size:11px;color:#A0AEC0;">Expires in ${expiryMins} minutes · one-time use</p>
+                  </td>
+                </tr>
+              </table>
+              ` : ''}
 
             </td>
           </tr>

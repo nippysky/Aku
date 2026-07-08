@@ -201,6 +201,7 @@ export function EditExpenseSheet({ expense, onClose, onSuccess }: EditExpenseShe
               size="lg"
               error={errors.amount?.message}
               style={styles.field}
+              asBottomSheetInput
             />
           )}
         />
@@ -217,6 +218,7 @@ export function EditExpenseSheet({ expense, onClose, onSuccess }: EditExpenseShe
               onChangeText={field.onChange}
               error={errors.description?.message}
               style={styles.field}
+              asBottomSheetInput
             />
           )}
         />

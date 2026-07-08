@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { eq, and, gte, lte } from 'drizzle-orm';
 import { getDatabase, schema } from '../lib/database/client';
+import { triggerPush } from '../lib/sync/trigger';
 import {
   format,
   startOfWeek, endOfWeek,
@@ -128,7 +129,8 @@ export const useBudgetsStore = create<BudgetsState>()((set, get) => ({
   error:     null,
 
   load: async (userId) => {
-    set({ isLoading: true, error: null });
+    const hasData = get().budgets.length > 0;
+    if (!hasData) set({ isLoading: true, error: null });
     try {
       const db = getDatabase();
       const rows = await db
@@ -177,6 +179,7 @@ export const useBudgetsStore = create<BudgetsState>()((set, get) => ({
     );
 
     set((s) => ({ budgets: [...s.budgets, newBudget] }));
+    triggerPush();
   },
 
   update: async (id, patch) => {
@@ -200,12 +203,14 @@ export const useBudgetsStore = create<BudgetsState>()((set, get) => ({
         };
       }),
     }));
+    triggerPush();
   },
 
   remove: async (id) => {
     const db = getDatabase();
     await db.delete(schema.budgets).where(eq(schema.budgets.id, id));
     set((s) => ({ budgets: s.budgets.filter((b) => b.id !== id) }));
+    triggerPush();
   },
 
   refreshCategory: async (userId, category) => {

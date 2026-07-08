@@ -1,30 +1,42 @@
 /**
  * Akù Notification Worker — PM2 background process
  *
- * Runs two recurring jobs on an in-process scheduler:
+ * Sends personalised push notifications across three tiers:
  *
- *   Daily reminder    — 19:00 UTC every day
- *     "Log your spending for today!" → deep-links to Expenses tab
+ * ── Tier 1 · Behavioural signals (server-only) ───────────────────────────────
+ *   Segments every user into one of:
+ *     • New user   (account < 3 days old)  → onboarding sequence (day 1/2/3)
+ *     • Dormant    (no sync in 7+ days)     → strong re-engagement
+ *     • Lapsing    (no sync in 3–6 days)    → gentle nudge
+ *     • Active     (synced recently)         → standard or personalised
  *
- *   Weekly summary    — 18:00 UTC every Sunday
- *     "Your week in review 📊" → deep-links to Home dashboard
+ * ── Tier 2 · App-reported insights ──────────────────────────────────────────
+ *   After each sync the app posts lightweight financial signals
+ *   (budget %, streak, top category, weekly delta) to POST /api/notifications/insight.
+ *   The worker reads these to craft personalised message variants:
+ *     • Over-budget alert  · Budget warning (>80 %)  · Streak celebration
+ *     • Weekly spend spike / drop  · Top-category callout  · Goal nudge
  *
- * Scale design:
- *   - Batches Expo push API at 100 tokens/request (Expo API limit)
- *   - Deduplicates via notification_log (unique per user + type + date)
- *   - Paginated DB queries — O(PAGE_SIZE) RAM regardless of user count
- *   - Graceful shutdown: SIGTERM/SIGINT drains the current batch then exits
+ * ── Tier 3 · Smart delivery timing ──────────────────────────────────────────
+ *   Runs every hour at :00.
+ *   Determines which IANA timezones are currently showing 19:xx (daily) or
+ *   Sunday 18:xx (weekly) and notifies only those users.
+ *   DST-safe: Intl.DateTimeFormat tracks DST automatically.
+ *   Users with no stored timezone fall back to UTC 19:00 / Sunday 18:00.
  *
- * Start:
- *   pm2 start dist/workers/notification-worker.js --name aku-notif-worker
- * Or via ecosystem.config.cjs (see /server/ecosystem.config.cjs).
+ * Deduplication:
+ *   notification_log (unique userId + type + sentDate) prevents double-sends
+ *   across restarts or concurrent workers.
+ *
+ * Scale: paginated queries, Expo batches of 100, O(PAGE_SIZE) RAM.
+ * Graceful shutdown: SIGTERM/SIGINT drains current batch then exits.
  */
 import 'dotenv/config';
 import { randomBytes } from 'node:crypto';
+import { isNotNull, notInArray, sql, eq, max } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { pushTokens, notificationLog } from '../db/schema.js';
+import { pushTokens, notificationLog, users, userInsights, syncRecords } from '../db/schema.js';
 import { sendExpoPush } from '../lib/expo-push.js';
-import { sql, notInArray } from 'drizzle-orm';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -35,10 +47,29 @@ interface PushPayload {
   data:      Record<string, string>;
 }
 
-interface JobConfig {
-  type:    string;
-  payload: PushPayload;
+interface UserRow {
+  userId:              string;
+  token:               string;
+  timezone:            string | null;
+  createdAt:           Date;
+  lastSyncAt:          Date | null;
+  budgetUtilization:   number | null;
+  hasOverBudget:       boolean | null;
+  spendingStreak:      number | null;
+  weeklyChangePct:     number | null;
+  monthlyExpenseCount: number | null;
+  topCategory:         string | null;
+  hasActiveGoals:      boolean | null;
+  goalsOnTrack:        number | null;
+  totalGoalsCount:     number | null;
 }
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const PAGE_SIZE      = 500;
+const DORMANT_HOURS  = 7 * 24;
+const LAPSING_HOURS  = 3 * 24;
+const NEW_USER_DAYS  = 3;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -46,191 +77,466 @@ function generateId(): string {
   return randomBytes(16).toString('hex');
 }
 
-/** Returns today's date as YYYY-MM-DD in UTC. */
 function todayUTC(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-/** Returns a Date for the next occurrence of hour:minute UTC (tomorrow if already past). */
-function nextUtcOccurrence(hour: number, minute: number): Date {
-  const now  = new Date();
-  const next = new Date(Date.UTC(
-    now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(),
-    hour, minute, 0, 0,
-  ));
-  if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
-  return next;
+/** Returns the local hour (0–23) for a given IANA timezone at `now`. -1 on error. */
+function localHourIn(timezone: string, now: Date): number {
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      hour:     'numeric',
+      hour12:   false,
+    }).formatToParts(now);
+    const h = parts.find((p) => p.type === 'hour')?.value;
+    return h !== undefined ? parseInt(h, 10) : -1;
+  } catch {
+    return -1;
+  }
 }
 
-/** Returns the next Sunday at 18:00 UTC. */
-function nextSunday18UTC(): Date {
-  const now              = new Date();
-  const daysUntilSunday  = now.getUTCDay() === 0 ? 0 : 7 - now.getUTCDay();
-  const candidate = new Date(Date.UTC(
-    now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + daysUntilSunday,
-    18, 0, 0, 0,
-  ));
-  if (candidate <= now) candidate.setUTCDate(candidate.getUTCDate() + 7);
-  return candidate;
+/** Returns the local weekday short name ('Sun', 'Mon', …) for a timezone. */
+function localWeekdayIn(timezone: string, now: Date): string {
+  try {
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      weekday:  'short',
+    }).format(now);
+  } catch {
+    return '';
+  }
 }
 
-// ─── Core send job ────────────────────────────────────────────────────────────
+/** Returns the set of IANA timezones stored in push_tokens. */
+async function allStoredTimezones(): Promise<string[]> {
+  const rows = await db
+    .selectDistinct({ timezone: pushTokens.timezone })
+    .from(pushTokens)
+    .where(isNotNull(pushTokens.timezone));
+  return rows.map((r) => r.timezone!);
+}
 
-const PAGE_SIZE = 500; // tokens per DB fetch — controls peak RAM
+// ─── Message selection — Tier 1 + Tier 2 ─────────────────────────────────────
+
+function pickDailyMessage(u: UserRow, now: Date): PushPayload {
+  const msPerHour    = 3_600_000;
+  const accountAgeH  = (now.getTime() - u.createdAt.getTime()) / msPerHour;
+  const lastSyncAgeH = u.lastSyncAt
+    ? (now.getTime() - u.lastSyncAt.getTime()) / msPerHour
+    : Infinity;
+
+  const baseData = { type: 'daily_reminder', screen: 'expenses', action: 'log' };
+
+  // ── NEW USER onboarding sequence (days 1 / 2 / 3) ──────────────────────
+  if (accountAgeH < NEW_USER_DAYS * 24) {
+    const dayNum = Math.floor(accountAgeH / 24) + 1;
+
+    if (dayNum === 1) return {
+      title:     'Welcome to Akù! 👋',
+      body:      'Log your first expense to start tracking your money.',
+      channelId: 'digest',
+      data:      { ...baseData, screen: 'expenses' },
+    };
+
+    if (dayNum === 2) return {
+      title:     'Set a budget today 🎯',
+      body:      'Budgets show you exactly where your money is going.',
+      channelId: 'digest',
+      data:      { ...baseData, screen: 'budgets' },
+    };
+
+    return {
+      title:     'Create your first savings goal 💰',
+      body:      'What are you saving for? Akù makes it easy to track progress.',
+      channelId: 'digest',
+      data:      { ...baseData, screen: 'goals' },
+    };
+  }
+
+  // ── DORMANT re-engagement (7+ days silent) ──────────────────────────────
+  if (lastSyncAgeH >= DORMANT_HOURS) {
+    const days = Math.floor(lastSyncAgeH / 24);
+    return {
+      title:     'Your finances need you 🚨',
+      body:      `You haven't logged anything in ${days} days. Don't lose track!`,
+      channelId: 'digest',
+      data:      { ...baseData, action: 'reopen' },
+    };
+  }
+
+  // ── LAPSING nudge (3–6 days silent) ────────────────────────────────────
+  if (lastSyncAgeH >= LAPSING_HOURS) {
+    return {
+      title:     'Haven\'t seen you in a bit 👀',
+      body:      'A quick expense log keeps your finances sharp. Tap to catch up.',
+      channelId: 'digest',
+      data:      baseData,
+    };
+  }
+
+  // ── ACTIVE user — Tier 2 personalisation ────────────────────────────────
+
+  if (u.hasOverBudget) return {
+    title:     '⚠️ Budget exceeded!',
+    body:      'You\'ve gone over budget this period. Tap to review your spending.',
+    channelId: 'digest',
+    data:      { ...baseData, screen: 'budgets' },
+  };
+
+  if (u.budgetUtilization != null && u.budgetUtilization >= 0.8) {
+    const pct = Math.round(u.budgetUtilization * 100);
+    return {
+      title:     `Budget at ${pct}% 🔴`,
+      body:      'You\'re close to your limit — time to review what\'s left.',
+      channelId: 'digest',
+      data:      { ...baseData, screen: 'budgets' },
+    };
+  }
+
+  if (u.spendingStreak != null && u.spendingStreak >= 3) return {
+    title:     `${u.spendingStreak}-day logging streak! 🔥`,
+    body:      'Keep the momentum — log today\'s expenses.',
+    channelId: 'digest',
+    data:      baseData,
+  };
+
+  if (u.weeklyChangePct != null && u.weeklyChangePct >= 20) return {
+    title:     `Spending up ${Math.round(u.weeklyChangePct)}% this week 📈`,
+    body:      u.topCategory
+      ? `${u.topCategory} is your biggest driver. Tap to review.`
+      : 'Tap to see what\'s driving it.',
+    channelId: 'digest',
+    data:      { ...baseData, screen: 'expenses' },
+  };
+
+  if (u.weeklyChangePct != null && u.weeklyChangePct <= -20) return {
+    title:     `Spending down ${Math.abs(Math.round(u.weeklyChangePct))}% this week 📉`,
+    body:      'Great discipline! Log today to keep it up.',
+    channelId: 'digest',
+    data:      baseData,
+  };
+
+  if (u.topCategory && u.monthlyExpenseCount != null && u.monthlyExpenseCount >= 5) return {
+    title:     `${u.topCategory} is your top spend this month 💡`,
+    body:      'Tap to see your full breakdown.',
+    channelId: 'digest',
+    data:      { ...baseData, screen: 'expenses' },
+  };
+
+  if (
+    u.hasActiveGoals &&
+    u.totalGoalsCount != null &&
+    u.goalsOnTrack != null &&
+    u.goalsOnTrack < u.totalGoalsCount
+  ) {
+    const behind = u.totalGoalsCount - u.goalsOnTrack;
+    return {
+      title:     `${behind} goal${behind > 1 ? 's' : ''} need${behind === 1 ? 's' : ''} attention 🎯`,
+      body:      'You\'re falling behind on savings. Contribute today.',
+      channelId: 'digest',
+      data:      { ...baseData, screen: 'goals' },
+    };
+  }
+
+  // ── Default ─────────────────────────────────────────────────────────────
+  return {
+    title:     'How did you spend today? 💸',
+    body:      'Take 30 seconds to log your expenses. Every penny counts.',
+    channelId: 'digest',
+    data:      baseData,
+  };
+}
+
+function pickWeeklyMessage(u: UserRow): PushPayload {
+  const data = { type: 'weekly_summary', screen: 'home' };
+
+  if (u.weeklyChangePct != null && u.weeklyChangePct >= 25) return {
+    title:     `Spending jumped ${Math.round(u.weeklyChangePct)}% this week 📈`,
+    body:      u.topCategory
+      ? `${u.topCategory} was your biggest expense. See your full review.`
+      : 'Your week in review — see where the money went.',
+    channelId: 'digest',
+    data,
+  };
+
+  if (u.weeklyChangePct != null && u.weeklyChangePct <= -25) return {
+    title:     `Great week — spending down ${Math.abs(Math.round(u.weeklyChangePct))}% 📉`,
+    body:      'You spent less than last week. Keep it up!',
+    channelId: 'digest',
+    data,
+  };
+
+  if (u.topCategory) return {
+    title:     'Your week in review 📊',
+    body:      `${u.topCategory} was your top category. Tap for the full breakdown.`,
+    channelId: 'digest',
+    data,
+  };
+
+  if (u.hasActiveGoals && u.goalsOnTrack != null && u.totalGoalsCount != null) {
+    const onTrack = u.goalsOnTrack;
+    const total   = u.totalGoalsCount;
+    if (total > 0) return {
+      title:     'Your week in review 📊',
+      body:      `${onTrack} of ${total} goal${total > 1 ? 's' : ''} on track. See how your week shaped up.`,
+      channelId: 'digest',
+      data,
+    };
+  }
+
+  return {
+    title:     'Your week in review 📊',
+    body:      'See how your finances shaped up this week.',
+    channelId: 'digest',
+    data,
+  };
+}
+
+// ─── Core personalised send ───────────────────────────────────────────────────
 
 /**
- * Sends `cfg.payload` to all registered devices that haven't received
- * `cfg.type` today. Uses paginated queries and deduplication via the
- * notification_log table.
+ * Query eligible users (matching timezones, not yet notified today),
+ * pick a personalised message per user, group by identical variant,
+ * send each variant as one Expo batch, then log to notification_log.
  */
-async function runJob(cfg: JobConfig): Promise<void> {
+async function runPersonalisedJob(
+  notifType:       'daily_reminder' | 'weekly_summary',
+  activeTimezones: Set<string>,
+  includeNullTz:   boolean,
+  now:             Date,
+): Promise<void> {
   const date = todayUTC();
-  console.log(`[worker] Starting job: ${cfg.type} / ${date}`);
-  let sent = 0;
+  console.log(
+    `[worker] ${notifType} | ${date} | tzCount=${activeTimezones.size} | nullTz=${includeNullTz}`,
+  );
+
+  if (activeTimezones.size === 0 && !includeNullTz) return;
+
+  let sent   = 0;
   let offset = 0;
 
   while (true) {
-    if (shutdownRequested) {
-      console.log('[worker] Shutdown requested — stopping job mid-batch.');
-      break;
-    }
+    if (shutdownRequested) break;
 
-    // userId sub-select: who already got this notification today?
-    const alreadySentIds = db
+    // Sub-query: users already notified today
+    const alreadySent = db
       .select({ userId: notificationLog.userId })
       .from(notificationLog)
       .where(
-        sql`${notificationLog.type} = ${cfg.type}
-            AND ${notificationLog.sentDate} = ${date}`
+        sql`${notificationLog.type} = ${notifType}
+            AND ${notificationLog.sentDate} = ${date}`,
       );
 
-    // Fetch next page of tokens whose owners haven't been notified yet
+    // Fetch page of users with their push token + insights
     const rows = await db
-      .select({ userId: pushTokens.userId, token: pushTokens.token })
+      .select({
+        userId:              pushTokens.userId,
+        token:               pushTokens.token,
+        timezone:            pushTokens.timezone,
+        createdAt:           users.createdAt,
+        budgetUtilization:   userInsights.budgetUtilization,
+        hasOverBudget:       userInsights.hasOverBudget,
+        spendingStreak:      userInsights.spendingStreak,
+        weeklyChangePct:     userInsights.weeklyChangePct,
+        monthlyExpenseCount: userInsights.monthlyExpenseCount,
+        topCategory:         userInsights.topCategory,
+        hasActiveGoals:      userInsights.hasActiveGoals,
+        goalsOnTrack:        userInsights.goalsOnTrack,
+        totalGoalsCount:     userInsights.totalGoalsCount,
+      })
       .from(pushTokens)
-      .where(notInArray(pushTokens.userId, alreadySentIds))
+      .innerJoin(users, eq(pushTokens.userId, users.id))
+      .leftJoin(userInsights, eq(userInsights.userId, pushTokens.userId))
+      .where(notInArray(pushTokens.userId, alreadySent))
       .limit(PAGE_SIZE)
       .offset(offset);
 
     if (rows.length === 0) break;
 
-    const tokens  = rows.map((r) => r.token);
-    const userIds = [...new Set(rows.map((r) => r.userId))];
+    // Filter to matching timezones (in-process; avoids complex SQL array binding)
+    const eligibleRows = rows.filter((r) => {
+      if (r.timezone && activeTimezones.has(r.timezone)) return true;
+      if (!r.timezone && includeNullTz) return true;
+      return false;
+    });
 
-    // Send the batch (internally chunked at 100 by expo-push wrapper)
-    await sendExpoPush(tokens, cfg.payload);
+    if (eligibleRows.length > 0) {
+      // Batch-load last sync time for this page's users
+      const uniqueIds = [...new Set(eligibleRows.map((r) => r.userId))];
+      const syncRows  = await db
+        .select({ userId: syncRecords.userId, lastSync: max(syncRecords.serverUpdatedAt) })
+        .from(syncRecords)
+        .where(
+          sql`${syncRecords.userId} IN (${sql.join(uniqueIds.map((id) => sql`${id}`), sql`, `)})`,
+        )
+        .groupBy(syncRecords.userId);
 
-    // Log each user — unique constraint prevents double-logging if worker
-    // restarts mid-batch or runs concurrently in a multi-instance setup.
-    for (const userId of userIds) {
-      try {
-        await db.insert(notificationLog).values({
-          id:       generateId(),
-          userId,
-          type:     cfg.type,
-          sentDate: date,
-          sentAt:   new Date(),
-        });
-      } catch {
-        // Unique constraint hit — already logged (concurrent workers / restart).
-        // Safe to silently ignore.
+      const lastSyncMap = new Map<string, Date>(
+        syncRows
+          .filter((s) => s.lastSync !== null)
+          .map((s) => [s.userId, new Date(s.lastSync as Date)]),
+      );
+
+      // Build per-user personalised messages and group by identical variant
+      const variantMap = new Map<string, { tokens: string[]; userIds: string[]; payload: PushPayload }>();
+
+      for (const row of eligibleRows) {
+        const userRow: UserRow = {
+          userId:              row.userId,
+          token:               row.token,
+          timezone:            row.timezone,
+          createdAt:           row.createdAt,
+          lastSyncAt:          lastSyncMap.get(row.userId) ?? null,
+          budgetUtilization:   row.budgetUtilization,
+          hasOverBudget:       row.hasOverBudget,
+          spendingStreak:      row.spendingStreak,
+          weeklyChangePct:     row.weeklyChangePct,
+          monthlyExpenseCount: row.monthlyExpenseCount,
+          topCategory:         row.topCategory,
+          hasActiveGoals:      row.hasActiveGoals,
+          goalsOnTrack:        row.goalsOnTrack,
+          totalGoalsCount:     row.totalGoalsCount,
+        };
+
+        const payload = notifType === 'daily_reminder'
+          ? pickDailyMessage(userRow, now)
+          : pickWeeklyMessage(userRow);
+
+        const variantKey = `${payload.title}|||${payload.body}`;
+        if (!variantMap.has(variantKey)) {
+          variantMap.set(variantKey, { tokens: [], userIds: [], payload });
+        }
+        const entry = variantMap.get(variantKey)!;
+        entry.tokens.push(row.token);
+        entry.userIds.push(row.userId);
       }
+
+      // Send each variant + log
+      for (const { tokens, userIds, payload } of variantMap.values()) {
+        if (shutdownRequested) break;
+        try {
+          await sendExpoPush(tokens, payload);
+        } catch (err) {
+          console.error(`[worker] Expo send error (${payload.title}):`, err);
+        }
+
+        for (const userId of userIds) {
+          try {
+            await db.insert(notificationLog).values({
+              id:       generateId(),
+              userId,
+              type:     notifType,
+              sentDate: date,
+              sentAt:   now,
+            });
+          } catch {
+            // Unique constraint hit — already logged, safe to ignore
+          }
+        }
+        sent += tokens.length;
+      }
+
+      console.log(`[worker] ${notifType}: page offset=${offset}, sent=${sent}`);
     }
 
-    sent += tokens.length;
     offset += PAGE_SIZE;
-
-    console.log(`[worker] ${cfg.type}: offset=${offset}, sent so far=${sent}`);
   }
 
-  console.log(`[worker] ${cfg.type} complete — ${sent} device(s) notified.`);
+  console.log(`[worker] ${notifType} complete — ${sent} device(s) notified.`);
 }
 
-// ─── Job definitions ──────────────────────────────────────────────────────────
-//
-// `data` payload keys match the NotificationData interface on the client
-// so that useNotificationNavigation can deep-link to the right screen.
+// ─── Hourly check — Tier 3 smart timing ──────────────────────────────────────
 
-const DAILY_JOB: JobConfig = {
-  type: 'daily_reminder',
-  payload: {
-    title:     'How did you spend today? 💸',
-    body:      'Take 30 seconds to log your expenses. Every penny counts.',
-    channelId: 'digest',
-    data: {
-      type:   'daily_reminder',
-      screen: 'expenses',
-      action: 'log',
-    },
-  },
-};
+/**
+ * Fired at the top of every hour.
+ * Determines which timezones are showing 19:xx (daily) or Sunday 18:xx (weekly)
+ * and runs the personalised job for those users.
+ */
+async function hourlyCheck(): Promise<void> {
+  const now     = new Date();
+  const utcHour = now.getUTCHours();
 
-const WEEKLY_JOB: JobConfig = {
-  type: 'weekly_summary',
-  payload: {
-    title:     'Your week in review 📊',
-    body:      'See how your finances shaped up this week.',
-    channelId: 'digest',
-    data: {
-      type:   'weekly_summary',
-      screen: 'home',
-    },
-  },
-};
+  const storedTimezones = await allStoredTimezones();
+
+  // ── Daily reminder: find TZs where local hour = 19 ──────────────────────
+  const dailyTzs = new Set<string>(
+    storedTimezones.filter((tz) => localHourIn(tz, now) === 19),
+  );
+  const includeNullForDaily = utcHour === 19;
+
+  if (dailyTzs.size > 0 || includeNullForDaily) {
+    await runPersonalisedJob('daily_reminder', dailyTzs, includeNullForDaily, now);
+  }
+
+  // ── Weekly summary: find TZs where it's Sunday AND local hour = 18 ──────
+  const weeklyTzs = new Set<string>(
+    storedTimezones.filter(
+      (tz) => localWeekdayIn(tz, now) === 'Sun' && localHourIn(tz, now) === 18,
+    ),
+  );
+  const isUtcSunday         = now.getUTCDay() === 0;
+  const includeNullForWeekly = isUtcSunday && utcHour === 18;
+
+  if (weeklyTzs.size > 0 || includeNullForWeekly) {
+    await runPersonalisedJob('weekly_summary', weeklyTzs, includeNullForWeekly, now);
+  }
+}
 
 // ─── Scheduler ────────────────────────────────────────────────────────────────
 
 let shutdownRequested = false;
 
-function scheduleDaily19(fn: () => Promise<void>, label: string): void {
-  const target = nextUtcOccurrence(19, 0);
-  const ms     = target.getTime() - Date.now();
-  console.log(`[worker] ${label} → next run: ${target.toISOString()} (${Math.round(ms / 60_000)} min)`);
+function scheduleNextHour(): void {
+  const now          = new Date();
+  const msToNextHour =
+    (60 - now.getUTCMinutes()) * 60_000
+    - now.getUTCSeconds()      * 1_000
+    - now.getUTCMilliseconds();
+
+  const nextRun = new Date(now.getTime() + msToNextHour);
+  console.log(
+    `[worker] Next hourly check: ${nextRun.toISOString()} (${Math.round(msToNextHour / 60_000)} min)`,
+  );
 
   setTimeout(async () => {
     if (shutdownRequested) return;
-    try { await fn(); } catch (err) { console.error(`[worker] ${label} error:`, err); }
-    scheduleDaily19(fn, label); // reschedule for tomorrow
-  }, ms);
-}
-
-function scheduleSunday18(fn: () => Promise<void>, label: string): void {
-  const target = nextSunday18UTC();
-  const ms     = target.getTime() - Date.now();
-  console.log(`[worker] ${label} → next run: ${target.toISOString()} (${Math.round(ms / 60_000)} min)`);
-
-  setTimeout(async () => {
-    if (shutdownRequested) return;
-    try { await fn(); } catch (err) { console.error(`[worker] ${label} error:`, err); }
-    scheduleSunday18(fn, label); // reschedule for next Sunday
-  }, ms);
+    try {
+      await hourlyCheck();
+    } catch (err) {
+      console.error('[worker] hourlyCheck error:', err);
+    }
+    scheduleNextHour();
+  }, msToNextHour);
 }
 
 // ─── Graceful shutdown ────────────────────────────────────────────────────────
 
 process.on('SIGTERM', () => {
-  console.log('[worker] SIGTERM — draining current batch (max 15 s)…');
+  console.log('[worker] SIGTERM — draining current batch (max 20 s)…');
   shutdownRequested = true;
-  setTimeout(() => process.exit(0), 15_000);
+  setTimeout(() => process.exit(0), 20_000);
 });
+
 process.on('SIGINT', () => {
   shutdownRequested = true;
-  setTimeout(() => process.exit(0), 15_000);
+  setTimeout(() => process.exit(0), 20_000);
 });
 
 // ─── Start ────────────────────────────────────────────────────────────────────
 
 console.log('[worker] Akù notification worker starting…');
+console.log('[worker] Mode: hourly timezone-aware · Tier 1 (behavioural) + Tier 2 (insights) + Tier 3 (smart timing)');
 
-scheduleDaily19(() => runJob(DAILY_JOB),  'daily-reminder');
-scheduleSunday18(() => runJob(WEEKLY_JOB), 'weekly-summary');
+scheduleNextHour();
 
-console.log('[worker] Scheduler live. Waiting for run times…');
-
-// Heartbeat every 6 h — visible in `pm2 logs aku-notif-worker`
+// Heartbeat every 6 h
 setInterval(() => {
-  const now = new Date();
-  if (now.getUTCMinutes() === 0 && now.getUTCHours() % 6 === 0) {
-    console.log(`[worker] ❤ alive at ${now.toISOString()}`);
+  const h = new Date().getUTCHours();
+  const m = new Date().getUTCMinutes();
+  if (m === 0 && h % 6 === 0) {
+    console.log(`[worker] ❤ alive at ${new Date().toISOString()}`);
   }
 }, 60_000).unref();
+
+console.log('[worker] Scheduler live — first check fires at the top of the next hour.');

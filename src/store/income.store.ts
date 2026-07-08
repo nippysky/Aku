@@ -3,6 +3,7 @@ import { eq, and, gte, lte } from 'drizzle-orm';
 import { getDatabase, schema } from '../lib/database/client';
 import { format } from 'date-fns';
 import { generateUUID } from '../lib/uuid';
+import { triggerPush } from '../lib/sync/trigger';
 import type {
   Income, IncomeCreateInput, IncomeUpdateInput,
   IncomeSummary, IncomeCategory,
@@ -75,7 +76,8 @@ export const useIncomeStore = create<IncomeState>()((set, get) => ({
   error:         null,
 
   load: async (userId) => {
-    set({ isLoading: true, error: null });
+    const hasData = get().records.length > 0 || get().allRecords.length > 0;
+    if (!hasData) set({ isLoading: true, error: null });
     try {
       const db    = getDatabase();
       const month = get().selectedMonth;
@@ -112,7 +114,8 @@ export const useIncomeStore = create<IncomeState>()((set, get) => ({
   },
 
   loadAll: async (userId) => {
-    set({ isLoading: true, error: null });
+    const hasData = get().allRecords.length > 0;
+    if (!hasData) set({ isLoading: true, error: null });
     try {
       const db = getDatabase();
       const rows = await db
@@ -168,6 +171,7 @@ export const useIncomeStore = create<IncomeState>()((set, get) => ({
       const summary = buildSummary(records, summaryMonth);
       set({ records, allRecords, summary });
 
+      triggerPush();
       return newRecord;
     } catch (e: any) {
       set({ error: e?.message ?? 'Failed to add income' });
@@ -192,6 +196,7 @@ export const useIncomeStore = create<IncomeState>()((set, get) => ({
     const allRecords = get().allRecords.map((r) => r.id === id ? { ...r, ...patch } : r);
     const summary = buildSummary(records, get().selectedMonth);
     set({ records, allRecords, summary });
+    triggerPush();
   },
 
   remove: async (id) => {
@@ -201,6 +206,7 @@ export const useIncomeStore = create<IncomeState>()((set, get) => ({
     const allRecords = get().allRecords.filter((r) => r.id !== id);
     const summary = buildSummary(records, get().selectedMonth);
     set({ records, allRecords, summary });
+    triggerPush();
   },
 
   setMonth: (month) => set({ selectedMonth: month }),

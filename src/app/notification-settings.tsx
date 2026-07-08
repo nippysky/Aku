@@ -33,6 +33,8 @@ import { useTheme } from '../theme';
 import { Palette } from '../theme/colors';
 import { Divider } from '../components/ui/Divider';
 import { useNotifPrefsStore } from '../store/notif-prefs.store';
+import { sendTestPush } from '../lib/api-client';
+import { useUIStore } from '../store/ui.store';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -162,8 +164,10 @@ export default function NotificationSettingsScreen() {
 
   const { billReminders, budgetAlerts, goalMilestones, dailyDigest, load, set: setPref, isLoaded } =
     useNotifPrefsStore();
+  const { showToast } = useUIStore();
 
-  const [permStatus, setPermStatus] = useState<PermissionStatus>('undetermined');
+  const [permStatus, setPermStatus]   = useState<PermissionStatus>('undetermined');
+  const [testSending, setTestSending] = useState(false);
 
   useEffect(() => {
     if (!isLoaded) load();
@@ -178,6 +182,19 @@ export default function NotificationSettingsScreen() {
     const r = await Notifications.requestPermissionsAsync();
     setPermStatus(r.granted ? 'granted' : !r.canAskAgain ? 'denied' : 'undetermined');
   }, []);
+
+  const handleTestPush = useCallback(async () => {
+    if (testSending) return;
+    setTestSending(true);
+    try {
+      const { sent } = await sendTestPush();
+      showToast('success', `Test notification sent to ${sent} device${sent === 1 ? '' : 's'}`);
+    } catch (e: any) {
+      showToast('error', e?.message ?? 'Test push failed');
+    } finally {
+      setTestSending(false);
+    }
+  }, [testSending, showToast]);
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
@@ -283,6 +300,29 @@ export default function NotificationSettingsScreen() {
             isLast
           />
         </View>
+
+        {/* DEV-only: test push notification */}
+        {__DEV__ && (
+          <Pressable
+            onPress={handleTestPush}
+            disabled={testSending}
+            style={[
+              styles.testPushBtn,
+              {
+                backgroundColor: colors.card,
+                borderRadius:     radius.lg,
+                borderWidth:      1,
+                borderColor:      colors.border,
+                opacity:          testSending ? 0.6 : 1,
+              },
+            ]}
+          >
+            <Bell size={16} color={colors.primary} strokeWidth={1.8} />
+            <Text style={[text.bodyMedium, { color: colors.text, flex: 1 }]}>
+              {testSending ? 'Sending…' : 'Send test push (Dev)'}
+            </Text>
+          </Pressable>
+        )}
       </ScrollView>
     </View>
   );
@@ -332,6 +372,15 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   group: {},
+  testPushBtn: {
+    flexDirection:     'row',
+    alignItems:        'center',
+    paddingVertical:   14,
+    paddingHorizontal: 14,
+    gap:               12,
+    marginTop:         20,
+    minHeight:         52,
+  },
   toggleRow: {
     flexDirection:     'row',
     alignItems:        'center',

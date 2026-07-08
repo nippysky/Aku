@@ -10,9 +10,10 @@
 import { Hono } from 'hono';
 import { eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { users } from '../db/schema.js';
+import { users, magicTokens } from '../db/schema.js';
 import { authMiddleware, type AuthContext } from '../middleware/auth.js';
 import { encryptDekForStorage, decryptDekFromStorage } from '../lib/server-crypto.js';
+import { notifyUser } from '../lib/ws-registry.js';
 
 const router = new Hono<{ Variables: AuthContext }>();
 
@@ -64,6 +65,9 @@ router.put('/me', async (c) => {
     .set({ name, updatedAt: new Date() })
     .where(eq(users.id, userId));
 
+  // Notify other devices so they pull the updated name
+  notifyUser(userId);
+
   return c.json({ success: true, name });
 });
 
@@ -99,6 +103,9 @@ router.put('/avatar-data', async (c) => {
     .set({ avatarData: avatarData ?? null, updatedAt: new Date() })
     .where(eq(users.id, userId));
 
+  // Notify other devices so they pull the updated avatar
+  notifyUser(userId);
+
   return c.json({ success: true });
 });
 
@@ -122,8 +129,10 @@ router.get('/dek', async (c) => {
     const dek = decryptDekFromStorage(user.encryptedDek);
     return c.json({ dek });
   } catch (err) {
-    console.error('[dek] Failed to decrypt DEK for user', userId, err);
-    return c.json({ error: 'Failed to decrypt DEK' }, 500);
+    // Decryption failed — most likely the master key was rotated (e.g. after .env loss).
+    // Treat this the same as "no DEK stored": the client will generate a fresh one.
+    console.warn('[dek] Failed to decrypt DEK for user', userId, '— returning null so client re-generates:', (err as Error).message);
+    return c.json({ dek: null });
   }
 });
 
@@ -159,6 +168,32 @@ router.post('/dek', async (c) => {
     .update(users)
     .set({ encryptedDek, updatedAt: new Date() })
     .where(eq(users.id, userId));
+
+  return c.json({ success: true });
+});
+
+// ─── DELETE /api/user/me ──────────────────────────────────────────────────────
+// Permanently deletes the user's account and ALL associated data.
+// PostgreSQL ON DELETE CASCADE handles: sessions, sync_records, push_tokens,
+// circles (owned), circle_members, notification_log, user_insights.
+// magic_tokens is keyed by email (not userId), so we delete it manually first.
+
+router.delete('/me', async (c) => {
+  const { sub: userId } = c.get('jwtPayload');
+
+  const [user] = await db
+    .select({ email: users.email })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+
+  if (!user) return c.json({ error: 'User not found' }, 404);
+
+  // Delete magic_tokens by email (no FK cascade from users)
+  await db.delete(magicTokens).where(eq(magicTokens.email, user.email));
+
+  // Delete user — PostgreSQL CASCADE wipes everything else
+  await db.delete(users).where(eq(users.id, userId));
 
   return c.json({ success: true });
 });

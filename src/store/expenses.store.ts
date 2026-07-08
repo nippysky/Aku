@@ -1,13 +1,14 @@
 import { create } from 'zustand';
 import { eq, and, gte, lte } from 'drizzle-orm';
 import { getDatabase, schema } from '../lib/database/client';
-import { format, startOfMonth, endOfMonth, parseISO } from 'date-fns';
+import { format } from 'date-fns';
 import { generateUUID } from '../lib/uuid';
 import type {
   Expense, ExpenseCreateInput, ExpenseUpdateInput,
   ExpenseSummary, ExpenseCategory,
 } from '../types';
 import { useBudgetsStore } from './budgets.store';
+import { triggerPush } from '../lib/sync/trigger';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
@@ -78,7 +79,8 @@ export const useExpensesStore = create<ExpensesState>()((set, get) => ({
   error:         null,
 
   load: async (userId) => {
-    set({ isLoading: true, error: null });
+    const hasData = get().expenses.length > 0 || get().allExpenses.length > 0;
+    if (!hasData) set({ isLoading: true, error: null });
     try {
       const db = getDatabase();
       const month = get().selectedMonth;
@@ -106,7 +108,8 @@ export const useExpensesStore = create<ExpensesState>()((set, get) => ({
   },
 
   loadAll: async (userId) => {
-    set({ isLoading: true, error: null });
+    const hasData = get().allExpenses.length > 0;
+    if (!hasData) set({ isLoading: true, error: null });
     try {
       const db = getDatabase();
       const rows = await db
@@ -176,6 +179,7 @@ export const useExpensesStore = create<ExpensesState>()((set, get) => ({
         .refreshCategory(userId, input.category)
         .catch(() => {});
 
+      triggerPush();
       return newExpense;
     } catch (e: any) {
       set({ error: e?.message ?? 'Failed to add expense' });
@@ -200,6 +204,7 @@ export const useExpensesStore = create<ExpensesState>()((set, get) => ({
     const allExpenses = get().allExpenses.map((e) => e.id === id ? { ...e, ...patch } : e);
     const summary = buildSummary(expenses, get().selectedMonth);
     set({ expenses, allExpenses, summary });
+    triggerPush();
   },
 
   remove: async (id) => {
@@ -209,6 +214,7 @@ export const useExpensesStore = create<ExpensesState>()((set, get) => ({
     const allExpenses = get().allExpenses.filter((e) => e.id !== id);
     const summary = buildSummary(expenses, get().selectedMonth);
     set({ expenses, allExpenses, summary });
+    triggerPush();
   },
 
   setMonth: (month) => {

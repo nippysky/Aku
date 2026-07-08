@@ -20,6 +20,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { BottomSheetTextInput } from '@gorhom/bottom-sheet';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -277,7 +278,7 @@ export function CreateCircleSheet({ isOpen, onClose, onSuccess }: CreateCircleSh
               },
             ]}
           >
-            <TextInput
+            <BottomSheetTextInput
               value={name}
               onChangeText={(v) => { setName(v); if (v.trim()) setNameError(''); }}
               placeholder="e.g. House Rent Fund"
@@ -312,7 +313,7 @@ export function CreateCircleSheet({ isOpen, onClose, onSuccess }: CreateCircleSh
               },
             ]}
           >
-            <TextInput
+            <BottomSheetTextInput
               value={description}
               onChangeText={setDescription}
               placeholder="What is this circle saving for?"
@@ -339,6 +340,7 @@ export function CreateCircleSheet({ isOpen, onClose, onSuccess }: CreateCircleSh
             label="Group goal amount (optional)"
             value={targetAmount}
             onChange={setTargetAmount}
+            asBottomSheetInput
           />
         </View>
 
@@ -363,6 +365,7 @@ export function CreateCircleSheet({ isOpen, onClose, onSuccess }: CreateCircleSh
             label="Per-member amount (optional)"
             value={perMember}
             onChange={setPerMember}
+            asBottomSheetInput
           />
           <Text style={[text.caption, { color: colors.textTertiary, marginTop: 6, marginLeft: 2 }]}>
             Leave blank to auto-split the group goal equally.

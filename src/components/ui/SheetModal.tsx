@@ -130,8 +130,9 @@ export function SheetModal({ visible, onClose, children }: SheetModalProps) {
       backdropComponent={renderBackdrop}
       backgroundStyle={{ backgroundColor: colors.card }}
       handleIndicatorStyle={{ backgroundColor: colors.border, width: 36 }}
-      keyboardBehavior="interactive"
+      keyboardBehavior="fillParent"
       keyboardBlurBehavior="restore"
+      android_keyboardInputMode="adjustResize"
     >
       <BottomSheetScrollView
         keyboardShouldPersistTaps="handled"

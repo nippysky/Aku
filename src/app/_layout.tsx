@@ -22,6 +22,9 @@ import { AppLoader } from '../components/ui/AppLoader';
 import { LightColors, DarkColors } from '../theme/colors';
 import { notificationService, useNotificationNavigation } from '../lib/notifications';
 import { registerPushToken } from '../lib/api-client';
+import { useSyncStore } from '../store/sync.store';
+import { wsClient } from '../lib/sync/ws-client';
+import * as Device from 'expo-device';
 
 // Prevent auto-hide while fonts + auth load
 SplashScreen.preventAutoHideAsync();
@@ -121,22 +124,46 @@ export default function RootLayout() {
     }
   }, [isLocked, user]);
 
-  // ── Clear badge when app comes to foreground ────────────────────────
+  // ── Foreground: clear badge + pull latest data from server ──────────
+  // When the app comes to foreground (user switches from device A to device B,
+  // or returns from background) we pull any changes made on other devices.
+  // bumpSyncVersion() inside pullAndMerge notifies tab screens to reload silently.
   useEffect(() => {
     const sub = AppState.addEventListener('change', (nextState) => {
       if (nextState === 'active') {
-        // Silently clear the red notification badge
+        // Clear the notification badge
         import('expo-notifications').then(({ setBadgeCountAsync }) => {
           setBadgeCountAsync(0).catch(() => {});
         });
+        // Pull delta from server — only fires when DEK is loaded (user unlocked)
+        const { dek, lastSyncAt } = useSyncStore.getState();
+        if (dek && user && !isLocked) {
+          import('../lib/sync/engine').then(({ pullAndMerge }) => {
+            pullAndMerge(lastSyncAt).catch(() => {});
+          });
+        }
       }
     });
     return () => sub.remove();
-  }, []);
+  }, [user, isLocked]);
+
+  // ── WebSocket — persistent real-time sync connection ────────────────
+  // Replaces the 30-second polling interval. The server pushes a 'sync'
+  // nudge to all connected devices whenever any device writes new data.
+  // AppState foreground trigger above acts as a fallback safety net.
+  useEffect(() => {
+    if (user && session && !isLocked) {
+      wsClient.connect();
+    } else {
+      wsClient.disconnect();
+    }
+  }, [user, session, isLocked]);
 
   // ── Push token registration ──────────────────────────────────────────
   // Register after the user is authenticated and unlocked, once per session.
+  // Skip entirely on simulators — push tokens require a physical device.
   useEffect(() => {
+    if (!Device.isDevice) return;
     if (!session || !user || isLocked || pushTokenRegistered.current) return;
     pushTokenRegistered.current = true;
 

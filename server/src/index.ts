@@ -10,6 +10,12 @@ import 'dotenv/config';  // Load .env before anything else
 
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
+import { WebSocketServer } from 'ws';
+import { verifyJWT, hashToken } from './lib/jwt.js';
+import { db } from './db/client.js';
+import { sessions } from './db/schema.js';
+import { and, eq, isNull, gt } from 'drizzle-orm';
+import { registerWs, connectionCount } from './lib/ws-registry.js';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 import { prettyJSON } from 'hono/pretty-json';
@@ -18,8 +24,7 @@ import authRouter          from './routes/auth.js';
 import userRouter          from './routes/user.js';
 import syncRouter          from './routes/sync.js';
 import notificationsRouter from './routes/notifications.js';
-import statementRouter     from './routes/statement.js';
-import receiptRouter       from './routes/receipt.js';
+import circlesRouter       from './routes/circles.js';
 
 import {
   globalRateLimit,
@@ -73,8 +78,7 @@ app.route('/api/auth',          authRouter);
 app.route('/api/user',          userRouter);
 app.route('/api/sync',          syncRouter);
 app.route('/api/notifications', notificationsRouter);
-app.route('/api/statement',     statementRouter);
-app.route('/api/receipt',       receiptRouter);
+app.route('/api/circles',       circlesRouter);
 
 // ── 404 ───────────────────────────────────────────────────────────────────────
 
@@ -91,10 +95,85 @@ app.onError((err, c) => {
 
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
 
-serve({ fetch: app.fetch, port: PORT }, (info) => {
+// ── HTTP server ───────────────────────────────────────────────────────────────
+
+const httpServer = serve({ fetch: app.fetch, port: PORT }, (info) => {
   console.log(`🚀 Akù API running on http://localhost:${info.port}`);
   console.log(`   NODE_ENV: ${process.env.NODE_ENV ?? 'development'}`);
   console.log(`   API_URL:  ${process.env.API_URL ?? '(not set)'}`);
+});
+
+// ── WebSocket server — real-time sync push ────────────────────────────────────
+// Mounted on the same HTTP server at path /api/sync/ws.
+// Auth: JWT passed as ?token=<jwt> query param (WSS encrypts the URL).
+// On push: sync route calls notifyUser(userId) → all connected devices for
+// that user receive { type: 'sync' } → client calls pullAndMerge immediately.
+
+const wss = new WebSocketServer({ server: httpServer as never, path: '/api/sync/ws' });
+
+wss.on('connection', async (ws, req) => {
+  // ── Extract + verify token from query string ──────────────────────────────
+  let userId: string;
+  try {
+    const url = new URL(req.url ?? '', 'ws://localhost');
+    const token = url.searchParams.get('token');
+    if (!token) { ws.close(1008, 'Missing token'); return; }
+
+    const jwtPayload = await verifyJWT(token);
+
+    // Verify the session still exists and hasn't been revoked
+    const tokenHash = hashToken(token);
+    const [session] = await db
+      .select()
+      .from(sessions)
+      .where(
+        and(
+          eq(sessions.tokenHash, tokenHash),
+          isNull(sessions.revokedAt),
+          gt(sessions.expiresAt, new Date()),
+        ),
+      )
+      .limit(1);
+
+    if (!session) { ws.close(1008, 'Session revoked'); return; }
+
+    userId = jwtPayload.sub;
+  } catch {
+    ws.close(1008, 'Invalid token');
+    return;
+  }
+
+  // ── Register connection in the in-memory registry ─────────────────────────
+  const unregister = registerWs(userId, () => {
+    if (ws.readyState === 1 /* OPEN */) {
+      ws.send(JSON.stringify({ type: 'sync' }));
+    }
+  });
+
+  console.log(`[ws] connect  userId=${userId}  total=${connectionCount()}`);
+
+  // ── Message handling: respond to client pings ─────────────────────────────
+  ws.on('message', (data) => {
+    try {
+      const msg = JSON.parse(data.toString()) as { type: string };
+      if (msg.type === 'ping') {
+        ws.send(JSON.stringify({ type: 'pong' }));
+      }
+    } catch { /* ignore malformed frames */ }
+  });
+
+  // ── Cleanup on disconnect ─────────────────────────────────────────────────
+  ws.on('close', () => {
+    unregister();
+    console.log(`[ws] close    userId=${userId}  total=${connectionCount()}`);
+  });
+
+  ws.on('error', () => {
+    unregister();
+  });
+
+  // Confirm connection to the client
+  ws.send(JSON.stringify({ type: 'connected' }));
 });
 
 export default app;

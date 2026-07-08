@@ -11,7 +11,7 @@ import { createHash, randomBytes } from 'crypto';
 import { eq, and, isNull, gt } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { users, magicTokens, sessions } from '../db/schema.js';
-import { signJWT, verifyJWT, hashToken } from '../lib/jwt.js';
+import { signJWT, hashToken } from '../lib/jwt.js';
 import { sendMagicLinkEmail } from '../lib/email.js';
 import { authMiddleware, type AuthContext } from '../middleware/auth.js';
 
@@ -81,10 +81,15 @@ router.post('/magic-link', async (c) => {
   const rawToken  = randomBytes(32).toString('hex');
   const tokenHash = createHash('sha256').update(rawToken).digest('hex');
 
+  // Generate a 6-digit OTP as an alternative to clicking the link.
+  // This is especially helpful when the email arrives on a different device.
+  const otpCode = String(Math.floor(100000 + Math.random() * 900000));
+
   await db.insert(magicTokens).values({
     id:        generateId(),
     email,
     tokenHash,
+    otpCode,
     expiresAt: getExpiryDate(),
     isNew:     isNewUser,  // client uses this to skip onboarding for returning users
   });
@@ -94,7 +99,7 @@ router.post('/magic-link', async (c) => {
   const verifyUrl = `${apiUrl}/api/auth/magic-link/verify?token=${rawToken}`;
 
   try {
-    await sendMagicLinkEmail({ to: email, name: user.name, url: verifyUrl });
+    await sendMagicLinkEmail({ to: email, name: user.name, url: verifyUrl, otpCode });
   } catch (err) {
     console.error('[auth] Failed to send magic link email:', err);
     return c.json({ error: 'Failed to send email. Please try again.' }, 500);
@@ -191,6 +196,90 @@ router.get('/magic-link/verify', async (c) => {
   // Return an HTML page that auto-redirects to the deep link.
   // If the app isn't installed the page shows a fallback message.
   return c.html(redirectPage(deepLink));
+});
+
+// ─── POST /api/auth/magic-link/verify-otp ────────────────────────────────────
+// Alternative verification for cross-device use: user types the 6-digit OTP
+// that was included in the magic link email instead of tapping the link.
+// Returns the same JWT + user payload as the link-based verify.
+
+router.post('/magic-link/verify-otp', async (c) => {
+  let body: { email?: string; otp?: string };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: 'Invalid JSON body' }, 400);
+  }
+
+  const email = body.email?.trim().toLowerCase();
+  const otp   = body.otp?.trim();
+
+  if (!email || !otp) {
+    return c.json({ error: 'email and otp are required' }, 400);
+  }
+
+  // Find the most-recent unused, non-expired token for this email + OTP
+  const [record] = await db
+    .select()
+    .from(magicTokens)
+    .where(
+      and(
+        eq(magicTokens.email, email),
+        eq(magicTokens.otpCode, otp),
+        isNull(magicTokens.usedAt),
+        gt(magicTokens.expiresAt, new Date()),
+      ),
+    )
+    .limit(1);
+
+  if (!record) {
+    return c.json({ error: 'Invalid or expired code. Please request a new sign-in link.' }, 400);
+  }
+
+  // Mark token as used
+  await db
+    .update(magicTokens)
+    .set({ usedAt: new Date() })
+    .where(eq(magicTokens.id, record.id));
+
+  const [user] = await db
+    .select()
+    .from(users)
+    .where(eq(users.email, record.email))
+    .limit(1);
+
+  if (!user) {
+    return c.json({ error: 'User not found. Please sign up again.' }, 404);
+  }
+
+  const sessionId     = generateId();
+  const sessionExpiry = getSessionExpiry();
+
+  const jwt = await signJWT({
+    sub:       user.id,
+    email:     user.email,
+    name:      user.name,
+    sessionId,
+  });
+
+  await db.insert(sessions).values({
+    id:        sessionId,
+    userId:    user.id,
+    tokenHash: hashToken(jwt),
+    expiresAt: sessionExpiry,
+  });
+
+  return c.json({
+    jwt,
+    isNew: record.isNew,
+    user:  {
+      id:         user.id,
+      name:       user.name,
+      email:      user.email,
+      avatarUrl:  user.avatarUrl,
+      avatarData: user.avatarData,
+    },
+  });
 });
 
 // ─── GET /api/auth/session ────────────────────────────────────────────────────

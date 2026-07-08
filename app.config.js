@@ -16,6 +16,7 @@ module.exports = {
   userInterfaceStyle: 'automatic',
   ios: {
     bundleIdentifier: 'com.nippysky.aku',
+    googleServicesFile: './GoogleService-Info.plist',
     supportsTablet: false,
     alternateIcons: {
       'aku-midnight': { image: './assets/images/icons/icon-midnight.png' },
@@ -38,6 +39,7 @@ module.exports = {
   },
   android: {
     package: 'com.nippysky.aku',
+    googleServicesFile: './google-services.json',
     adaptiveIcon: {
       foregroundImage: './assets/images/android-icon-foreground.png',
       backgroundImage: './assets/images/android-icon-background.png',

@@ -17,6 +17,7 @@ import { db } from '../db/client.js';
 import { syncRecords } from '../db/schema.js';
 import { authMiddleware } from '../middleware/auth.js';
 import type { AuthContext } from '../middleware/auth.js';
+import { notifyUser } from '../lib/ws-registry.js';
 
 // ─── Validation helpers ───────────────────────────────────────────────────────
 
@@ -36,6 +37,12 @@ function isValidUUID(s: unknown): s is string {
     typeof s === 'string' &&
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
   );
+}
+
+// Sync record IDs are prefixed strings like "exp_<uuid>", "bill_<uuid>" etc.
+// They are stable client-generated identifiers, not required to be bare UUIDs.
+function isValidSyncId(s: unknown): s is string {
+  return typeof s === 'string' && s.length > 0 && s.length <= 200;
 }
 
 // ─── Router ───────────────────────────────────────────────────────────────────
@@ -82,7 +89,7 @@ syncRouter.post('/push', async (c) => {
 
   for (const r of body.records as PushRecord[]) {
     // Validate each record strictly
-    if (!isValidUUID(r.id)) {
+    if (!isValidSyncId(r.id)) {
       return c.json({ error: `Invalid record id: ${r.id}` }, 400);
     }
     if (!VALID_ENTITY_TYPES.has(r.entityType)) {
@@ -128,6 +135,9 @@ syncRouter.post('/push', async (c) => {
         },
       });
   }
+
+  // Notify all OTHER connected devices for this user via WebSocket
+  notifyUser(userId);
 
   return c.json({ pushed: toUpsert.length, serverUpdatedAt: now.toISOString() });
 });

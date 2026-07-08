@@ -59,9 +59,10 @@ async function apiFetch<T>(path: string, opts: FetchOptions = {}): Promise<T> {
   const { method = 'GET', body, noAuth = false } = opts;
 
   const headers: Record<string, string> = {};
+  let token: string | null = null;
 
   if (!noAuth) {
-    const token = await getToken();
+    token = await getToken();
     if (token) headers['Authorization'] = `Bearer ${token}`;
   }
 
@@ -81,9 +82,14 @@ async function apiFetch<T>(path: string, opts: FetchOptions = {}): Promise<T> {
   });
 
   if (res.status === 401) {
-    // Lazily import to avoid circular dependency
-    const { useAuthStore } = require('../store/auth.store');
-    useAuthStore.getState().signOut();
+    // Only auto-signout if we actually sent a token that the server rejected.
+    // Without this guard, revokeSession() (called inside signOut) would get a
+    // 401 back (no token in SecureStore), call signOut() again, and cascade
+    // into hundreds of recursive DELETE /api/auth/session requests.
+    if (token) {
+      const { useAuthStore } = require('../store/auth.store');
+      useAuthStore.getState().signOut();
+    }
     throw new ApiError(401, 'Session expired. Please sign in again.');
   }
 
@@ -127,6 +133,21 @@ export async function requestMagicLink(email: string, name?: string): Promise<vo
 }
 
 /**
+ * Verify the 6-digit OTP that was included in the magic link email.
+ * Use this when the email arrives on a different device — the user types
+ * the code on the original device instead of tapping the link.
+ */
+export async function verifyMagicOTP(
+  email: string,
+  otp:   string,
+): Promise<{ jwt: string; user: UserProfile; isNew: boolean }> {
+  return apiFetch<{ jwt: string; user: UserProfile; isNew: boolean }>(
+    '/api/auth/magic-link/verify-otp',
+    { method: 'POST', body: { email, otp }, noAuth: true },
+  );
+}
+
+/**
  * Validate the stored JWT on app startup. Returns the user profile if the
  * session is still valid, or null if it has expired / been revoked.
  */
@@ -159,6 +180,14 @@ export async function getMe(): Promise<UserProfile> {
 
 export async function updateName(name: string): Promise<void> {
   await apiFetch('/api/user/me', { method: 'PUT', body: { name } });
+}
+
+/**
+ * Permanently delete the authenticated user's account and all data.
+ * Throws on network error so the caller can surface it before wiping local state.
+ */
+export async function deleteAccount(): Promise<void> {
+  await apiFetch('/api/user/me', { method: 'DELETE' });
 }
 
 /**
@@ -203,14 +232,17 @@ export async function uploadDek(dekHex: string): Promise<void> {
 /**
  * Register a device's Expo push token with the server.
  * Safe to call on every app launch — the server upserts.
+ * Automatically includes the device's IANA timezone so the server can deliver
+ * notifications at 7 pm the user's local time (Tier 3 smart timing).
  */
 export async function registerPushToken(
   token: string,
   platform: 'ios' | 'android',
 ): Promise<void> {
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone ?? null;
   await apiFetch('/api/notifications/token', {
     method: 'POST',
-    body:   { token, platform },
+    body:   { token, platform, timezone },
   });
 }
 
@@ -227,6 +259,14 @@ export async function deregisterPushToken(token: string): Promise<void> {
   } catch {
     // Best-effort — token will be pruned by DeviceNotRegistered cleanup anyway
   }
+}
+
+/**
+ * Send a test push notification to all of the authenticated user's own devices.
+ * Use this from DEV builds or admin tools to verify the push pipeline.
+ */
+export async function sendTestPush(): Promise<{ sent: number }> {
+  return apiFetch<{ sent: number }>('/api/notifications/test', { method: 'POST' });
 }
 
 /**
@@ -251,39 +291,94 @@ export async function sendCircleNotification(
   }
 }
 
-// ─── Statement parse endpoint ─────────────────────────────────────────────────
+/**
+ * Report aggregated financial insight signals to the server after each sync.
+ * The server uses these to craft personalised push notifications.
+ *
+ * All values are aggregated/relative — no raw financial amounts ever leave the
+ * device. Budget utilization is a 0.0–2.0+ ratio; amounts stay on device.
+ *
+ * Best-effort, fire-and-forget: call without awaiting.
+ */
+export type UserInsightPayload = {
+  /** Highest budget utilization ratio (0.0–2.0+). null = no budgets. */
+  budgetUtilization:   number | null;
+  /** True if any budget is ≥ 100 % spent this period. */
+  hasOverBudget:       boolean;
+  /** Consecutive days with at least one expense logged. */
+  spendingStreak:      number;
+  /** % change in total spending vs the previous 7-day window. null = < 2 weeks of data. */
+  weeklyChangePct:     number | null;
+  /** Total expenses logged this calendar month. */
+  monthlyExpenseCount: number;
+  /** Top expense category by total amount this month. null = no expenses. */
+  topCategory:         string | null;
+  /** Total non-completed savings goals. */
+  totalGoalsCount:     number;
+  /** Goals pacing on track (saved ≥ 80 % of expected given deadline). */
+  goalsOnTrack:        number;
+  /** True if any active goals exist. */
+  hasActiveGoals:      boolean;
+};
 
-export type ServerTransaction = {
-  date:        string;
-  description: string;
-  amount:      number;
-  type:        'credit' | 'debit';
+export async function reportInsight(payload: UserInsightPayload): Promise<void> {
+  await apiFetch('/api/notifications/insight', {
+    method: 'POST',
+    body:   payload,
+  });
+}
+
+// ─── Circle endpoints ─────────────────────────────────────────────────────────
+
+/**
+ * Register a newly created circle with the server so other users can find it
+ * by invite code. Call fire-and-forget after creating locally.
+ */
+export async function registerCircle(
+  id:         string,
+  name:       string,
+  emoji:      string,
+  inviteCode: string,
+): Promise<void> {
+  await apiFetch('/api/circles', {
+    method: 'POST',
+    body:   { id, name, emoji, inviteCode },
+  });
+}
+
+export type CircleJoinResult = {
+  circleId:   string;
+  name:       string;
+  emoji:      string;
+  inviteCode: string;
+  ownerId:    string;
+  ownerName:  string | null;
 };
 
 /**
- * Upload a base64-encoded PDF to the server for text extraction and
- * best-effort transaction parsing. Returns up to 200 transactions.
+ * Join a circle by its 8-character invite code.
+ * Returns circle metadata so the client can seed its local SQLite records.
  */
-export async function parseStatementPDF(pdfBase64: string): Promise<ServerTransaction[]> {
-  const res = await apiFetch<{ transactions: ServerTransaction[] }>(
-    '/api/statement/parse',
-    { method: 'POST', body: { pdfBase64 } },
-  );
-  return res.transactions;
+export async function joinCircleByCode(code: string): Promise<CircleJoinResult> {
+  return apiFetch<CircleJoinResult>('/api/circles/join', {
+    method: 'POST',
+    body:   { code },
+  });
 }
 
-// ─── Receipt OCR endpoint ─────────────────────────────────────────────────────
+export type ServerCircle = {
+  id:         string;
+  name:       string;
+  emoji:      string;
+  inviteCode: string;
+  ownerId:    string;
+  role:       string;
+};
 
-/**
- * Send a base64-encoded receipt image to the server for OCR text extraction.
- * Returns the detected total amount in kobo (×100), or null if undetected.
- */
-export async function scanReceiptImage(imageBase64: string): Promise<number | null> {
-  const res = await apiFetch<{ amount: number | null }>(
-    '/api/receipt/scan',
-    { method: 'POST', body: { imageBase64 } },
-  );
-  return res.amount;
+/** Fetch all circles the authenticated user belongs to from the server. */
+export async function fetchUserCircles(): Promise<ServerCircle[]> {
+  const res = await apiFetch<{ circles: ServerCircle[] }>('/api/circles');
+  return res.circles;
 }
 
 // ─── Sync endpoints ───────────────────────────────────────────────────────────

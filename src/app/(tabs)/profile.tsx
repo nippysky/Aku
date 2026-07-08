@@ -55,8 +55,6 @@ import { useExpensesStore } from '../../store/expenses.store';
 import { useBudgetsStore } from '../../store/budgets.store';
 import { useGoalsStore } from '../../store/goals.store';
 import { useIncomeStore } from '../../store/income.store';
-import { getDatabase, schema } from '../../lib/database/client';
-import { eq } from 'drizzle-orm';
 import { UserAvatar } from '../../components/ui/UserAvatar';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
@@ -232,13 +230,13 @@ export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
 
-  const { user, updateUser, saveAvatarData, biometric, setupBiometric, disableBiometric, signOut } = useAuthStore();
+  const { user, updateUser, saveAvatarData, biometric, setupBiometric, disableBiometric, signOut, deleteAccount } = useAuthStore();
   const { circles, activeCircle, load: loadCircles } = useCirclesStore();
   const { showToast, currency, themeMode, setThemeMode } = useUIStore();
-  const { bills, load: loadBills }                   = useBillsStore();
-  const { expenses, load: loadExpenses }             = useExpensesStore();
-  const { budgets, load: loadBudgets }               = useBudgetsStore();
-  const { goals, load: loadGoals }                   = useGoalsStore();
+  const { bills }    = useBillsStore();
+  const { expenses } = useExpensesStore();
+  const { budgets }  = useBudgetsStore();
+  const { goals }    = useGoalsStore();
   const { allRecords: incomeRecords, loadAll: loadAllInc } = useIncomeStore();
 
   // ── Theme picker sheet ────────────────────────────────────────────────
@@ -312,6 +310,7 @@ export default function ProfileScreen() {
 
   // ── Create Circle sheet ───────────────────────────────────────────────
   const [showCreateCircle, setShowCreateCircle] = useState(false);
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
 
   // ── Active app icon ───────────────────────────────────────────────────
   const [activeIconId, setActiveIconId] = useState<string>('default');
@@ -361,42 +360,46 @@ export default function ProfileScreen() {
     );
   }, [signOut]);
 
-  // ── Clear all data ────────────────────────────────────────────────────
-  const handleClearData = useCallback(() => {
+  // ── Delete Account ────────────────────────────────────────────────────
+  const handleDeleteAccount = useCallback(() => {
     Alert.alert(
-      'Clear All Data',
-      'This will permanently delete all your bills, expenses, budgets, and goals. This cannot be undone.',
+      'Delete Account',
+      'This will permanently delete your Akù account and everything in it — expenses, bills, goals, budgets, income, and circles. This cannot be undone.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Clear Everything',
+          text: 'Delete My Account',
           style: 'destructive',
-          onPress: async () => {
-            if (!user) return;
-            try {
-              const db = getDatabase();
-              await db.delete(schema.goalContributions).where(eq(schema.goalContributions.userId, user.id));
-              await db.delete(schema.goals).where(eq(schema.goals.userId, user.id));
-              await db.delete(schema.expenses).where(eq(schema.expenses.userId, user.id));
-              await db.delete(schema.bills).where(eq(schema.bills.userId, user.id));
-              await db.delete(schema.budgets).where(eq(schema.budgets.userId, user.id));
-              await db.delete(schema.income).where(eq(schema.income.userId, user.id));
-              await Promise.all([
-                loadBills(user.id),
-                loadExpenses(user.id),
-                loadBudgets(user.id),
-                loadGoals(user.id),
-                loadAllInc(user.id),
-              ]);
-              showToast('success', 'All data cleared');
-            } catch {
-              showToast('error', 'Failed to clear data');
-            }
+          onPress: () => {
+            // Second confirmation — no going back after this
+            Alert.alert(
+              'Are you absolutely sure?',
+              'Your account will be gone forever. There is no way to recover it.',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Yes, Delete Everything',
+                  style: 'destructive',
+                  onPress: async () => {
+                    setIsDeletingAccount(true);
+                    try {
+                      await deleteAccount();
+                    } catch {
+                      setIsDeletingAccount(false);
+                      Alert.alert('Error', 'Could not delete your account. Please check your connection and try again.');
+                    }
+                    // deleteAccount() resets auth state → nav guard routes to onboarding
+                    // No need to setIsDeletingAccount(false) — component will unmount
+                  },
+                },
+              ],
+            );
           },
         },
       ],
     );
-  }, [user, showToast, loadBills, loadExpenses, loadBudgets, loadGoals, loadAllInc]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deleteAccount]);
 
   // ── Profile avatar ────────────────────────────────────────────────────
   // Flow: pick → resize 250×250 JPEG → read as base64 → save to SQLite
@@ -424,11 +427,22 @@ export default function ProfileScreen() {
 
       if (result.canceled || !result.assets[0]) return;
 
-      // Resize to 250×250, compress, and get base64 in one step — no FileSystem read needed
+      const asset = result.assets[0];
+      const { width, height } = asset;
+
+      // Step 1: center-crop to a square so avatars are never distorted
+      const size    = Math.min(width, height);
+      const originX = Math.floor((width  - size) / 2);
+      const originY = Math.floor((height - size) / 2);
+
+      // Step 2: crop → resize to 260×260 → compress to JPEG
       const manipulated = await ImageManipulator.manipulateAsync(
-        result.assets[0].uri,
-        [{ resize: { width: 250, height: 250 } }],
-        { compress: 0.75, format: ImageManipulator.SaveFormat.JPEG, base64: true },
+        asset.uri,
+        [
+          { crop: { originX, originY, width: size, height: size } },
+          { resize: { width: 260, height: 260 } },
+        ],
+        { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG, base64: true },
       );
 
       if (!manipulated.base64) throw new Error('Image processing failed');
@@ -1091,8 +1105,8 @@ export default function ProfileScreen() {
           />
           <SettingsRow
             icon={Trash2}
-            label="Clear all data"
-            onPress={handleClearData}
+            label={isDeletingAccount ? 'Deleting account…' : 'Delete Account'}
+            onPress={isDeletingAccount ? undefined : handleDeleteAccount}
             isDestructive
             isLast
           />

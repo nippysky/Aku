@@ -2,10 +2,12 @@
  * Sign In Screen — for returning users on a new device or after reinstall.
  *
  * Flow:
- *   Enter email → magic link sent → "Check your inbox" state
- *   User taps link in email → auth-callback.tsx → lock screen (/(auth))
+ *   Enter email → email sent (magic link + 6-digit code) → "Check your inbox" state
+ *   User either:
+ *     (a) taps link in email → auth-callback.tsx → lock screen
+ *     (b) enters 6-digit code inline → verifyMagicOTP → handleAuthCallback → lock screen
  */
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -14,6 +16,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
@@ -26,6 +29,7 @@ import { ChevronLeft, Mail } from 'lucide-react-native';
 import { Button, Input } from '../components/ui';
 import { useTheme } from '../theme';
 import { useAuthStore } from '../store/auth.store';
+import { verifyMagicOTP } from '../lib/api-client';
 
 // ─── Schema ────────────────────────────────────────────────────────────────
 
@@ -44,7 +48,7 @@ export default function SignInScreen() {
   const { colors, spacing, text, layout } = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { signIn, isLoading } = useAuthStore();
+  const { signIn, handleAuthCallback, isLoading } = useAuthStore();
 
   const [step, setStep]           = useState<'input' | 'sent'>('input');
   const [sentEmail, setSentEmail] = useState('');
@@ -52,10 +56,15 @@ export default function SignInScreen() {
   const [resending, setResending] = useState(false);
   const [resent, setResent]       = useState(false);
 
+  // OTP inline entry
+  const [otp, setOtp]           = useState('');
+  const [otpLoading, setOtpLoading] = useState(false);
+  const [otpError, setOtpError] = useState<string | null>(null);
+  const otpRef = useRef<TextInput>(null);
+
   const {
     control,
     handleSubmit,
-    getValues,
     formState: { errors, isValid },
   } = useForm<FormValues>({
     resolver:      zodResolver(schema),
@@ -69,6 +78,8 @@ export default function SignInScreen() {
     try {
       await signIn(normalised);
       setSentEmail(normalised);
+      setOtp('');
+      setOtpError(null);
       setStep('sent');
     } catch (err) {
       setSendError(err instanceof Error ? err.message : 'Could not send email. Please try again.');
@@ -79,6 +90,8 @@ export default function SignInScreen() {
     if (resending) return;
     setResending(true);
     setSendError(null);
+    setOtpError(null);
+    setOtp('');
     try {
       await signIn(sentEmail);
       setResent(true);
@@ -90,92 +103,176 @@ export default function SignInScreen() {
     }
   }, [resending, sentEmail, signIn]);
 
+  const handleOtpChange = useCallback(async (value: string) => {
+    const digits = value.replace(/\D/g, '').slice(0, 6);
+    setOtp(digits);
+    setOtpError(null);
+
+    if (digits.length === 6) {
+      setOtpLoading(true);
+      try {
+        const { jwt, user: profile, isNew } = await verifyMagicOTP(sentEmail, digits);
+        await handleAuthCallback(jwt, profile);
+        // Mirror auth-callback.tsx routing:
+        // sign-in screen is only reachable when hasOnboarded = false (new device / reinstall)
+        if (isNew) {
+          router.replace('/(onboarding)/pin-setup');
+        } else {
+          router.replace('/(onboarding)/pin-setup?returning=1');
+        }
+      } catch (err) {
+        setOtpError(err instanceof Error ? err.message : 'Invalid code. Please try again.');
+        setOtp('');
+        setTimeout(() => otpRef.current?.focus(), 100);
+      } finally {
+        setOtpLoading(false);
+      }
+    }
+  }, [sentEmail, handleAuthCallback]);
+
   // ── "Check your inbox" state ──────────────────────────────────────────────
 
   if (step === 'sent') {
     return (
-      <View
-        style={[
-          styles.container,
-          {
-            backgroundColor:   colors.background,
-            paddingTop:        insets.top + spacing[2],
-            paddingBottom:     Math.max(insets.bottom, spacing[6]) + spacing[4],
-            paddingHorizontal: layout.screenPadding,
-          },
-        ]}
+      <KeyboardAvoidingView
+        style={{ flex: 1, backgroundColor: colors.background }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        {/* Back */}
-        <Pressable
-          onPress={() => setStep('input')}
-          style={styles.backBtn}
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
+        <ScrollView
+          contentContainerStyle={{ flexGrow: 1 }}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
         >
-          <ChevronLeft size={22} color={colors.textSecondary} strokeWidth={2} />
-        </Pressable>
-
-        {/* Content */}
-        <View style={styles.content}>
-          <Animated.View entering={FadeInDown.delay(60).duration(500)} style={styles.iconWrap}>
-            <Mail size={44} color={colors.primary} strokeWidth={1.4} />
-          </Animated.View>
-
-          <Animated.View entering={FadeInDown.delay(140).duration(500)}>
-            <Text style={[text.onboardingTitle, { color: colors.text, marginTop: spacing[6] }]}>
-              Check your{'\n'}inbox.
-            </Text>
-          </Animated.View>
-
-          <Animated.View entering={FadeInDown.delay(220).duration(500)}>
-            <Text style={[text.body, { color: colors.textSecondary, marginTop: spacing[3] }]}>
-              We sent a sign-in link to{' '}
-              <Text style={{ color: colors.primary, fontFamily: 'PlusJakartaSans_500Medium' }}>
-                {sentEmail}
-              </Text>
-              .{'\n'}Tap it to open the app and sign in.
-            </Text>
-          </Animated.View>
-
-          <Animated.View
-            entering={FadeInDown.delay(300).duration(500)}
-            style={[styles.spinnerRow, { marginTop: spacing[8] }]}
+          <View
+            style={[
+              styles.container,
+              {
+                backgroundColor:   colors.background,
+                paddingTop:        insets.top + spacing[2],
+                paddingBottom:     Math.max(insets.bottom, spacing[6]) + spacing[4],
+                paddingHorizontal: layout.screenPadding,
+              },
+            ]}
           >
-            <ActivityIndicator size="small" color={colors.textTertiary} />
-            <Text style={[text.bodySm, { color: colors.textTertiary, marginLeft: spacing[2] }]}>
-              Waiting for you to tap the link…
-            </Text>
-          </Animated.View>
-        </View>
+            {/* Back */}
+            <Pressable
+              onPress={() => setStep('input')}
+              style={styles.backBtn}
+              accessibilityRole="button"
+              accessibilityLabel="Go back"
+            >
+              <ChevronLeft size={22} color={colors.textSecondary} strokeWidth={2} />
+            </Pressable>
 
-        {/* Bottom actions */}
-        <Animated.View entering={FadeInUp.delay(380).duration(500)} style={styles.bottomActions}>
-          {sendError ? (
-            <Text style={[text.bodySm, { color: colors.danger, textAlign: 'center' }]}>
-              {sendError}
-            </Text>
-          ) : null}
-          <Button
-            label={resending ? 'Sending…' : resent ? 'Email sent!' : 'Resend email'}
-            variant="secondary"
-            size="lg"
-            fullWidth
-            loading={resending}
-            disabled={resending}
-            onPress={handleResend}
-          />
-          <Pressable
-            onPress={() => setStep('input')}
-            accessibilityRole="button"
-            style={styles.changeEmailLink}
-          >
-            <Text style={[text.bodySm, { color: colors.textSecondary }]}>
-              Wrong email?{' '}
-              <Text style={{ color: colors.primary }}>Change it</Text>
-            </Text>
-          </Pressable>
-        </Animated.View>
-      </View>
+            {/* Content */}
+            <View style={styles.content}>
+              <Animated.View entering={FadeInDown.delay(60).duration(500)} style={styles.iconWrap}>
+                <Mail size={44} color={colors.primary} strokeWidth={1.4} />
+              </Animated.View>
+
+              <Animated.View entering={FadeInDown.delay(140).duration(500)}>
+                <Text style={[text.onboardingTitle, { color: colors.text, marginTop: spacing[6] }]}>
+                  Check your{'\n'}inbox.
+                </Text>
+              </Animated.View>
+
+              <Animated.View entering={FadeInDown.delay(220).duration(500)}>
+                <Text style={[text.body, { color: colors.textSecondary, marginTop: spacing[3] }]}>
+                  We sent a sign-in link and a{' '}
+                  <Text style={{ color: colors.text, fontFamily: 'PlusJakartaSans_500Medium' }}>
+                    6-digit code
+                  </Text>{' '}
+                  to{' '}
+                  <Text style={{ color: colors.primary, fontFamily: 'PlusJakartaSans_500Medium' }}>
+                    {sentEmail}
+                  </Text>
+                  .
+                </Text>
+              </Animated.View>
+
+              {/* OTP entry */}
+              <Animated.View
+                entering={FadeInDown.delay(300).duration(500)}
+                style={{ marginTop: spacing[8] }}
+              >
+                <Text style={[text.label, { color: colors.textSecondary, marginBottom: spacing[3] }]}>
+                  Enter 6-digit code
+                </Text>
+                <TextInput
+                  ref={otpRef}
+                  value={otp}
+                  onChangeText={handleOtpChange}
+                  keyboardType="number-pad"
+                  maxLength={6}
+                  textAlign="center"
+                  editable={!otpLoading}
+                  placeholder="——————"
+                  placeholderTextColor={colors.border}
+                  style={[
+                    styles.otpInput,
+                    {
+                      backgroundColor: colors.backgroundSecondary,
+                      borderColor:     otpError ? colors.danger : otp.length > 0 ? colors.primary : colors.border,
+                      color:           colors.text,
+                    },
+                  ]}
+                />
+                {otpLoading ? (
+                  <View style={[styles.otpFeedbackRow, { marginTop: spacing[3] }]}>
+                    <ActivityIndicator size="small" color={colors.primary} />
+                    <Text style={[text.bodySm, { color: colors.textSecondary, marginLeft: spacing[2] }]}>
+                      Verifying…
+                    </Text>
+                  </View>
+                ) : otpError ? (
+                  <Text style={[text.bodySm, { color: colors.danger, marginTop: spacing[2] }]}>
+                    {otpError}
+                  </Text>
+                ) : null}
+              </Animated.View>
+
+              <Animated.View
+                entering={FadeInDown.delay(380).duration(500)}
+                style={[styles.dividerRow, { marginTop: spacing[8] }]}
+              >
+                <View style={[styles.dividerLine, { backgroundColor: colors.border }]} />
+                <Text style={[text.caption, { color: colors.textTertiary, marginHorizontal: spacing[3] }]}>
+                  or tap the link in the email
+                </Text>
+                <View style={[styles.dividerLine, { backgroundColor: colors.border }]} />
+              </Animated.View>
+            </View>
+
+            {/* Bottom actions */}
+            <Animated.View entering={FadeInUp.delay(440).duration(500)} style={styles.bottomActions}>
+              {sendError ? (
+                <Text style={[text.bodySm, { color: colors.danger, textAlign: 'center' }]}>
+                  {sendError}
+                </Text>
+              ) : null}
+              <Button
+                label={resending ? 'Sending…' : resent ? 'Email sent!' : 'Resend email'}
+                variant="secondary"
+                size="lg"
+                fullWidth
+                loading={resending}
+                disabled={resending || otpLoading}
+                onPress={handleResend}
+              />
+              <Pressable
+                onPress={() => setStep('input')}
+                accessibilityRole="button"
+                style={styles.changeEmailLink}
+              >
+                <Text style={[text.bodySm, { color: colors.textSecondary }]}>
+                  Wrong email?{' '}
+                  <Text style={{ color: colors.primary }}>Change it</Text>
+                </Text>
+              </Pressable>
+            </Animated.View>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
     );
   }
 
@@ -226,7 +323,7 @@ export default function SignInScreen() {
 
             <Animated.View entering={FadeInDown.delay(200).duration(500)}>
               <Text style={[text.body, { color: colors.textSecondary, marginTop: spacing[3] }]}>
-                Enter your email and we'll send you a sign-in link. No password needed.
+                Enter your email and we'll send you a sign-in link and a 6-digit code. No password needed.
               </Text>
             </Animated.View>
 
@@ -268,7 +365,7 @@ export default function SignInScreen() {
               </Text>
             ) : null}
             <Button
-              label="Send sign-in link"
+              label="Send sign-in email"
               variant="primary"
               size="lg"
               fullWidth
@@ -299,16 +396,32 @@ const styles = StyleSheet.create({
     marginBottom:    8,
   },
   content: {
-    flex:          1,
+    flex:           1,
     justifyContent: 'center',
     paddingBottom:  24,
   },
   iconWrap: {
     alignSelf: 'flex-start',
   },
-  spinnerRow: {
+  otpInput: {
+    height:       64,
+    borderWidth:  1.5,
+    borderRadius: 14,
+    fontSize:     28,
+    letterSpacing: 10,
+    fontFamily:   'PlusJakartaSans_600SemiBold',
+  },
+  otpFeedbackRow: {
     flexDirection: 'row',
     alignItems:    'center',
+  },
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems:    'center',
+  },
+  dividerLine: {
+    flex:   1,
+    height: 1,
   },
   bottomActions: {
     gap:        16,

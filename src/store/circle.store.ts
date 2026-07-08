@@ -427,7 +427,7 @@ export const useCircleStore = create<CircleState>()((set, get) => ({
             recipientIds,
             'New contribution 💰',
             `${contributorName} logged ${fmt(amount)} — awaiting verification.`,
-            { screen: 'circle', circleId },
+            { type: 'circle_event', screen: 'circle', circleId },
           ).catch(() => {});
         }
       } catch { /* non-critical */ }
@@ -474,7 +474,7 @@ export const useCircleStore = create<CircleState>()((set, get) => ({
               recipientIds,
               'Contribution verified ✅',
               `${fmt(verified.amount)} from ${verified.userName} has been verified!`,
-              { screen: 'circle', circleId: verified.circleId },
+              { type: 'circle_event', screen: 'circle', circleId: verified.circleId },
             ).catch(() => {});
           }
         }

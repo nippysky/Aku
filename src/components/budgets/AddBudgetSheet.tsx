@@ -181,6 +181,7 @@ export function AddBudgetSheet({ isOpen, onClose, onSuccess }: AddBudgetSheetPro
             onChange={field.onChange}
             error={errors.amount?.message}
             style={styles.field}
+            asBottomSheetInput
           />
         )}
       />

@@ -8,6 +8,7 @@ import {
   View,
   ViewStyle,
 } from 'react-native';
+import { BottomSheetTextInput } from '@gorhom/bottom-sheet';
 import Animated, {
   interpolateColor,
   useAnimatedStyle,
@@ -55,6 +56,9 @@ interface InputProps
   rightElement?: React.ReactNode;
   style?: ViewStyle;
   inputRef?: React.RefObject<TextInput>;
+  /** Pass true when this Input is rendered inside a BottomSheetModal so the
+   *  keyboard properly pushes the sheet up instead of covering the field. */
+  asBottomSheetInput?: boolean;
 }
 
 // ─── Animated border wrapper ──────────────────────────────────────────────────
@@ -93,11 +97,17 @@ export function Input({
   rightElement,
   style,
   inputRef,
+  asBottomSheetInput = false,
   editable = true,
   multiline = false,
   numberOfLines,
   ...textInputProps
 }: InputProps) {
+  // Use gorhom's BottomSheetTextInput when inside a sheet so the sheet moves
+  // up with the keyboard instead of the keyboard covering the input.
+  const ActiveTextInput = asBottomSheetInput
+    ? (BottomSheetTextInput as unknown as typeof TextInput)
+    : TextInput;
   const { colors, layout, text, font, fontSize, spacing, radius, isDark } = useTheme();
   const [isFocused, setIsFocused] = useState(false);
   const internalRef = useRef<TextInput>(null);
@@ -203,8 +213,8 @@ export function Input({
           </View>
         )}
 
-        <TextInput
-          ref={ref}
+        <ActiveTextInput
+          ref={ref as React.RefObject<TextInput>}
           style={[
             text.body,
             styles.input,

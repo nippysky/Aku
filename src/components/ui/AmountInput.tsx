@@ -7,6 +7,7 @@ import {
   ViewStyle,
   Pressable,
 } from 'react-native';
+import { BottomSheetTextInput } from '@gorhom/bottom-sheet';
 import Animated, {
   interpolateColor,
   useAnimatedStyle,
@@ -29,6 +30,9 @@ interface AmountInputProps {
   style?: ViewStyle;
   editable?: boolean;
   placeholder?: string;
+  /** Pass true when rendered inside a BottomSheetModal so the keyboard
+   *  properly pushes the sheet up instead of covering the field. */
+  asBottomSheetInput?: boolean;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -57,7 +61,11 @@ export function AmountInput({
   style,
   editable = true,
   placeholder = '0',
+  asBottomSheetInput = false,
 }: AmountInputProps) {
+  const ActiveTextInput = asBottomSheetInput
+    ? (BottomSheetTextInput as unknown as typeof TextInput)
+    : TextInput;
   const { colors, text, font, fontSize, spacing, radius, layout } = useTheme();
   const currencySymbol = useUIStore((s) => s.currency.symbol);
   const [isFocused, setIsFocused] = useState(false);
@@ -180,8 +188,8 @@ export function AmountInput({
         </Text>
 
         {/* Amount input */}
-        <TextInput
-          ref={inputRef}
+        <ActiveTextInput
+          ref={inputRef as React.RefObject<TextInput>}
           style={[
             styles.input,
             {

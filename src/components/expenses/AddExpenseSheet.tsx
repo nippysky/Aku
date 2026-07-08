@@ -1,7 +1,5 @@
 import React, { useCallback, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
   Pressable,
   StyleSheet,
   Text,
@@ -11,12 +9,9 @@ import { useForm, Controller } from 'react-hook-form';
 import {
   UtensilsCrossed, Car, ShoppingBag, Tv, Home, Zap,
   Heart, Users, BookOpen, PiggyBank, Gift, MoreHorizontal,
-  Calendar, ScanLine,
+  Calendar,
 } from 'lucide-react-native';
 import { format, parseISO } from 'date-fns';
-import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system';
-import { scanReceiptImage } from '../../lib/api-client';
 import { useTheme } from '../../theme';
 import { SheetModal } from '../ui/SheetModal';
 import { Input } from '../ui/Input';
@@ -95,7 +90,6 @@ export function AddExpenseSheet({ isOpen, onClose, onSuccess }: AddExpenseSheetP
   const { user }      = useAuthStore();
   const { showToast } = useUIStore();
   const [showDatePicker, setShowDatePicker] = useState(false);
-  const [scanning, setScanning]             = useState(false);
 
   const {
     control,
@@ -115,37 +109,6 @@ export function AddExpenseSheet({ isOpen, onClose, onSuccess }: AddExpenseSheetP
   });
 
   const date = watch('date');
-
-  const handleScanReceipt = useCallback(async () => {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      Alert.alert('Permission needed', 'Allow photo access to scan a receipt.');
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality:    0.85,
-    });
-    if (result.canceled) return;
-    setScanning(true);
-    try {
-      // Read image as base64 and send to server for OCR
-      const base64 = await FileSystem.readAsStringAsync(result.assets[0].uri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-      const amount = await scanReceiptImage(base64);
-      if (amount !== null && amount > 0) {
-        setValue('amount', amount);
-        showToast('success', 'Amount scanned from receipt');
-      } else {
-        showToast('error', 'Could not detect amount — enter manually');
-      }
-    } catch {
-      showToast('error', 'Scan failed — enter amount manually');
-    } finally {
-      setScanning(false);
-    }
-  }, [setValue, showToast]);
 
   const handleClose = useCallback(() => {
     reset();
@@ -188,33 +151,15 @@ export function AddExpenseSheet({ isOpen, onClose, onSuccess }: AddExpenseSheetP
   return (
     <>
       <SheetModal visible={isOpen} onClose={handleClose}>
-        {/* Title + scan button */}
-        <View style={styles.titleRow}>
-          <Text
-            style={[
-              styles.title,
-              { fontFamily: font.displayLight, fontSize: fontSize['2xl'], color: colors.text },
-            ]}
-          >
-            Add Expense
-          </Text>
-          <Pressable
-            onPress={handleScanReceipt}
-            disabled={scanning}
-            style={[
-              styles.scanBtn,
-              { backgroundColor: colors.backgroundSecondary, borderRadius: radius.full },
-            ]}
-            accessibilityRole="button"
-            accessibilityLabel="Scan receipt"
-          >
-            {scanning ? (
-              <ActivityIndicator size="small" color={colors.primary} />
-            ) : (
-              <ScanLine size={20} color={colors.primary} strokeWidth={1.8} />
-            )}
-          </Pressable>
-        </View>
+        {/* Title */}
+        <Text
+          style={[
+            styles.title,
+            { fontFamily: font.displayLight, fontSize: fontSize['2xl'], color: colors.text, marginBottom: 24 },
+          ]}
+        >
+          Add Expense
+        </Text>
 
         {/* Amount */}
         <Controller
@@ -228,6 +173,7 @@ export function AddExpenseSheet({ isOpen, onClose, onSuccess }: AddExpenseSheetP
               size="lg"
               error={errors.amount?.message}
               style={styles.field}
+              asBottomSheetInput
             />
           )}
         />
@@ -244,6 +190,7 @@ export function AddExpenseSheet({ isOpen, onClose, onSuccess }: AddExpenseSheetP
               onChangeText={field.onChange}
               error={errors.description?.message}
               style={styles.field}
+              asBottomSheetInput
             />
           )}
         />
@@ -361,20 +308,8 @@ export function AddExpenseSheet({ isOpen, onClose, onSuccess }: AddExpenseSheetP
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  titleRow: {
-    flexDirection:  'row',
-    alignItems:     'center',
-    justifyContent: 'space-between',
-    marginBottom:   24,
-  },
   title: {
     letterSpacing: -0.5,
-  },
-  scanBtn: {
-    width:          40,
-    height:         40,
-    alignItems:     'center',
-    justifyContent: 'center',
   },
   field: {
     marginBottom: 20,

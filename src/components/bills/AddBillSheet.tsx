@@ -187,6 +187,7 @@ export function AddBillSheet({ isOpen, onClose, onSuccess }: AddBillSheetProps) 
               onChangeText={field.onChange}
               error={errors.name?.message}
               style={styles.field}
+              asBottomSheetInput
             />
           )}
         />
@@ -202,6 +203,7 @@ export function AddBillSheet({ isOpen, onClose, onSuccess }: AddBillSheetProps) 
               onChange={field.onChange}
               error={errors.amount?.message}
               style={styles.field}
+              asBottomSheetInput
             />
           )}
         />
@@ -358,6 +360,7 @@ export function AddBillSheet({ isOpen, onClose, onSuccess }: AddBillSheetProps) 
               multiline
               numberOfLines={3}
               style={styles.field}
+              asBottomSheetInput
             />
           )}
         />

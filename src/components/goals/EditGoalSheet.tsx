@@ -224,6 +224,7 @@ export function EditGoalSheet({ goal, onClose, onSuccess }: EditGoalSheetProps) 
               onChangeText={field.onChange}
               error={errors.name?.message}
               style={styles.field}
+              asBottomSheetInput
             />
           )}
         />
@@ -240,6 +241,7 @@ export function EditGoalSheet({ goal, onClose, onSuccess }: EditGoalSheetProps) 
               onChange={field.onChange}
               error={errors.amount?.message}
               style={styles.field}
+              asBottomSheetInput
             />
           )}
         />
@@ -315,6 +317,7 @@ export function EditGoalSheet({ goal, onClose, onSuccess }: EditGoalSheetProps) 
               multiline
               numberOfLines={3}
               style={styles.field}
+              asBottomSheetInput
             />
           )}
         />

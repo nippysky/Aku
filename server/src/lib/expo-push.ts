@@ -50,12 +50,21 @@ function sleep(ms: number): Promise<void> {
  * Returns the array of tickets (one per message).
  */
 async function postBatch(messages: PushMessage[], attempt = 1): Promise<ExpoTicket[]> {
+  // EXPO_ACCESS_TOKEN is required for EAS production builds that have
+  // "Enhanced push security" enabled (set in your Expo dashboard).
+  // Without it, pushes to production builds silently fail.
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'Accept':       'application/json',
+  };
+  const accessToken = process.env.EXPO_ACCESS_TOKEN;
+  if (accessToken) {
+    headers['Authorization'] = `Bearer ${accessToken}`;
+  }
+
   const res = await fetch(EXPO_PUSH_URL, {
     method:  'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Accept':       'application/json',
-    },
+    headers,
     body: JSON.stringify(messages),
   });
 

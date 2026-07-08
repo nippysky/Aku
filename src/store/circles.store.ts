@@ -9,9 +9,10 @@
  * see circle.store.ts.
  */
 import { create } from 'zustand';
-import { eq, inArray } from 'drizzle-orm';
+import { eq, and, inArray } from 'drizzle-orm';
 import { getDatabase, schema } from '../lib/database/client';
 import { generateUUID } from '../lib/uuid';
+import { registerCircle, joinCircleByCode, fetchUserCircles } from '../lib/api-client';
 import type { Household, HouseholdMember, CircleFrequency, ContributionType } from '../types';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -50,13 +51,14 @@ interface CirclesState {
   isLoading:    boolean;
   error:        string | null;
 
-  load:         (userId: string) => Promise<void>;
-  create:       (name: string, ownerId: string, settings?: CircleCreateSettings) => Promise<Household>;
-  joinByCode:   (code: string, userId: string) => Promise<{ circleId: string; circleName: string }>;
-  joinById:     (circleId: string, userId: string) => Promise<void>;
-  updateName:   (name: string) => Promise<void>;
-  loadMembers:  (circleId: string) => Promise<void>;
-  clearError:   () => void;
+  load:             (userId: string) => Promise<void>;
+  syncFromServer:   (userId: string) => Promise<void>;
+  create:           (name: string, ownerId: string, settings?: CircleCreateSettings) => Promise<Household>;
+  joinByCode:       (code: string, userId: string) => Promise<{ circleId: string; circleName: string }>;
+  joinById:         (circleId: string, userId: string) => Promise<void>;
+  updateName:       (name: string) => Promise<void>;
+  loadMembers:      (circleId: string) => Promise<void>;
+  clearError:       () => void;
 }
 
 // ─── Store ────────────────────────────────────────────────────────────────────
@@ -108,6 +110,74 @@ export const useCirclesStore = create<CirclesState>()((set, get) => ({
     }
   },
 
+  // ── Sync circles from server → seed local SQLite → reload ────────────────
+  // Called by the WS client when another device creates/joins a circle.
+  syncFromServer: async (userId) => {
+    try {
+      const serverCircles = await fetchUserCircles();
+      const db  = getDatabase();
+      const now = new Date().toISOString();
+
+      for (const c of serverCircles) {
+        // Upsert the household row
+        const existing = await db
+          .select({ id: schema.households.id })
+          .from(schema.households)
+          .where(eq(schema.households.id, c.id));
+
+        if (existing.length === 0) {
+          await (db.insert(schema.households) as any).values({
+            id:         c.id,
+            name:       c.name,
+            ownerId:    c.ownerId,
+            inviteCode: c.inviteCode,
+            createdAt:  now,
+          });
+          await (db.insert(schema.circleSettings) as any).values({
+            id:               c.id,
+            emoji:            c.emoji ?? '💰',
+            description:      null,
+            targetAmount:     null,
+            frequency:        'monthly',
+            perMemberAmount:  null,
+            contributionType: 'equal',
+            deadline:         null,
+            accountName:      null,
+            accountNumber:    null,
+            bankName:         null,
+            notes:            null,
+            updatedAt:        now,
+          });
+        }
+
+        // Upsert membership
+        const existingMember = await db
+          .select({ id: schema.householdMembers.id })
+          .from(schema.householdMembers)
+          .where(
+            and(
+              eq(schema.householdMembers.householdId, c.id),
+              eq(schema.householdMembers.userId, userId),
+            ),
+          );
+
+        if (existingMember.length === 0) {
+          await db.insert(schema.householdMembers).values({
+            id:          generateUUID(),
+            householdId: c.id,
+            userId,
+            role:        c.role as any,
+            joinedAt:    now,
+          });
+        }
+      }
+
+      await get().load(userId);
+    } catch {
+      // Non-fatal — circles will load normally on next app open
+    }
+  },
+
   // ── Create a new circle ───────────────────────────────────────────────────
   create: async (name, ownerId, settings) => {
     const db       = getDatabase();
@@ -149,47 +219,77 @@ export const useCirclesStore = create<CirclesState>()((set, get) => ({
     });
 
     await get().load(ownerId);
+
+    // Register with server so other users can find this circle by invite code.
+    // Fire-and-forget — never blocks local circle creation.
+    const emoji = settings?.emoji ?? '💰';
+    registerCircle(circleId, name, emoji, inviteCode).catch(() => {
+      // Non-fatal: the circle is usable locally; retry logic can be added later.
+    });
+
     return { id: circleId, name, ownerId, inviteCode, createdAt: now };
   },
 
   // ── Join by 8-char invite code ────────────────────────────────────────────
+  // Calls the server to look up the circle and record membership.
+  // Then seeds local SQLite so the app can render the circle immediately.
   joinByCode: async (code, userId) => {
-    const db = getDatabase();
-    const upperCode = code.trim().toUpperCase();
+    const db  = getDatabase();
+    const now = new Date().toISOString();
 
-    // Look up circle with this invite code
-    const rows = await db
-      .select()
+    // 1. Ask the server — this is the authoritative source for invite codes
+    const result = await joinCircleByCode(code);
+    const { circleId, name, emoji, inviteCode, ownerId } = result;
+
+    // 2. Upsert the circle into local SQLite (in case we don't have it yet)
+    const existingCircle = await db
+      .select({ id: schema.households.id })
       .from(schema.households)
-      .where(eq((schema.households as any).inviteCode, upperCode));
+      .where(eq(schema.households.id, circleId));
 
-    if (!rows || rows.length === 0) {
-      throw new Error('Invalid or expired invite code');
+    if (existingCircle.length === 0) {
+      await (db.insert(schema.households) as any).values({
+        id:         circleId,
+        name,
+        ownerId,
+        inviteCode,
+        createdAt:  now,
+      });
+      await (db.insert(schema.circleSettings) as any).values({
+        id:               circleId,
+        emoji,
+        description:      null,
+        targetAmount:     null,
+        frequency:        'monthly',
+        perMemberAmount:  null,
+        contributionType: 'equal',
+        deadline:         null,
+        accountName:      null,
+        accountNumber:    null,
+        bankName:         null,
+        notes:            null,
+        updatedAt:        now,
+      });
     }
 
-    const circle = rows[0];
-
-    // Check if already a member
-    const existing = await db
-      .select()
+    // 3. Upsert self as a member
+    const existingMember = await db
+      .select({ id: schema.householdMembers.id })
       .from(schema.householdMembers)
-      .where(eq(schema.householdMembers.householdId, circle.id));
+      .where(eq(schema.householdMembers.householdId, circleId));
 
-    if (existing.some((m: any) => m.userId === userId)) {
-      return { circleId: circle.id, circleName: circle.name };
+    if (!existingMember.some((m: any) => m.userId === userId)) {
+      await db.insert(schema.householdMembers).values({
+        id:          generateUUID(),
+        householdId: circleId,
+        userId,
+        role:        'member',
+        joinedAt:    now,
+      });
     }
-
-    // Add as member
-    await db.insert(schema.householdMembers).values({
-      id:          generateUUID(),
-      householdId: circle.id,
-      userId,
-      role:        'member',
-      joinedAt:    new Date().toISOString(),
-    });
 
     await get().load(userId);
-    return { circleId: circle.id, circleName: circle.name };
+    return { circleId, circleName: name };
   },
 
   // ── Join by circleId (deep link confirm) ─────────────────────────────────

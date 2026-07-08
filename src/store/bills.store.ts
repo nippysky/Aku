@@ -8,6 +8,7 @@ import {
 import { generateUUID } from '../lib/uuid';
 import { notificationService } from '../lib/notifications';
 import { useUIStore } from './ui.store';
+import { triggerPush } from '../lib/sync/trigger';
 import type { Bill, BillCreateInput, BillUpdateInput, BillStatus, BillFrequency } from '../types';
 
 // ─── Recurring due-date helper ────────────────────────────────────────────────
@@ -102,7 +103,8 @@ export const useBillsStore = create<BillsState>()((set, get) => ({
   paid:      [],
 
   load: async (userId) => {
-    set({ isLoading: true, error: null });
+    const hasData = get().bills.length > 0;
+    if (!hasData) set({ isLoading: true, error: null });
     try {
       const db = getDatabase();
       const rows = await db
@@ -167,6 +169,7 @@ export const useBillsStore = create<BillsState>()((set, get) => ({
         a.dueDate.localeCompare(b.dueDate)
       );
       _setBills(set, bills);
+      triggerPush();
       return newBill;
     } catch (e: any) {
       set({ error: e?.message ?? 'Failed to add bill' });
@@ -196,6 +199,7 @@ export const useBillsStore = create<BillsState>()((set, get) => ({
         return updated;
       });
       _setBills(set, bills);
+      triggerPush();
     } catch (e: any) {
       set({ error: e?.message ?? 'Failed to update bill' });
     } finally {
@@ -234,6 +238,7 @@ export const useBillsStore = create<BillsState>()((set, get) => ({
 
       const bills = get().bills.map((b) => b.id === id ? updated : b);
       _setBills(set, bills);
+      triggerPush();
     } else {
       // One-time or custom: mark permanently paid
       await db
@@ -250,6 +255,7 @@ export const useBillsStore = create<BillsState>()((set, get) => ({
           : b
       );
       _setBills(set, bills);
+      triggerPush();
     }
   },
 
@@ -269,6 +275,7 @@ export const useBillsStore = create<BillsState>()((set, get) => ({
       return updated;
     });
     _setBills(set, bills);
+    triggerPush();
   },
 
   remove: async (id) => {
@@ -278,6 +285,7 @@ export const useBillsStore = create<BillsState>()((set, get) => ({
     notificationService.cancelBillReminders(id).catch(() => {});
     const bills = get().bills.filter((b) => b.id !== id);
     _setBills(set, bills);
+    triggerPush();
   },
 
   clearError: () => set({ error: null }),

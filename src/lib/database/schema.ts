@@ -1,4 +1,4 @@
-import { int, real, text, sqliteTable, index } from 'drizzle-orm/sqlite-core';
+import { int, text, sqliteTable, index } from 'drizzle-orm/sqlite-core';
 
 // ─── Akù Database Schema (Drizzle + Expo SQLite) ─────────────────────────
 // All dates stored as ISO8601 text. Amounts stored as integers (kobo).

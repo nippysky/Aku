@@ -3,6 +3,7 @@ import {
   FlatList,
   Platform,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -25,6 +26,7 @@ import { AddGoalSheet } from '../../components/goals/AddGoalSheet';
 import { AddContributionSheet } from '../../components/goals/AddContributionSheet';
 import { useGoalsStore } from '../../store/goals.store';
 import { useAuthStore } from '../../store/auth.store';
+import { useSyncStore } from '../../store/sync.store';
 import { SkeletonBanner, SkeletonGoalCard } from '../../components/ui/Skeleton';
 import { useCurrencyFormat } from '../../hooks/useCurrencyFormat';
 import type { GoalWithProgress } from '../../types';
@@ -349,14 +351,29 @@ export default function GoalsScreen() {
 
   const { goals, load, isLoading } = useGoalsStore();
   const { user }                   = useAuthStore();
+  const syncVersion                = useSyncStore((s) => s.syncVersion);
 
   const [filter,      setFilter]      = useState<FilterKey>('all');
   const [addOpen,     setAddOpen]     = useState(false);
   const [contribGoal, setContribGoal] = useState<{ id: string; name: string } | null>(null);
+  const [refreshing,  setRefreshing]  = useState(false);
 
   useEffect(() => {
     if (user) load(user.id);
   }, [user]);
+
+  // ── Sync version watcher — reload silently when server pull lands ─────────
+  useEffect(() => {
+    if (!user || syncVersion === 0) return;
+    load(user.id);
+  }, [syncVersion]);
+
+  const onRefresh = useCallback(async () => {
+    if (!user) return;
+    setRefreshing(true);
+    await load(user.id);
+    setRefreshing(false);
+  }, [user, load]);
 
   const filtered = goals.filter((g) => {
     if (filter === 'active')    return !g.isCompleted;
@@ -439,6 +456,14 @@ export default function GoalsScreen() {
         renderItem={renderItem}
         style={{ flex: 1 }}
         ListHeaderComponent={ListHeader}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+          />
+        }
         contentContainerStyle={[
           styles.listContent,
           { paddingBottom: insets.bottom + layout.tabBarHeight + 24 },

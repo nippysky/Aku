@@ -11,6 +11,7 @@ import { eq, and, lte } from 'drizzle-orm';
 import { getDatabase, schema } from '../lib/database/client';
 import { format, addDays, addWeeks, addMonths, addYears, parseISO } from 'date-fns';
 import { generateUUID } from '../lib/uuid';
+import { triggerPush } from '../lib/sync/trigger';
 import type { IncomeCategory } from '../types';
 import type { RecurringFrequency } from './recurring-expenses.store';
 
@@ -102,7 +103,8 @@ export const useRecurringIncomeStore = create<RecurringIncomeState>()((set, get)
   isLoading: false,
 
   load: async (userId) => {
-    set({ isLoading: true });
+    const hasData = get().items.length > 0;
+    if (!hasData) set({ isLoading: true });
     try {
       const db   = getDatabase();
       const rows = await db
@@ -153,6 +155,7 @@ export const useRecurringIncomeStore = create<RecurringIncomeState>()((set, get)
     };
 
     set((s) => ({ items: [...s.items, newItem].sort((a, b) => a.name.localeCompare(b.name)) }));
+    triggerPush();
     return newItem;
   },
 
@@ -169,12 +172,14 @@ export const useRecurringIncomeStore = create<RecurringIncomeState>()((set, get)
         item.id === id ? { ...item, ...input, updatedAt: now } : item
       ),
     }));
+    triggerPush();
   },
 
   remove: async (id) => {
     const db = getDatabase();
     await db.delete(schema.recurringIncome).where(eq(schema.recurringIncome.id, id));
     set((s) => ({ items: s.items.filter((i) => i.id !== id) }));
+    triggerPush();
   },
 
   toggleActive: async (id) => {
@@ -193,6 +198,7 @@ export const useRecurringIncomeStore = create<RecurringIncomeState>()((set, get)
         i.id === id ? { ...i, isActive: newActive, updatedAt: now } : i
       ),
     }));
+    triggerPush();
   },
 
   processOverdue: async (userId) => {
@@ -278,6 +284,7 @@ export const useRecurringIncomeStore = create<RecurringIncomeState>()((set, get)
         .where(eq(schema.recurringIncome.userId, userId))
         .orderBy(schema.recurringIncome.name);
       set({ items: rows.map(fromDb) });
+      triggerPush();
     }
 
     return logged;

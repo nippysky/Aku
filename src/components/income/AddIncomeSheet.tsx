@@ -157,6 +157,7 @@ export function AddIncomeSheet({ isOpen, onClose, onSuccess }: AddIncomeSheetPro
               size="lg"
               error={errors.amount?.message}
               style={styles.field}
+              asBottomSheetInput
             />
           )}
         />
@@ -173,6 +174,7 @@ export function AddIncomeSheet({ isOpen, onClose, onSuccess }: AddIncomeSheetPro
               onChangeText={field.onChange}
               error={errors.description?.message}
               style={styles.field}
+              asBottomSheetInput
             />
           )}
         />

@@ -1,7 +1,8 @@
-import React, { useCallback, useEffect, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Platform,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -47,6 +48,7 @@ import { useExpensesStore } from '../../store/expenses.store';
 import { useIncomeStore } from '../../store/income.store';
 import { useGoalsStore } from '../../store/goals.store';
 import { useBudgetsStore } from '../../store/budgets.store';
+import { useSyncStore } from '../../store/sync.store';
 import { useNotifHistoryStore } from '../../store/notif-history.store';
 import { FirstTimeHint } from '../../components/ui/FirstTimeHint';
 import { useFirstTimeHint } from '../../hooks/useFirstTimeHint';
@@ -87,9 +89,10 @@ function computeInsight(
   if (incomeThisMonth > 0 && unpaidBillsTotal > 0) {
     const ratio = incomeThisMonth / unpaidBillsTotal;
     if (ratio >= 1.5) {
+      const displayRatio = Math.min(ratio, 99.9);
       return {
         icon: TrendingUp, iconColor: '#16A85A', label: 'Cash flow',
-        text: `Your income this month covers your bills ${ratio.toFixed(1)}× over.`,
+        text: `Your income this month covers your bills ${displayRatio.toFixed(1)}× over.`,
       };
     }
   }
@@ -464,28 +467,52 @@ export default function HomeScreen() {
   const router = useRouter();
   const { user } = useAuthStore();
   const { bills, upcoming, overdue, dueToday, load: loadBills, isLoading: billsLoading } = useBillsStore();
-  const { expenses, allExpenses, load: loadExpenses, isLoading: expensesLoading } = useExpensesStore();
+  const { expenses, allExpenses, loadAll: loadExpenses, isLoading: expensesLoading } = useExpensesStore();
   const { allRecords: incRecords, loadAll: loadAllInc } = useIncomeStore();
   const { goals, load: loadGoals, isLoading: goalsLoading } = useGoalsStore();
   const { budgets, load: loadBudgets, isLoading: budgetsLoading } = useBudgetsStore();
   const notifUnread = useNotifHistoryStore((s) => s.unreadCount);
+  const syncVersion = useSyncStore((s) => s.syncVersion);
   const hintBell = useFirstTimeHint('hint_home_bell');
 
   const isLoading = billsLoading || expensesLoading || goalsLoading || budgetsLoading;
+  const [refreshing, setRefreshing] = useState(false);
   const { fmt, fmtCompact } = useCurrencyFormat();
 
+  // Initial load on mount / user change
   useEffect(() => {
     if (user) {
       loadBills(user.id);
       loadExpenses(user.id);
       loadBudgets(user.id);
       loadAllInc(user.id);
+      loadGoals(user.id);
     }
   }, [user]);
 
+  // ── Sync version watcher — reload silently when server pull lands ─────────
   useEffect(() => {
-    if (user) loadGoals(user.id);
-  }, [user]);
+    if (!user || syncVersion === 0) return;
+    loadBills(user.id);
+    loadExpenses(user.id);
+    loadBudgets(user.id);
+    loadAllInc(user.id);
+    loadGoals(user.id);
+  }, [syncVersion]);
+
+  // Pull-to-refresh — uses a separate `refreshing` state so no skeleton flash
+  const onRefresh = useCallback(async () => {
+    if (!user) return;
+    setRefreshing(true);
+    await Promise.all([
+      loadBills(user.id),
+      loadExpenses(user.id),
+      loadBudgets(user.id),
+      loadAllInc(user.id),
+      loadGoals(user.id),
+    ]);
+    setRefreshing(false);
+  }, [user, loadBills, loadExpenses, loadBudgets, loadAllInc, loadGoals]);
 
   const firstName = user?.name?.split(' ')[0] ?? 'there';
   const greeting  = getGreeting();
@@ -540,6 +567,14 @@ export default function HomeScreen() {
           { paddingTop: insets.top + 16, paddingBottom: layout.tabBarHeight + insets.bottom + 80 },
         ]}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+          />
+        }
       >
         {/* ── SECTION 1: Greeting ── */}
         <Animated.View

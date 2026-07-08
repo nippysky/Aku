@@ -8,8 +8,10 @@ import {
   validateSession,
   revokeSession,
   syncAvatarData,
+  getMe,
   fetchDek,
   uploadDek,
+  deleteAccount as deleteAccountApi,
   type UserProfile,
 } from '../lib/api-client';
 import { getDatabase, schema } from '../lib/database/client';
@@ -67,6 +69,12 @@ interface AuthState {
   signIn:                  (email: string, name?: string) => Promise<void>;
   handleAuthCallback:      (jwt: string, user: UserProfile) => Promise<void>;
   signOut:                 () => Promise<void>;
+  /**
+   * Permanently delete this account on the server (cascades all data via PostgreSQL),
+   * then wipe all local SQLite tables and SecureStore. Irreversible.
+   * Throws if the server call fails so the caller can surface the error.
+   */
+  deleteAccount:           () => Promise<void>;
   updateUser:              (patch: Partial<User>) => void;
   markOnboardingComplete:  () => Promise<void>;
   /**
@@ -80,6 +88,11 @@ interface AuthState {
    * avatarData is stored in SQLite only — never SecureStore (size limit).
    */
   saveAvatarData:          (avatarData: string) => Promise<void>;
+  /**
+   * Pull the latest profile (name + avatar) from the server and update
+   * local SQLite + in-memory state. Called on WS sync push from another device.
+   */
+  refreshProfile:          () => Promise<void>;
 
   // Actions — PIN
   setupPin:         (pin: string) => Promise<void>;
@@ -401,6 +414,63 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     });
   },
 
+  // ── Delete Account — nuclear: server + local wipe ────────────────────
+  deleteAccount: async () => {
+    // STEP 1: Delete on server (BLOCKING — must succeed before we touch local state)
+    await deleteAccountApi();
+
+    // STEP 2: Disconnect WebSocket so no sync fires after wipe
+    void (async () => {
+      try {
+        const { wsClient } = require('../lib/sync/ws-client');
+        wsClient.disconnect();
+      } catch { /* non-critical */ }
+    })();
+
+    // STEP 3: Wipe ALL local SQLite tables — order matters (children before parents)
+    try {
+      const db = getDatabase();
+      await db.delete(schema.circleContributions);
+      await db.delete(schema.circleSettings);
+      await db.delete(schema.goalContributions);
+      await db.delete(schema.goals);
+      await db.delete(schema.budgets);
+      await db.delete(schema.income);
+      await db.delete(schema.expenses);
+      await db.delete(schema.bills);
+      await db.delete(schema.recurringIncome);
+      await db.delete(schema.recurringExpenses);
+      await db.delete(schema.notifications);
+      await db.delete(schema.householdMembers);
+      await db.delete(schema.households);
+      await db.delete(schema.appState);
+      await db.delete(schema.users);
+    } catch { /* server already deleted — local wipe is best-effort */ }
+
+    // STEP 4: Clear all SecureStore keys + DEK
+    void useSyncStore.getState().clearDek();
+    await Promise.all([
+      SecureStore.deleteItemAsync(KEYS.SESSION),
+      SecureStore.deleteItemAsync(KEYS.USER),
+      SecureStore.deleteItemAsync(KEYS.PIN_HASH),
+      SecureStore.deleteItemAsync(KEYS.BIOMETRIC),
+      SecureStore.deleteItemAsync(KEYS.ONBOARDED),
+    ]);
+
+    // STEP 5: Reset all Zustand data stores
+    resetAllDataStores();
+
+    // STEP 6: Auth state reset → nav guard routes to onboarding
+    set({
+      user:          null,
+      session:       null,
+      isLocked:      false,
+      hasOnboarded:  false,
+      biometric:     { enabled: false, type: 'none' },
+      error:         null,
+    });
+  },
+
   // ── Update User ────────────────────────────────────────────────────────
   updateUser: (patch) => {
     const current = get().user;
@@ -434,6 +504,33 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
 
     // 3. Fire-and-forget server sync — failure is silent, local is authoritative
     void syncAvatarData(avatarData).catch(() => {});
+  },
+
+  // ── Refresh Profile from Server ────────────────────────────────────────
+  // Called by the WS client when a sync push arrives from another device.
+  // Fetches the latest name + avatar from the server and updates local state.
+  refreshProfile: async () => {
+    const { user } = get();
+    if (!user) return;
+    try {
+      const profile = await getMe();
+      const db  = getDatabase();
+      const now = new Date().toISOString();
+      // Update SQLite so other queries (e.g. circle member JOIN) see the latest values
+      await db
+        .update(schema.users)
+        .set({ name: profile.name, avatarData: profile.avatarData ?? null, updatedAt: now })
+        .where(eq(schema.users.id, user.id));
+      // Update in-memory state — UI re-renders the avatar immediately
+      set({
+        user: {
+          ...user,
+          name:      profile.name,
+          avatarUrl: profile.avatarUrl,
+          avatarData: profile.avatarData ?? null,
+        },
+      });
+    } catch { /* Non-fatal — profile refreshes on next app open */ }
   },
 
   // ── Mark onboarding complete (persists across restarts) ───────────────
@@ -471,7 +568,12 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       CryptoDigestAlgorithm.SHA256,
       `aku:pin:${user.id}:${pin}`,
     );
-    await SecureStore.setItemAsync(KEYS.PIN_HASH, pinHash);
+    try {
+      await SecureStore.setItemAsync(KEYS.PIN_HASH, pinHash);
+    } catch (err) {
+      console.error('[setupPin] Failed to save PIN hash:', err);
+      throw err;
+    }
 
     // 2. Determine the DEK to use — in priority order:
     //    a) Already in Keychain (same device — PIN reset or re-setup).
@@ -491,20 +593,31 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     let dekHex: string | null = null;
     try {
       dekHex = await fetchDek();
-    } catch { /* offline — will fall through to generate */ }
+    } catch (err) {
+      console.warn('[setupPin] fetchDek failed (will generate fresh):', err);
+    }
 
     if (dekHex) {
       // Returning user — server has the DEK; store it in Keychain.
-      await syncStore.setDek(decodeDEK(dekHex));
+      try {
+        await syncStore.setDek(decodeDEK(dekHex));
+      } catch (err) {
+        console.error('[setupPin] Failed to save server DEK to Keychain:', err);
+        throw err;
+      }
     } else {
-      // Brand-new account — generate a random DEK, store locally and upload.
+      // Brand-new account (or server DEK unreadable) — generate a random DEK.
       const newDek = await generateDEK();
-      await syncStore.setDek(newDek);
+      try {
+        await syncStore.setDek(newDek);
+      } catch (err) {
+        console.error('[setupPin] Failed to save generated DEK to Keychain:', err);
+        throw err;
+      }
       try {
         await uploadDek(encodeDEK(newDek));
-      } catch {
-        // Non-fatal — the opportunistic upload in the `alreadyLoaded` branch
-        // above will retry next time setupPin is called on this device.
+      } catch (err) {
+        console.warn('[setupPin] uploadDek failed (non-fatal):', err);
       }
     }
   },

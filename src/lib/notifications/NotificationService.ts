@@ -32,6 +32,9 @@ interface BillReminderConfig {
 // ─── NotificationService ──────────────────────────────────────────────────────
 
 class NotificationService {
+  // Suppress duplicate "physical device required" warnings in dev/simulator
+  private _simulatorWarnShown = false;
+
   // ── Permissions ─────────────────────────────────────────────────────────
 
   async requestPermissions(): Promise<boolean> {
@@ -89,6 +92,14 @@ class NotificationService {
       importance: Notifications.AndroidImportance.DEFAULT,
       enableVibrate: false,
       showBadge: false,
+    });
+
+    await Notifications.setNotificationChannelAsync('circles', {
+      name: 'Circle Activity',
+      importance: Notifications.AndroidImportance.HIGH,
+      vibrationPattern: [0, 250, 250, 250],
+      enableVibrate: true,
+      showBadge: true,
     });
   }
 
@@ -278,7 +289,10 @@ class NotificationService {
     if (!Device.isDevice) {
       // Physical device required for real push tokens.
       // In dev you can still test local notifications.
-      console.warn('[NotificationService] Push tokens require a physical device.');
+      if (!this._simulatorWarnShown) {
+        console.warn('[NotificationService] Push tokens require a physical device.');
+        this._simulatorWarnShown = true;
+      }
       return null;
     }
 

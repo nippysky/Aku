@@ -414,28 +414,35 @@ export default function CircleDetailScreen() {
     }
   }, [openEditSheet, openPaySheet]);
 
+  // ── Derived display values ─────────────────────────────────────────────────
+  // Declared here so they're available to all callbacks below AND to JSX.
+  const circleEmoji = settings?.emoji ?? '💰';
+
   // ── Invite ────────────────────────────────────────────────────────────────
   const handleInvite = useCallback(() => {
     Haptics.selectionAsync();
     const inviteCode = (circle as any)?.inviteCode ?? '';
-    const deepLink   = `aku://circle/join?circleId=${circleId}&code=${inviteCode}`;
+    // Use HTTPS so WhatsApp/iMessage renders it as a tappable link.
+    // nippysky.com/ventures/aku/join redirects to aku:// deep link on the device.
+    const joinUrl    = `https://nippysky.com/ventures/aku/join?code=${inviteCode}`;
+    const circleName = circle?.name ?? 'Circle';
 
     const shareCode = async () => {
-      if (inviteCode) {
-        await Clipboard.setStringAsync(inviteCode);
-        showToast('success', `Code ${inviteCode} copied!`);
-      } else {
-        showToast('info', 'No invite code available');
-      }
+      if (!inviteCode) { showToast('info', 'No invite code available'); return; }
+      await Clipboard.setStringAsync(inviteCode);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      showToast('success', `Code ${inviteCode} copied!`);
     };
 
     const shareLink = async () => {
+      if (!inviteCode) { showToast('info', 'No invite code available'); return; }
       try {
-        await Share.share({
-          message: `Join my ${circleEmoji} ${circle?.name ?? 'Circle'} on Akù!\n\nTap: ${deepLink}\n\nOr enter code: ${inviteCode}`,
-          title:   `Join ${circle?.name ?? 'Circle'} on Akù`,
-          url:     deepLink,
-        });
+        const message =
+          `${circleEmoji} Join "${circleName}" on Akù — the smart money circle app!\n\n` +
+          `Tap the link to join instantly:\n${joinUrl}\n\n` +
+          `Or open Akù → More → Join a Circle → enter code: ${inviteCode}`;
+
+        await Share.share({ message, title: `Join ${circleName} on Akù` });
       } catch {
         showToast('error', 'Could not open share sheet');
       }
@@ -453,7 +460,7 @@ export default function CircleDetailScreen() {
         { text: 'Cancel', style: 'cancel' },
       ]);
     }
-  }, [circle, circleId, showToast]);
+  }, [circle, circleId, circleEmoji, showToast]);
 
   // ── Copy payment details ──────────────────────────────────────────────────
   const handleCopy = useCallback(async () => {
@@ -548,8 +555,6 @@ export default function CircleDetailScreen() {
       </View>
     );
   }
-
-  const circleEmoji = settings?.emoji ?? '💰';
 
   // ── MEMBERS TAB ───────────────────────────────────────────────────────────
   const MembersTab = (
