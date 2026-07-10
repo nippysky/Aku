@@ -1,28 +1,22 @@
 /**
  * circle/[id].tsx — Contribution Group Detail
  *
- * Two tabs:
- *  [Members]  — member payment status, goal progress, payment details
- *  [Activity] — leaderboard, pending approvals (admin only), my contributions
+ * Three tabs (admin) / two tabs (member):
+ *  [Members]      — member payment status, goal progress, payment details
+ *  [Activity]     — leaderboard, my contributions
+ *  [Contributions]— (admin only) pending approvals with approve/deny+reason, full log
  *
- * Admin (circle owner):
- *   - Settings gear → Edit Circle / Edit Payment Details
- *   - Verify / reject pending contributions in Activity tab
- *   - Remove members from Members tab
- *
- * Members:
- *   - Log Contribution FAB on Activity tab
- *   - Invite others via Share Code / Share Link
- *
- * Push notifications: all circle members receive a push when contributions
- * are logged or verified (via server-side fan-out by user IDs).
+ * Fully branded: no Alert.alert, no ActionSheetIOS, no native Share modal.
+ * All confirmations use AkuAlert (in-app modal).
+ * Invite and admin settings use branded BottomSheetModal sheets.
+ * Member removal pushes real-time notification via server.
+ * Circle settings (frequency/goal/etc.) sync via server so all members see same data.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActionSheetIOS,
   ActivityIndicator,
-  Alert,
   FlatList,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -42,10 +36,13 @@ import {
   Building2,
   Calendar,
   Check,
+  CheckCircle2,
   Copy,
   Crown,
+  Link2,
   Plus,
   Settings2,
+  Share2,
   ShieldCheck,
   Trash2,
   TrendingUp,
@@ -54,6 +51,9 @@ import {
   Users,
   Activity,
   CreditCard,
+  XCircle,
+  X,
+  LayoutList,
 } from 'lucide-react-native';
 import {
   BottomSheetModal,
@@ -91,13 +91,6 @@ const FREQ_LABELS: Record<CircleFrequency, string> = {
 };
 
 const CIRCLE_EMOJIS = ['💰','🏠','✈️','🎯','🎓','🏖️','💊','🚗','💍','🎉','🌍','🔑'];
-
-const STATUS_CONFIG = {
-  paid:    { bg: '#D1FAE5', fg: '#065F46', label: 'Paid'    },
-  partial: { bg: '#FEF3C7', fg: '#92400E', label: 'Partial' },
-  pending: { bg: '#EFF6FF', fg: '#1D4ED8', label: 'Pending' },
-  overdue: { bg: '#FEE2E2', fg: '#991B1B', label: 'Overdue' },
-};
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -147,32 +140,96 @@ function AdminPill() {
   );
 }
 
+// ─── AkuAlert — branded in-app confirmation modal ─────────────────────────────
+
+interface AlertConfig {
+  title:        string;
+  message?:     string;
+  confirmLabel: string;
+  danger?:      boolean;
+  onConfirm:    () => void | Promise<void>;
+  onCancel:     () => void;
+}
+
+function AkuAlert({ config }: { config: AlertConfig | null }) {
+  const { colors, font, fontSize } = useTheme();
+  if (!config) return null;
+  return (
+    <Modal transparent animationType="fade" visible statusBarTranslucent>
+      <Pressable style={styles.alertOverlay} onPress={config.onCancel}>
+        <Pressable style={[styles.alertCard, { backgroundColor: colors.card }]} onPress={() => {}}>
+          <Text style={{ fontFamily: font.displayLight, fontSize: fontSize.xl, color: '#163A2F', marginBottom: 8 }}>
+            {config.title}
+          </Text>
+          {config.message ? (
+            <Text style={{ fontFamily: font.sansRegular, fontSize: fontSize.sm, color: colors.textSecondary, lineHeight: 20, marginBottom: 20 }}>
+              {config.message}
+            </Text>
+          ) : <View style={{ height: 12 }} />}
+          <View style={{ flexDirection: 'row', gap: 10 }}>
+            <Pressable
+              onPress={config.onCancel}
+              style={[styles.alertBtn, { backgroundColor: colors.backgroundSecondary, borderColor: colors.border, flex: 1 }]}
+            >
+              <Text style={{ fontFamily: font.sansSemiBold, fontSize: fontSize.sm, color: colors.textSecondary }}>
+                {config.danger ? 'Cancel' : 'Cancel'}
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={async () => { await config.onConfirm(); config.onCancel(); }}
+              style={[styles.alertBtn, { backgroundColor: config.danger ? '#FF3B30' : '#163A2F', flex: 1 }]}
+            >
+              <Text style={{ fontFamily: font.sansSemiBold, fontSize: fontSize.sm, color: '#FAF9F5' }}>
+                {config.confirmLabel}
+              </Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
 // ─── Tab switcher ─────────────────────────────────────────────────────────────
+
+type TabKey = 'members' | 'activity' | 'contributions';
 
 function TabSwitcher({
   active,
   onChange,
   pendingCount,
+  isAdmin,
 }: {
-  active: 'members' | 'activity';
-  onChange: (t: 'members' | 'activity') => void;
+  active:       TabKey;
+  onChange:     (t: TabKey) => void;
   pendingCount: number;
+  isAdmin:      boolean;
 }) {
   const { font, fontSize } = useTheme();
-  const tabs = [
-    { key: 'members'  as const, label: 'Members',  Icon: Users    },
-    { key: 'activity' as const, label: 'Activity', Icon: Activity },
+
+  const tabs: { key: TabKey; label: string; Icon: React.ComponentType<{ size: number; color: string; strokeWidth: number }> }[] = [
+    { key: 'members',       label: 'Members',      Icon: Users       },
+    { key: 'activity',      label: 'Activity',     Icon: Activity    },
+    ...(isAdmin ? [{ key: 'contributions' as const, label: 'Contributions', Icon: LayoutList }] : []),
   ];
+
   return (
-    <View style={{ flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 100, padding: 3, marginTop: 14, alignSelf: 'flex-start' }}>
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      directionalLockEnabled
+      nestedScrollEnabled
+      style={{ marginTop: 14 }}
+      contentContainerStyle={{ flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 100, padding: 3, alignSelf: 'flex-start' }}
+    >
       {tabs.map(({ key, label, Icon }) => {
-        const isActive = active === key;
-        const showBadge = key === 'activity' && pendingCount > 0;
+        const isActive   = active === key;
+        const showBadge  = key === 'contributions' && pendingCount > 0;
         return (
           <Pressable
             key={key}
             onPress={() => onChange(key)}
-            style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 18, paddingVertical: 8, borderRadius: 100, backgroundColor: isActive ? 'rgba(255,255,255,0.18)' : 'transparent' }}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 100, backgroundColor: isActive ? 'rgba(255,255,255,0.18)' : 'transparent' }}
           >
             <Icon size={13} color={isActive ? '#FAF9F5' : 'rgba(250,249,245,0.55)'} strokeWidth={2} />
             <Text style={{ fontFamily: font.sansSemiBold, fontSize: fontSize.sm, color: isActive ? '#FAF9F5' : 'rgba(250,249,245,0.55)', letterSpacing: 0.2 }}>
@@ -186,7 +243,7 @@ function TabSwitcher({
           </Pressable>
         );
       })}
-    </View>
+    </ScrollView>
   );
 }
 
@@ -195,10 +252,10 @@ function TabSwitcher({
 function MemberRow({
   ms, fmt, isLast, isOwner, onRemove,
 }: {
-  ms: MemberPaymentStatus;
-  fmt: (n: number) => string;
-  isLast: boolean;
-  isOwner: boolean;
+  ms:       MemberPaymentStatus;
+  fmt:      (n: number) => string;
+  isLast:   boolean;
+  isOwner:  boolean;
   onRemove?: () => void;
 }) {
   const { colors, font, fontSize, text } = useTheme();
@@ -209,10 +266,6 @@ function MemberRow({
     : 0;
   const basePct     = Math.min(paidPct, 100);
   const overflowPct = isGenerous ? Math.min(paidPct - 100, 60) : 0;
-
-  const sc = isGenerous
-    ? { bg: '#EEF9EC', fg: '#166534', label: `${paidPct}% 🎉` }
-    : STATUS_CONFIG[ms.status];
 
   return (
     <View>
@@ -238,14 +291,20 @@ function MemberRow({
           {ms.expectedAmount > 0 ? (
             <>
               <View style={{ height: 4, borderRadius: 2, backgroundColor: colors.border, marginTop: 5, overflow: 'hidden', flexDirection: 'row' }}>
-                <View style={{ height: 4, backgroundColor: ms.status === 'partial' ? '#F59E0B' : '#16C172', width: `${basePct}%` }} />
+                <View style={{ height: 4, backgroundColor: ms.status === 'overdue' ? '#FF3B30' : ms.status === 'partial' ? '#F59E0B' : '#16C172', width: `${basePct}%` }} />
                 {isGenerous && overflowPct > 0 && (
                   <View style={{ height: 4, backgroundColor: '#C4E07A', width: `${overflowPct}%` }} />
                 )}
               </View>
               <Text style={[text.caption, { color: colors.textTertiary, marginTop: 2 }]}>
                 {fmt(ms.verifiedAmount)}{ms.expectedAmount > 0 ? ` of ${fmt(ms.expectedAmount)}` : ''}
-                {isGenerous ? ` · ${paidPct - 100}% extra 🙌` : ms.pendingAmount > 0 ? ` · ${fmt(ms.pendingAmount)} pending` : ''}
+                {isGenerous
+                  ? ` · ${paidPct - 100}% extra 🙌`
+                  : ms.pendingAmount > 0
+                    ? ` · ${fmt(ms.pendingAmount)} pending`
+                    : ms.status === 'overdue'
+                      ? ' · overdue'
+                      : ''}
               </Text>
             </>
           ) : (
@@ -255,18 +314,9 @@ function MemberRow({
           )}
         </View>
 
-        {/* Status badge — hide for owner with no contribution expectation */}
-        {!(ms.role === 'owner' && ms.expectedAmount === 0 && ms.verifiedAmount === 0) && (
-          <View style={[styles.badge, { backgroundColor: sc.bg, marginLeft: 8 }]}>
-            <Text style={{ fontFamily: font.sansSemiBold, fontSize: 9, color: sc.fg, letterSpacing: 0.3 }}>
-              {isGenerous ? sc.label : sc.label.toUpperCase()}
-            </Text>
-          </View>
-        )}
-
         {/* Admin: remove member icon (non-owner members only) */}
         {isOwner && ms.role !== 'owner' && onRemove && (
-          <Pressable onPress={onRemove} hitSlop={10} style={{ marginLeft: 6, padding: 4 }}>
+          <Pressable onPress={onRemove} hitSlop={10} style={{ marginLeft: 8, padding: 4 }}>
             <UserMinus size={15} color={colors.textTertiary} strokeWidth={1.8} />
           </Pressable>
         )}
@@ -295,34 +345,43 @@ export default function CircleDetailScreen() {
     members, memberStatuses,
     isLoading, isSaving,
     loadCircle, saveSettings,
-    logContribution, verifyContribution, deleteContribution,
+    logContribution, verifyContribution, deleteContribution, denyContribution,
     removeMember,
   } = useCircleStore();
 
   const circle  = useMemo(() => circles.find((c) => c.id === circleId) ?? null, [circles, circleId]);
   const isOwner = !!user && !!circle && circle.ownerId === user.id;
 
-  const [activeTab, setActiveTab] = useState<'members' | 'activity'>('members');
+  const [activeTab, setActiveTab] = useState<TabKey>('members');
 
   useEffect(() => {
     if (circleId) loadCircle(circleId);
   }, [circleId]);
 
-  // Reload when WS sync brings in new members (syncVersion bumps in circles.store)
   useEffect(() => {
     if (circleId && syncVersion > 0) loadCircle(circleId);
   }, [syncVersion]);
 
   // ── Sheet refs ────────────────────────────────────────────────────────────
-  const logSheetRef  = useRef<BottomSheetModal>(null);
-  const editSheetRef = useRef<BottomSheetModal>(null);
-  const paySheetRef  = useRef<BottomSheetModal>(null);
+  const logSheetRef      = useRef<BottomSheetModal>(null);
+  const editSheetRef     = useRef<BottomSheetModal>(null);
+  const paySheetRef      = useRef<BottomSheetModal>(null);
+  const inviteSheetRef   = useRef<BottomSheetModal>(null);
+  const settingsMenuRef  = useRef<BottomSheetModal>(null);
+  const denySheetRef     = useRef<BottomSheetModal>(null);
 
   const renderBackdrop = useCallback(
     (props: BottomSheetBackdropProps) => (
       <BottomSheetBackdrop {...props} disappearsOnIndex={-1} appearsOnIndex={0} opacity={0.5} />
     ), [],
   );
+
+  // ── AkuAlert state ────────────────────────────────────────────────────────
+  const [alertConfig, setAlertConfig] = useState<AlertConfig | null>(null);
+
+  const showAlert = useCallback((cfg: Omit<AlertConfig, 'onCancel'>) => {
+    setAlertConfig({ ...cfg, onCancel: () => setAlertConfig(null) });
+  }, []);
 
   // ── Log contribution form ─────────────────────────────────────────────────
   const [logAmountKobo, setLogAmountKobo] = useState(0);
@@ -407,74 +466,32 @@ export default function CircleDetailScreen() {
     showToast('success', 'Payment details saved');
   }, [circleId, editAcctName, editAcctNumber, editBankName, editNotes, saveSettings, showToast]);
 
-  // ── Admin settings menu ───────────────────────────────────────────────────
-  const handleSettingsMenu = useCallback(() => {
-    Haptics.selectionAsync();
-    const options = ['Edit Circle Details', 'Edit Payment Details', 'Cancel'];
-    if (Platform.OS === 'ios') {
-      ActionSheetIOS.showActionSheetWithOptions(
-        { options, cancelButtonIndex: 2, title: 'Admin Settings' },
-        (idx) => {
-          if (idx === 0) openEditSheet();
-          if (idx === 1) openPaySheet();
-        },
-      );
-    } else {
-      Alert.alert('Admin Settings', undefined, [
-        { text: 'Edit Circle Details',  onPress: openEditSheet },
-        { text: 'Edit Payment Details', onPress: openPaySheet  },
-        { text: 'Cancel', style: 'cancel' },
-      ]);
-    }
-  }, [openEditSheet, openPaySheet]);
-
   // ── Derived display values ─────────────────────────────────────────────────
-  // Declared here so they're available to all callbacks below AND to JSX.
-  const circleEmoji = settings?.emoji ?? '💰';
+  const circleEmoji  = settings?.emoji ?? '💰';
+  const inviteCode   = (circle as any)?.inviteCode ?? '';
+  const joinUrl      = `https://nippysky.com/ventures/aku/join?code=${inviteCode}`;
+  const circleName   = circle?.name ?? 'Circle';
 
-  // ── Invite ────────────────────────────────────────────────────────────────
-  const handleInvite = useCallback(() => {
-    Haptics.selectionAsync();
-    const inviteCode = (circle as any)?.inviteCode ?? '';
-    // Use HTTPS so WhatsApp/iMessage renders it as a tappable link.
-    // nippysky.com/ventures/aku/join redirects to aku:// deep link on the device.
-    const joinUrl    = `https://nippysky.com/ventures/aku/join?code=${inviteCode}`;
-    const circleName = circle?.name ?? 'Circle';
+  // ── Invite actions ────────────────────────────────────────────────────────
+  const handleCopyCode = useCallback(async () => {
+    if (!inviteCode) { showToast('info', 'No invite code available'); return; }
+    await Clipboard.setStringAsync(inviteCode);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    showToast('success', `Code ${inviteCode} copied!`);
+  }, [inviteCode, showToast]);
 
-    const shareCode = async () => {
-      if (!inviteCode) { showToast('info', 'No invite code available'); return; }
-      await Clipboard.setStringAsync(inviteCode);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      showToast('success', `Code ${inviteCode} copied!`);
-    };
-
-    const shareLink = async () => {
-      if (!inviteCode) { showToast('info', 'No invite code available'); return; }
-      try {
-        const message =
-          `${circleEmoji} Join "${circleName}" on Akù — the smart money circle app!\n\n` +
-          `Tap the link to join instantly:\n${joinUrl}\n\n` +
-          `Or open Akù → More → Join a Circle → enter code: ${inviteCode}`;
-
-        await Share.share({ message, title: `Join ${circleName} on Akù` });
-      } catch {
-        showToast('error', 'Could not open share sheet');
-      }
-    };
-
-    if (Platform.OS === 'ios') {
-      ActionSheetIOS.showActionSheetWithOptions(
-        { options: ['Copy Invite Code', 'Share Invite Link', 'Cancel'], cancelButtonIndex: 2 },
-        (idx) => { if (idx === 0) shareCode(); if (idx === 1) shareLink(); },
-      );
-    } else {
-      Alert.alert('Invite Members', undefined, [
-        { text: 'Copy Invite Code', onPress: shareCode },
-        { text: 'Share Link',       onPress: shareLink },
-        { text: 'Cancel', style: 'cancel' },
-      ]);
+  const handleShareLink = useCallback(async () => {
+    if (!inviteCode) { showToast('info', 'No invite code available'); return; }
+    try {
+      const message =
+        `${circleEmoji} Join "${circleName}" on Akù — the smart money circle app!\n\n` +
+        `Tap to join instantly:\n${joinUrl}\n\n` +
+        `Or enter code: ${inviteCode}`;
+      await Share.share({ message, title: `Join ${circleName} on Akù` });
+    } catch {
+      showToast('error', 'Could not open share sheet');
     }
-  }, [circle, circleId, circleEmoji, showToast]);
+  }, [inviteCode, circleEmoji, circleName, joinUrl, showToast]);
 
   // ── Copy payment details ──────────────────────────────────────────────────
   const handleCopy = useCallback(async () => {
@@ -490,54 +507,63 @@ export default function CircleDetailScreen() {
     showToast('success', 'Account details copied');
   }, [settings, showToast]);
 
-  // ── Verify / delete contribution ──────────────────────────────────────────
-  const handleVerify = useCallback(async (c: CircleContribution) => {
+  // ── Verify contribution ───────────────────────────────────────────────────
+  const handleVerify = useCallback((c: CircleContribution) => {
     if (!user) return;
-    Alert.alert(
-      'Verify Contribution',
-      `Mark ${fmt(c.amount)} from ${c.userName} as verified?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Verify',
-          onPress: async () => {
-            await verifyContribution(c.id, user.id);
-            showToast('success', 'Verified ✓');
-          },
-        },
-      ],
-    );
-  }, [user, verifyContribution, showToast, fmt]);
-
-  const handleDeleteContribution = useCallback(async (c: CircleContribution) => {
-    Alert.alert('Remove Entry', `Remove ${fmt(c.amount)} entry?`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Remove',
-        style: 'destructive',
-        onPress: async () => { await deleteContribution(c.id); showToast('info', 'Removed'); },
+    showAlert({
+      title:        'Verify Contribution',
+      message:      `Mark ${fmt(c.amount)} from ${c.userName} as verified?`,
+      confirmLabel: 'Verify ✓',
+      onConfirm:    async () => {
+        await verifyContribution(c.id, user.id);
+        showToast('success', 'Verified ✓');
       },
-    ]);
-  }, [deleteContribution, showToast, fmt]);
+    });
+  }, [user, verifyContribution, showToast, fmt, showAlert]);
+
+  // ── Delete contribution ───────────────────────────────────────────────────
+  const handleDeleteContribution = useCallback((c: CircleContribution) => {
+    showAlert({
+      title:        'Remove Entry',
+      message:      `Remove this ${fmt(c.amount)} entry?`,
+      confirmLabel: 'Remove',
+      danger:       true,
+      onConfirm:    async () => { await deleteContribution(c.id); showToast('info', 'Removed'); },
+    });
+  }, [deleteContribution, showToast, fmt, showAlert]);
+
+  // ── Deny contribution (admin) — opens sheet for reason ───────────────────
+  const [denyTarget, setDenyTarget] = useState<CircleContribution | null>(null);
+  const [denyReason, setDenyReason] = useState('');
+
+  const handleDeny = useCallback((c: CircleContribution) => {
+    setDenyTarget(c);
+    setDenyReason('');
+    denySheetRef.current?.present();
+  }, []);
+
+  const handleConfirmDeny = useCallback(async () => {
+    if (!denyTarget) return;
+    await denyContribution(denyTarget.id, denyReason);
+    denySheetRef.current?.dismiss();
+    setDenyTarget(null);
+    setDenyReason('');
+    showToast('info', 'Contribution declined');
+  }, [denyTarget, denyReason, denyContribution, showToast]);
 
   // ── Remove member (admin only) ────────────────────────────────────────────
-  const handleRemoveMember = useCallback((memberId: string, memberName: string) => {
-    Alert.alert(
-      'Remove Member',
-      `Remove ${memberName} from this circle?\n\nTheir contribution history will remain.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Remove',
-          style: 'destructive',
-          onPress: async () => {
-            await removeMember(memberId);
-            showToast('info', `${memberName} removed`);
-          },
-        },
-      ],
-    );
-  }, [removeMember, showToast]);
+  const handleRemoveMember = useCallback((memberId: string, memberUserId: string, memberName: string) => {
+    showAlert({
+      title:        'Remove Member',
+      message:      `Remove ${memberName} from this circle?\n\nAll members will be notified. Their contribution history will remain.`,
+      confirmLabel: 'Remove',
+      danger:       true,
+      onConfirm:    async () => {
+        await removeMember(memberId, memberUserId, memberName);
+        showToast('info', `${memberName} removed`);
+      },
+    });
+  }, [removeMember, showToast, showAlert]);
 
   // ── Computed values ───────────────────────────────────────────────────────
   const myContributions = useMemo(
@@ -546,9 +572,11 @@ export default function CircleDetailScreen() {
   const pendingAll = useMemo(
     () => contributions.filter((c) => c.status === 'pending'), [contributions],
   );
+  const allVerified = useMemo(
+    () => contributions.filter((c) => c.status === 'verified'), [contributions],
+  );
   const grandVerified = useMemo(
-    () => contributions.filter((c) => c.status === 'verified').reduce((s, c) => s + c.amount, 0),
-    [contributions],
+    () => allVerified.reduce((s, c) => s + c.amount, 0), [allVerified],
   );
   const targetPct = settings?.targetAmount && settings.targetAmount > 0
     ? Math.min(Math.round((grandVerified / settings.targetAmount) * 100), 100)
@@ -620,7 +648,7 @@ export default function CircleDetailScreen() {
           Members · {members.length}
         </Text>
         <Pressable
-          onPress={handleInvite}
+          onPress={() => { Haptics.selectionAsync(); inviteSheetRef.current?.present(); }}
           style={[styles.inviteBtn, { backgroundColor: colors.primary + '14', borderColor: colors.primary + '30' }]}
         >
           <UserPlus size={13} color={colors.primary} strokeWidth={2} />
@@ -650,7 +678,7 @@ export default function CircleDetailScreen() {
                 isLast={idx === memberStatuses.length - 1}
                 isOwner={isOwner}
                 onRemove={memberRecord && ms.role !== 'owner'
-                  ? () => handleRemoveMember(memberRecord.id, ms.name)
+                  ? () => handleRemoveMember(memberRecord.id, memberRecord.userId, ms.name)
                   : undefined
                 }
               />
@@ -738,48 +766,6 @@ export default function CircleDetailScreen() {
       contentContainerStyle={[styles.tabBody, { paddingBottom: insets.bottom + layout.tabBarHeight + 80, paddingHorizontal: layout.screenPadding }]}
       showsVerticalScrollIndicator={false}
     >
-      {/* Admin: Pending Approvals — shown first so admin acts quickly */}
-      {isOwner && pendingAll.length > 0 && (
-        <>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8, marginBottom: 10 }}>
-            <Text style={[text.labelCaps, { color: colors.textTertiary, marginLeft: 2 }]}>
-              Pending Approvals · {pendingAll.length}
-            </Text>
-            <AdminPill />
-          </View>
-          <Animated.View
-            entering={FadeInDown.duration(280)}
-            style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, padding: 0, overflow: 'hidden' }]}
-          >
-            {pendingAll.map((c, idx) => (
-              <View key={c.id}>
-                <View style={[styles.pendingRow, { paddingHorizontal: 14 }]}>
-                  <Avatar name={c.userName} size={34} />
-                  <View style={{ flex: 1, marginLeft: 10 }}>
-                    <Text style={{ fontFamily: font.sansSemiBold, fontSize: fontSize.sm, color: colors.text }} numberOfLines={1}>
-                      {c.userName || 'Member'}
-                    </Text>
-                    <Text style={[text.caption, { color: colors.textTertiary }]}>
-                      {fmtDate(c.createdAt)}{c.note ? ` · ${c.note}` : ''}
-                    </Text>
-                  </View>
-                  <Text style={{ fontFamily: font.sansSemiBold, fontSize: fontSize.sm, color: colors.text, marginRight: 10 }}>
-                    {fmt(c.amount)}
-                  </Text>
-                  <Pressable onPress={() => handleVerify(c)} style={[styles.iconBtn, { backgroundColor: colors.primary }]} disabled={isSaving}>
-                    <ShieldCheck size={14} color="#FAF9F5" strokeWidth={2} />
-                  </Pressable>
-                  <Pressable onPress={() => handleDeleteContribution(c)} style={[styles.iconBtn, { backgroundColor: colors.dangerBg, marginLeft: 6 }]} disabled={isSaving}>
-                    <Trash2 size={14} color={colors.danger} strokeWidth={2} />
-                  </Pressable>
-                </View>
-                {idx < pendingAll.length - 1 && <Divider style={{ marginLeft: 58 }} />}
-              </View>
-            ))}
-          </Animated.View>
-        </>
-      )}
-
       {/* Leaderboard */}
       <SectionLabel label="Leaderboard" />
       {leaderboard.length === 0 ? (
@@ -875,6 +861,130 @@ export default function CircleDetailScreen() {
     </ScrollView>
   );
 
+  // ── CONTRIBUTIONS TAB (admin only) ────────────────────────────────────────
+  const ContributionsTab = (
+    <ScrollView
+      contentContainerStyle={[styles.tabBody, { paddingBottom: insets.bottom + layout.tabBarHeight + 40, paddingHorizontal: layout.screenPadding }]}
+      showsVerticalScrollIndicator={false}
+    >
+      {/* Pending Approvals */}
+      {pendingAll.length === 0 ? (
+        <>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8, marginBottom: 10 }}>
+            <Text style={[text.labelCaps, { color: colors.textTertiary, marginLeft: 2 }]}>Pending Approvals</Text>
+            <AdminPill />
+          </View>
+          <View style={[styles.emptyCard, { borderColor: colors.border }]}>
+            <CheckCircle2 size={24} color={colors.textTertiary} strokeWidth={1.4} />
+            <Text style={[text.bodySm, { color: colors.textTertiary, marginTop: 6, textAlign: 'center' }]}>
+              All clear — no pending contributions.
+            </Text>
+          </View>
+        </>
+      ) : (
+        <>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8, marginBottom: 10 }}>
+            <Text style={[text.labelCaps, { color: colors.textTertiary, marginLeft: 2 }]}>
+              Pending Approvals · {pendingAll.length}
+            </Text>
+            <AdminPill />
+          </View>
+          <Text style={[text.bodySm, { color: colors.textTertiary, marginBottom: 10, lineHeight: 18 }]}>
+            Verify to confirm, or deny with a reason — the member will be notified.
+          </Text>
+          <Animated.View
+            entering={FadeInDown.duration(280)}
+            style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, padding: 0, overflow: 'hidden' }]}
+          >
+            {pendingAll.map((c, idx) => (
+              <View key={c.id}>
+                <View style={[styles.pendingRow, { paddingHorizontal: 14 }]}>
+                  <Avatar name={c.userName} size={36} />
+                  <View style={{ flex: 1, marginLeft: 10 }}>
+                    <Text style={{ fontFamily: font.sansSemiBold, fontSize: fontSize.sm, color: colors.text }} numberOfLines={1}>
+                      {c.userName || 'Member'}
+                    </Text>
+                    <Text style={[text.caption, { color: colors.textTertiary }]}>
+                      {fmtDate(c.createdAt)}{c.note ? ` · ${c.note}` : ''}
+                    </Text>
+                  </View>
+                  <Text style={{ fontFamily: font.sansSemiBold, fontSize: fontSize.sm, color: colors.text, marginRight: 10 }}>
+                    {fmt(c.amount)}
+                  </Text>
+                  {/* Approve */}
+                  <Pressable
+                    onPress={() => handleVerify(c)}
+                    style={[styles.iconBtn, { backgroundColor: '#163A2F' }]}
+                    disabled={isSaving}
+                  >
+                    <ShieldCheck size={14} color="#C4E07A" strokeWidth={2} />
+                  </Pressable>
+                  {/* Deny */}
+                  <Pressable
+                    onPress={() => handleDeny(c)}
+                    style={[styles.iconBtn, { backgroundColor: colors.dangerBg, marginLeft: 6 }]}
+                    disabled={isSaving}
+                  >
+                    <XCircle size={14} color={colors.danger} strokeWidth={2} />
+                  </Pressable>
+                </View>
+                {idx < pendingAll.length - 1 && <Divider style={{ marginLeft: 60 }} />}
+              </View>
+            ))}
+          </Animated.View>
+        </>
+      )}
+
+      {/* All Contributions log */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 22, marginBottom: 10 }}>
+        <Text style={[text.labelCaps, { color: colors.textTertiary, marginLeft: 2 }]}>
+          All Contributions · {contributions.length}
+        </Text>
+      </View>
+      {contributions.length === 0 ? (
+        <View style={[styles.emptyCard, { borderColor: colors.border }]}>
+          <Text style={[text.bodySm, { color: colors.textTertiary, textAlign: 'center' }]}>
+            No contributions logged yet.
+          </Text>
+        </View>
+      ) : (
+        <Animated.View
+          entering={FadeInDown.duration(280)}
+          style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, padding: 0, overflow: 'hidden' }]}
+        >
+          {contributions.map((c, idx) => (
+            <View key={c.id}>
+              <View style={[styles.myRow, { paddingHorizontal: 14 }]}>
+                <Avatar name={c.userName} size={34} />
+                <View style={{ flex: 1, marginLeft: 10 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <Text style={{ fontFamily: font.sansSemiBold, fontSize: fontSize.sm, color: colors.text }}>
+                      {fmt(c.amount)}
+                    </Text>
+                    <View style={[styles.badge, { backgroundColor: c.status === 'verified' ? '#D1FAE5' : '#FEF3C7' }]}>
+                      <Text style={{ fontFamily: font.sansSemiBold, fontSize: 9, color: c.status === 'verified' ? '#065F46' : '#92400E', letterSpacing: 0.4 }}>
+                        {c.status === 'verified' ? '✓ VERIFIED' : '⏳ PENDING'}
+                      </Text>
+                    </View>
+                  </View>
+                  <Text style={[text.caption, { color: colors.textTertiary, marginTop: 1 }]}>
+                    {c.userName} · {fmtDate(c.createdAt)}{c.note ? ` · ${c.note}` : ''}
+                  </Text>
+                </View>
+                {c.status === 'pending' && (
+                  <Pressable onPress={() => handleDeleteContribution(c)} hitSlop={8} disabled={isSaving}>
+                    <Trash2 size={15} color={colors.textTertiary} strokeWidth={1.6} />
+                  </Pressable>
+                )}
+              </View>
+              {idx < contributions.length - 1 && <Divider style={{ marginLeft: 58 }} />}
+            </View>
+          ))}
+        </Animated.View>
+      )}
+    </ScrollView>
+  );
+
   // ─────────────────────────────────────────────────────────────────────────
 
   return (
@@ -905,9 +1015,13 @@ export default function CircleDetailScreen() {
             </View>
           </View>
 
-          {/* Admin-only settings gear */}
+          {/* Admin-only settings gear — opens branded settings menu sheet */}
           {isOwner && (
-            <Pressable onPress={handleSettingsMenu} hitSlop={8} style={styles.headerBtn}>
+            <Pressable
+              onPress={() => { Haptics.selectionAsync(); settingsMenuRef.current?.present(); }}
+              hitSlop={8}
+              style={styles.headerBtn}
+            >
               <Settings2 size={20} color="#FAF9F5" strokeWidth={1.8} />
             </Pressable>
           )}
@@ -948,12 +1062,17 @@ export default function CircleDetailScreen() {
           active={activeTab}
           onChange={setActiveTab}
           pendingCount={isOwner ? pendingAll.length : 0}
+          isAdmin={isOwner}
         />
       </View>
 
       {isLoading
         ? <ActivityIndicator color={colors.primary} style={{ marginTop: 40 }} />
-        : activeTab === 'members' ? MembersTab : ActivityTab}
+        : activeTab === 'members'
+          ? MembersTab
+          : activeTab === 'activity'
+            ? ActivityTab
+            : ContributionsTab}
 
       {/* Log Contribution FAB (Activity tab — all members) */}
       {activeTab === 'activity' && (
@@ -983,7 +1102,7 @@ export default function CircleDetailScreen() {
         keyboardBehavior="interactive"
         keyboardBlurBehavior="restore"
       >
-        <BottomSheetView style={{ paddingHorizontal: 20, paddingBottom: insets.bottom + 16 }}>
+        <BottomSheetScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: insets.bottom + 24 }}>
           <Text style={{ fontFamily: font.displayLight, fontSize: fontSize.xl, color: colors.text, marginBottom: 4 }}>
             Log Contribution
           </Text>
@@ -1006,7 +1125,7 @@ export default function CircleDetailScreen() {
             onPress={handleLog}
             disabled={isSaving || logAmountKobo <= 0}
           />
-        </BottomSheetView>
+        </BottomSheetScrollView>
       </BottomSheetModal>
 
       {/* ── Edit Circle Sheet (admin only) ── */}
@@ -1019,7 +1138,7 @@ export default function CircleDetailScreen() {
         keyboardBehavior="interactive"
         keyboardBlurBehavior="restore"
       >
-        <BottomSheetScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: insets.bottom + 24 }}>
+        <BottomSheetScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: insets.bottom + 24 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
             <Text style={{ fontFamily: font.displayLight, fontSize: fontSize.xl, color: colors.text }}>Edit Circle</Text>
             <AdminPill />
@@ -1076,7 +1195,7 @@ export default function CircleDetailScreen() {
 
           {/* Frequency */}
           <Text style={[text.label, { color: colors.textSecondary, marginBottom: 8 }]}>Contribution Frequency</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginBottom: 16 }}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} directionalLockEnabled nestedScrollEnabled contentContainerStyle={{ gap: 8, marginBottom: 16 }}>
             {(Object.keys(FREQ_LABELS) as CircleFrequency[]).map((f) => (
               <Pressable
                 key={f}
@@ -1124,7 +1243,7 @@ export default function CircleDetailScreen() {
         keyboardBehavior="interactive"
         keyboardBlurBehavior="restore"
       >
-        <BottomSheetScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: insets.bottom + 24 }}>
+        <BottomSheetScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: insets.bottom + 24 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
             <Text style={{ fontFamily: font.displayLight, fontSize: fontSize.xl, color: colors.text }}>Payment Details</Text>
             <AdminPill />
@@ -1133,29 +1252,200 @@ export default function CircleDetailScreen() {
             Where should members send their contributions?
           </Text>
 
-          {([
-            { label: 'Institution / Platform', value: editBankName,   setter: setEditBankName,   placeholder: 'e.g. Bank, PayPal, Venmo'  },
-            { label: 'Account / Reference',    value: editAcctNumber, setter: setEditAcctNumber, placeholder: 'Account number, phone, ID…' },
-            { label: 'Recipient Name',         value: editAcctName,   setter: setEditAcctName,   placeholder: 'Who receives the payment'   },
-            { label: 'Notes',                  value: editNotes,      setter: setEditNotes,      placeholder: 'Any extra instructions'      },
-          ] as const).map((f) => (
-            <View key={f.label} style={{ marginBottom: 14 }}>
-              <Text style={[text.label, { color: colors.textSecondary, marginBottom: 6 }]}>{f.label}</Text>
-              <View style={[styles.inputWrap, { borderColor: colors.border, backgroundColor: colors.inputBackground }]}>
-                <TextInput
-                  value={f.value}
-                  onChangeText={f.setter}
-                  placeholder={f.placeholder}
-                  placeholderTextColor={colors.inputPlaceholder}
-                  style={{ fontFamily: font.sansRegular, fontSize: fontSize.sm, color: colors.text, padding: 14 }}
-                />
-              </View>
+          <View style={{ marginBottom: 14 }}>
+            <Text style={[text.label, { color: colors.textSecondary, marginBottom: 6 }]}>Institution / Platform</Text>
+            <View style={[styles.inputWrap, { borderColor: colors.border, backgroundColor: colors.inputBackground }]}>
+              <TextInput
+                value={editBankName}
+                onChangeText={setEditBankName}
+                placeholder="e.g. GTBank, Opay, PayPal, Venmo"
+                placeholderTextColor={colors.inputPlaceholder}
+                style={{ fontFamily: font.sansRegular, fontSize: fontSize.sm, color: colors.text, padding: 14 }}
+              />
             </View>
-          ))}
+          </View>
+          <View style={{ marginBottom: 14 }}>
+            <Text style={[text.label, { color: colors.textSecondary, marginBottom: 6 }]}>Account / Reference</Text>
+            <View style={[styles.inputWrap, { borderColor: colors.border, backgroundColor: colors.inputBackground }]}>
+              <TextInput
+                value={editAcctNumber}
+                onChangeText={setEditAcctNumber}
+                placeholder="Account number, phone, wallet ID…"
+                placeholderTextColor={colors.inputPlaceholder}
+                keyboardType="default"
+                style={{ fontFamily: font.sansRegular, fontSize: fontSize.sm, color: colors.text, padding: 14 }}
+              />
+            </View>
+          </View>
+          <View style={{ marginBottom: 14 }}>
+            <Text style={[text.label, { color: colors.textSecondary, marginBottom: 6 }]}>Recipient Name</Text>
+            <View style={[styles.inputWrap, { borderColor: colors.border, backgroundColor: colors.inputBackground }]}>
+              <TextInput
+                value={editAcctName}
+                onChangeText={setEditAcctName}
+                placeholder="Who receives the payment"
+                placeholderTextColor={colors.inputPlaceholder}
+                style={{ fontFamily: font.sansRegular, fontSize: fontSize.sm, color: colors.text, padding: 14 }}
+              />
+            </View>
+          </View>
+          <View style={{ marginBottom: 20 }}>
+            <Text style={[text.label, { color: colors.textSecondary, marginBottom: 6 }]}>Notes (optional)</Text>
+            <View style={[styles.inputWrap, { borderColor: colors.border, backgroundColor: colors.inputBackground }]}>
+              <TextInput
+                value={editNotes}
+                onChangeText={setEditNotes}
+                placeholder="Any extra instructions for members"
+                placeholderTextColor={colors.inputPlaceholder}
+                multiline
+                numberOfLines={3}
+                style={{ fontFamily: font.sansRegular, fontSize: fontSize.sm, color: colors.text, padding: 14, minHeight: 72, textAlignVertical: 'top' }}
+              />
+            </View>
+          </View>
 
           <View style={{ marginTop: 8 }}>
             <Button variant="primary" label={isSaving ? 'Saving…' : 'Save Payment Details'} onPress={handleSavePayment} disabled={isSaving} />
           </View>
+        </BottomSheetScrollView>
+      </BottomSheetModal>
+
+      {/* ── Admin Settings Menu Sheet ── */}
+      <BottomSheetModal
+        ref={settingsMenuRef}
+        snapPoints={['30%']}
+        backdropComponent={renderBackdrop}
+        backgroundStyle={{ backgroundColor: colors.card }}
+        handleIndicatorStyle={{ backgroundColor: colors.border }}
+      >
+        <BottomSheetView style={{ paddingHorizontal: 20, paddingBottom: insets.bottom + 16 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 20 }}>
+            <Text style={{ fontFamily: font.displayLight, fontSize: fontSize.xl, color: colors.text }}>Admin Settings</Text>
+            <AdminPill />
+          </View>
+
+          <Pressable
+            onPress={() => { settingsMenuRef.current?.dismiss(); setTimeout(openEditSheet, 250); }}
+            style={[styles.menuItem, { borderColor: colors.border }]}
+          >
+            <Settings2 size={18} color={colors.primary} strokeWidth={1.8} />
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontFamily: font.sansSemiBold, fontSize: fontSize.sm, color: colors.text }}>Edit Circle Details</Text>
+              <Text style={[text.caption, { color: colors.textTertiary }]}>Name, emoji, goal, frequency, deadline</Text>
+            </View>
+          </Pressable>
+
+          <Pressable
+            onPress={() => { settingsMenuRef.current?.dismiss(); setTimeout(openPaySheet, 250); }}
+            style={[styles.menuItem, { borderColor: colors.border, marginTop: 10, borderBottomWidth: 0 }]}
+          >
+            <CreditCard size={18} color={colors.primary} strokeWidth={1.8} />
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontFamily: font.sansSemiBold, fontSize: fontSize.sm, color: colors.text }}>Edit Payment Details</Text>
+              <Text style={[text.caption, { color: colors.textTertiary }]}>Bank account, mobile money, etc.</Text>
+            </View>
+          </Pressable>
+        </BottomSheetView>
+      </BottomSheetModal>
+
+      {/* ── Invite Sheet (branded) ── */}
+      <BottomSheetModal
+        ref={inviteSheetRef}
+        snapPoints={['55%']}
+        backdropComponent={renderBackdrop}
+        backgroundStyle={{ backgroundColor: colors.card }}
+        handleIndicatorStyle={{ backgroundColor: colors.border }}
+      >
+        <BottomSheetScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: insets.bottom + 24 }}>
+          {/* Circle card */}
+          <View style={[styles.inviteCircleCard, { backgroundColor: '#163A2F' }]}>
+            <Text style={{ fontSize: 36, marginBottom: 8 }}>{circleEmoji}</Text>
+            <Text style={{ fontFamily: font.displayLight, fontSize: fontSize['2xl'], color: '#FAF9F5', letterSpacing: -0.5, textAlign: 'center' }}>
+              {circleName}
+            </Text>
+            <Text style={{ fontFamily: font.sansRegular, fontSize: fontSize.sm, color: 'rgba(250,249,245,0.6)', marginTop: 4 }}>
+              {members.length} member{members.length !== 1 ? 's' : ''}
+            </Text>
+          </View>
+
+          {/* Invite code */}
+          <Text style={[text.labelCaps, { color: colors.textTertiary, marginTop: 20, marginBottom: 8, marginLeft: 2 }]}>Invite Code</Text>
+          <Pressable
+            onPress={handleCopyCode}
+            style={[styles.codeBox, { backgroundColor: colors.backgroundSecondary, borderColor: colors.border }]}
+          >
+            <Text style={{ fontFamily: font.sansSemiBold, fontSize: 28, letterSpacing: 6, color: colors.text, textAlign: 'center' }}>
+              {inviteCode || '——————'}
+            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6 }}>
+              <Copy size={12} color={colors.primary} strokeWidth={2} />
+              <Text style={{ fontFamily: font.sansSemiBold, fontSize: fontSize.xs, color: colors.primary }}>Tap to copy</Text>
+            </View>
+          </Pressable>
+
+          {/* Actions */}
+          <View style={{ gap: 10, marginTop: 14 }}>
+            <Pressable
+              onPress={handleShareLink}
+              style={[styles.shareBtn, { backgroundColor: '#163A2F' }]}
+            >
+              <Share2 size={18} color="#FAF9F5" strokeWidth={1.8} />
+              <Text style={{ fontFamily: font.sansSemiBold, fontSize: fontSize.sm, color: '#FAF9F5' }}>Share Invite Link</Text>
+            </Pressable>
+            <Pressable
+              onPress={handleCopyCode}
+              style={[styles.shareBtn, { backgroundColor: colors.backgroundSecondary, borderWidth: 1, borderColor: colors.border }]}
+            >
+              <Link2 size={18} color={colors.text} strokeWidth={1.8} />
+              <Text style={{ fontFamily: font.sansSemiBold, fontSize: fontSize.sm, color: colors.text }}>Copy Code Only</Text>
+            </Pressable>
+          </View>
+
+          <Text style={[text.caption, { color: colors.textTertiary, textAlign: 'center', marginTop: 14, lineHeight: 18 }]}>
+            Share the link or code. Anyone with it can join this circle.
+          </Text>
+        </BottomSheetScrollView>
+      </BottomSheetModal>
+
+      {/* ── Deny Contribution Sheet (admin only) ── */}
+      <BottomSheetModal
+        ref={denySheetRef}
+        snapPoints={['48%']}
+        backdropComponent={renderBackdrop}
+        backgroundStyle={{ backgroundColor: colors.card }}
+        handleIndicatorStyle={{ backgroundColor: colors.border }}
+        keyboardBehavior="interactive"
+        keyboardBlurBehavior="restore"
+      >
+        <BottomSheetScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: insets.bottom + 24 }}>
+          <Text style={{ fontFamily: font.displayLight, fontSize: fontSize.xl, color: colors.text, marginBottom: 4 }}>
+            Decline Contribution
+          </Text>
+          {denyTarget && (
+            <Text style={[text.caption, { color: colors.textTertiary, marginBottom: 16, lineHeight: 18 }]}>
+              Declining {fmt(denyTarget.amount)} from {denyTarget.userName}. They'll receive a push notification with your reason.
+            </Text>
+          )}
+
+          <Text style={[text.label, { color: colors.textSecondary, marginBottom: 6 }]}>Reason (optional but recommended)</Text>
+          <View style={[styles.inputWrap, { borderColor: colors.border, backgroundColor: colors.inputBackground, marginBottom: 20 }]}>
+            <TextInput
+              value={denyReason}
+              onChangeText={setDenyReason}
+              placeholder="e.g. Wrong amount, already received, not yet due…"
+              placeholderTextColor={colors.inputPlaceholder}
+              multiline
+              numberOfLines={3}
+              style={{ fontFamily: font.sansRegular, fontSize: fontSize.sm, color: colors.text, padding: 14, minHeight: 80, textAlignVertical: 'top' }}
+            />
+          </View>
+
+          <Button
+            variant="danger"
+            label={isSaving ? 'Declining…' : 'Decline Contribution'}
+            onPress={handleConfirmDeny}
+            disabled={isSaving}
+          />
         </BottomSheetScrollView>
       </BottomSheetModal>
 
@@ -1166,6 +1456,9 @@ export default function CircleDetailScreen() {
         onClose={() => setShowDeadlinePicker(false)}
         title="Set deadline"
       />
+
+      {/* Branded alert — replaces all Alert.alert calls */}
+      <AkuAlert config={alertConfig} />
     </View>
   );
 }
@@ -1184,25 +1477,34 @@ const styles = StyleSheet.create({
     borderRadius: 20, borderWidth: 1,
     borderColor: 'rgba(196,224,122,0.25)',
   },
-  progressCard:{ backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 14, padding: 14, marginTop: 12 },
-  bigBarWrap:  { backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 6, height: 10, overflow: 'hidden' },
-  bigBar:      { height: 10, borderRadius: 6 },
-  tabBody:     { paddingTop: 8 },
-  metaRow:     { flexDirection: 'row', borderRadius: 14, borderWidth: 1, padding: 14, marginTop: 8, alignItems: 'center' },
-  metaCell:    { flex: 1, gap: 2 },
-  card:        { borderRadius: 14, borderWidth: 1, padding: 14 },
-  emptyCard:   { borderRadius: 14, borderWidth: 1, padding: 24, alignItems: 'center', justifyContent: 'center', gap: 6 },
-  badge:       { paddingHorizontal: 7, paddingVertical: 3, borderRadius: 20 },
-  memberRow:   { flexDirection: 'row', alignItems: 'center', paddingVertical: 13 },
-  acctRow:     { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 4 },
-  copyBtn:     { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
-  leaderRow:   { flexDirection: 'row', alignItems: 'center', paddingVertical: 13 },
-  rankCol:     { width: 30, alignItems: 'center', marginRight: 8 },
-  pendingRow:  { flexDirection: 'row', alignItems: 'center', paddingVertical: 12 },
-  iconBtn:     { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
-  myRow:       { flexDirection: 'row', alignItems: 'center', paddingVertical: 13 },
-  fab:         { position: 'absolute' },
-  fabBtn:      { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 20, paddingVertical: 13, borderRadius: 100, shadowColor: '#163A2F', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 6 },
-  inputWrap:   { borderRadius: 12, borderWidth: 1, overflow: 'hidden' },
-  inviteBtn:   { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 100, borderWidth: 1 },
+  progressCard:     { backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 14, padding: 14, marginTop: 12 },
+  bigBarWrap:       { backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 6, height: 10, overflow: 'hidden' },
+  bigBar:           { height: 10, borderRadius: 6 },
+  tabBody:          { paddingTop: 8 },
+  metaRow:          { flexDirection: 'row', borderRadius: 14, borderWidth: 1, padding: 14, marginTop: 8, alignItems: 'center' },
+  metaCell:         { flex: 1, gap: 2 },
+  card:             { borderRadius: 14, borderWidth: 1, padding: 14 },
+  emptyCard:        { borderRadius: 14, borderWidth: 1, padding: 24, alignItems: 'center', justifyContent: 'center', gap: 6 },
+  badge:            { paddingHorizontal: 7, paddingVertical: 3, borderRadius: 20 },
+  memberRow:        { flexDirection: 'row', alignItems: 'center', paddingVertical: 13 },
+  acctRow:          { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 4 },
+  copyBtn:          { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  leaderRow:        { flexDirection: 'row', alignItems: 'center', paddingVertical: 13 },
+  rankCol:          { width: 30, alignItems: 'center', marginRight: 8 },
+  pendingRow:       { flexDirection: 'row', alignItems: 'center', paddingVertical: 12 },
+  iconBtn:          { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
+  myRow:            { flexDirection: 'row', alignItems: 'center', paddingVertical: 13 },
+  fab:              { position: 'absolute' },
+  fabBtn:           { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 20, paddingVertical: 13, borderRadius: 100, shadowColor: '#163A2F', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 6 },
+  inputWrap:        { borderRadius: 12, borderWidth: 1, overflow: 'hidden' },
+  inviteBtn:        { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 100, borderWidth: 1 },
+  menuItem:         { flexDirection: 'row', alignItems: 'center', gap: 14, padding: 14, borderRadius: 14, borderWidth: 1 },
+  // AkuAlert
+  alertOverlay:     { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center', padding: 24 },
+  alertCard:        { width: '100%', maxWidth: 340, borderRadius: 20, padding: 24, shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.18, shadowRadius: 20, elevation: 12 },
+  alertBtn:         { height: 46, borderRadius: 12, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
+  // Invite sheet
+  inviteCircleCard: { borderRadius: 20, padding: 24, alignItems: 'center', marginTop: 4 },
+  codeBox:          { borderRadius: 16, borderWidth: 1, padding: 20, alignItems: 'center', marginBottom: 4 },
+  shareBtn:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, height: 52, borderRadius: 14 },
 });

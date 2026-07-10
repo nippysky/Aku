@@ -11,7 +11,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import Svg, { Path } from 'react-native-svg';
+import Svg, { Path, Ellipse } from 'react-native-svg';
 import { Button } from '../../components/ui';
 import { useAuthStore } from '../../store';
 import { Palette } from '../../theme/colors';
@@ -23,31 +23,35 @@ import { Spacing, Layout } from '../../theme/spacing';
 function AkuMonogramSmall() {
   return (
     <Svg width={56} height={56} viewBox="0 0 140 140" fill="none">
+      {/* Left leg — thick bold */}
       <Path
-        d="M70 16 L22 124"
+        d="M70 20 L18 122"
         stroke={Palette.gold}
-        strokeWidth={4.5}
+        strokeWidth={14}
         strokeLinecap="round"
       />
+      {/* Right leg */}
       <Path
-        d="M70 16 L118 124"
+        d="M70 20 L122 122"
         stroke={Palette.gold}
-        strokeWidth={4.5}
+        strokeWidth={14}
         strokeLinecap="round"
       />
+      {/* Straight crossbar */}
       <Path
-        d="M38 80 L70 58 L102 80"
+        d="M38 83 L102 83"
         stroke={Palette.gold}
-        strokeWidth={4}
+        strokeWidth={11}
         strokeLinecap="round"
-        strokeLinejoin="round"
-        fill="none"
       />
-      <Path
-        d="M70 5 L70 13"
-        stroke={Palette.gold}
-        strokeWidth={3}
-        strokeLinecap="round"
+      {/* Apostrophe — filled teardrop above apex */}
+      <Ellipse
+        cx={86}
+        cy={13}
+        rx={6.5}
+        ry={10}
+        fill={Palette.gold}
+        transform="rotate(-8, 86, 13)"
       />
     </Svg>
   );

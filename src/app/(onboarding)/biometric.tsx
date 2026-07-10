@@ -194,7 +194,7 @@ export default function BiometricScreen() {
     >
       <OnboardingHeader
         step={5}
-        total={9}
+        total={8}
         onBack={() => router.back()}
         dark={true}
       />

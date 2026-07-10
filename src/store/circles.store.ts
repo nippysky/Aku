@@ -9,10 +9,10 @@
  * see circle.store.ts.
  */
 import { create } from 'zustand';
-import { eq, and, inArray } from 'drizzle-orm';
+import { eq, and, inArray, notInArray } from 'drizzle-orm';
 import { getDatabase, schema } from '../lib/database/client';
 import { generateUUID } from '../lib/uuid';
-import { registerCircle, joinCircleByCode, fetchUserCircles, fetchCircleMembers } from '../lib/api-client';
+import { registerCircle, joinCircleByCode, fetchUserCircles, fetchCircleMembers, fetchCircleSettings } from '../lib/api-client';
 import type { Household, HouseholdMember, CircleFrequency, ContributionType } from '../types';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -234,9 +234,96 @@ export const useCirclesStore = create<CirclesState>()((set, get) => ({
               });
             }
           }
+
+          // ── CLEANUP: Remove stale local members no longer on the server ──
+          // Critical fix: when admin kicks someone, this deletes them from ALL
+          // devices' local SQLite so the circle screen refreshes correctly.
+          if (allMembers.length > 0) {
+            const serverMemberIds = allMembers.map((m) => m.userId);
+            await db
+              .delete(schema.householdMembers)
+              .where(
+                and(
+                  eq(schema.householdMembers.householdId, c.id),
+                  notInArray(schema.householdMembers.userId, serverMemberIds),
+                ),
+              );
+          }
         } catch {
           // Non-fatal — member sync fails if user isn't in this circle yet
         }
+
+        // ── Sync circle settings from server (fixes frequency/target mismatch) ──
+        // The admin pushes settings to the server on every save; members pull them
+        // here so everyone sees the same frequency, goal, and per-member amounts.
+        try {
+          const serverSettings = await fetchCircleSettings(c.id);
+          if (serverSettings && typeof serverSettings === 'object') {
+            const existingSettings = await db
+              .select({ id: schema.circleSettings.id })
+              .from(schema.circleSettings)
+              .where(eq(schema.circleSettings.id, c.id));
+
+            const payload: any = {
+              ...(serverSettings.frequency        !== undefined ? { frequency:        serverSettings.frequency        } : {}),
+              ...(serverSettings.targetAmount      !== undefined ? { targetAmount:     serverSettings.targetAmount     } : {}),
+              ...(serverSettings.perMemberAmount   !== undefined ? { perMemberAmount:  serverSettings.perMemberAmount  } : {}),
+              ...(serverSettings.deadline          !== undefined ? { deadline:         serverSettings.deadline         } : {}),
+              ...(serverSettings.description       !== undefined ? { description:      serverSettings.description      } : {}),
+              ...(serverSettings.emoji             !== undefined ? { emoji:            serverSettings.emoji            } : {}),
+              ...(serverSettings.accountName       !== undefined ? { accountName:      serverSettings.accountName      } : {}),
+              ...(serverSettings.accountNumber     !== undefined ? { accountNumber:    serverSettings.accountNumber    } : {}),
+              ...(serverSettings.bankName          !== undefined ? { bankName:         serverSettings.bankName         } : {}),
+              ...(serverSettings.notes             !== undefined ? { notes:            serverSettings.notes            } : {}),
+              updatedAt: now,
+            };
+
+            if (existingSettings.length > 0) {
+              await (db.update(schema.circleSettings) as any)
+                .set(payload)
+                .where(eq(schema.circleSettings.id, c.id));
+            } else {
+              await (db.insert(schema.circleSettings) as any).values({
+                id: c.id,
+                emoji:            serverSettings.emoji            ?? '💰',
+                description:      serverSettings.description      ?? null,
+                targetAmount:     serverSettings.targetAmount      ?? null,
+                frequency:        serverSettings.frequency         ?? 'monthly',
+                perMemberAmount:  serverSettings.perMemberAmount   ?? null,
+                contributionType: 'equal',
+                deadline:         serverSettings.deadline          ?? null,
+                accountName:      serverSettings.accountName       ?? null,
+                accountNumber:    serverSettings.accountNumber     ?? null,
+                bankName:         serverSettings.bankName          ?? null,
+                notes:            serverSettings.notes             ?? null,
+                updatedAt:        now,
+              });
+            }
+          }
+        } catch {
+          // Non-fatal — settings sync is best-effort
+        }
+      }
+
+      // ── CLEANUP: Remove circles user was removed/kicked from ──────────────
+      // After the upsert loop, any local membership whose circleId isn't in
+      // serverCircles means the server removed the user — delete it locally
+      // so the circle disappears from their list immediately on next sync.
+      const serverCircleIds = serverCircles.map((c) => c.id);
+      if (serverCircleIds.length > 0) {
+        await db
+          .delete(schema.householdMembers)
+          .where(
+            and(
+              eq(schema.householdMembers.userId, userId),
+              notInArray(schema.householdMembers.householdId, serverCircleIds),
+            ),
+          );
+      } else {
+        // No circles at all on server — remove ALL local memberships for this user
+        await db
+          .delete(schema.householdMembers)
+          .where(eq(schema.householdMembers.userId, userId));
       }
 
       await get().load(userId);

@@ -13,7 +13,7 @@
 import { create } from 'zustand';
 import { eq } from 'drizzle-orm';
 import { getDatabase, schema } from '../lib/database/client';
-import { sendCircleNotification } from '../lib/api-client';
+import { sendCircleNotification, pushCircleSettings, removeCircleMemberFromServer } from '../lib/api-client';
 import { generateUUID } from '../lib/uuid';
 import { trackReviewEvent } from '../lib/review';
 
@@ -218,7 +218,9 @@ interface CircleState {
   logContribution:    (circleId: string, userId: string, amount: number, note?: string, userInfo?: { name: string; email: string; avatarUrl?: string | null }) => Promise<void>;
   verifyContribution: (id: string, verifiedBy: string) => Promise<void>;
   deleteContribution: (id: string) => Promise<void>;
-  removeMember:       (memberId: string) => Promise<void>;
+  /** Admin: deny a pending contribution with an optional reason; sends push to contributor. */
+  denyContribution:   (id: string, reason?: string) => Promise<void>;
+  removeMember:       (memberId: string, memberUserId: string, memberName: string) => Promise<void>;
   clearError:         () => void;
 }
 
@@ -380,6 +382,9 @@ export const useCircleStore = create<CircleState>()((set, get) => ({
       // Recompute member statuses with new settings
       const { members, contributions } = get();
       set({ memberStatuses: buildMemberStatuses(members, contributions, get().settings, members.length) });
+
+      // Push to server so members can pull on their next syncFromServer
+      pushCircleSettings(circleId, data).catch(() => {});
     } catch (e: any) {
       set({ error: e?.message ?? 'Failed to save settings' });
     } finally {
@@ -510,11 +515,50 @@ export const useCircleStore = create<CircleState>()((set, get) => ({
     }
   },
 
-  // ── Remove member (admin only) ──────────────────────────────────────────────
-  removeMember: async (memberId) => {
+  // ── Deny contribution (admin only) ─────────────────────────────────────────
+  denyContribution: async (id, reason) => {
     set({ isSaving: true, error: null });
     try {
       const db = getDatabase();
+
+      // Get contribution details before deleting
+      const target = get().contributions.find((c) => c.id === id);
+
+      await db.delete(schema.circleContributions).where(eq(schema.circleContributions.id, id));
+
+      const contributions = get().contributions.filter((c) => c.id !== id);
+      const { members, settings } = get();
+      set({
+        contributions,
+        leaderboard:    buildLeaderboard(contributions),
+        memberStatuses: buildMemberStatuses(members, contributions, settings, members.length),
+      });
+
+      // Push to the contributor so they know their entry was denied
+      if (target) {
+        const fmt = (n: number) => `${Math.round(n / 100).toLocaleString()}`;
+        const reasonNote = reason?.trim() ? ` Reason: "${reason.trim()}"` : '';
+        sendCircleNotification(
+          [target.userId],
+          'Contribution not verified ❌',
+          `Your ${fmt(target.amount)} entry was declined by the admin.${reasonNote}`,
+          { type: 'circle_event', screen: 'circle', circleId: target.circleId },
+        ).catch(() => {});
+      }
+    } catch (e: any) {
+      set({ error: e?.message ?? 'Failed to deny contribution' });
+    } finally {
+      set({ isSaving: false });
+    }
+  },
+
+  // ── Remove member (admin only) ──────────────────────────────────────────────
+  removeMember: async (memberId, memberUserId, memberName) => {
+    set({ isSaving: true, error: null });
+    try {
+      const db = getDatabase();
+      const circleId = get().activeCircleId;
+
       await db
         .delete(schema.householdMembers)
         .where(eq(schema.householdMembers.id, memberId));
@@ -526,6 +570,12 @@ export const useCircleStore = create<CircleState>()((set, get) => ({
         memberStatuses: buildMemberStatuses(members, contributions, settings, members.length),
         leaderboard:    buildLeaderboard(contributions),
       });
+
+      // Fire server-side removal so the server can push to the removed user
+      // and all remaining members, and trigger WS nudges
+      if (circleId) {
+        removeCircleMemberFromServer(circleId, memberUserId).catch(() => {});
+      }
     } catch (e: any) {
       set({ error: e?.message ?? 'Failed to remove member' });
     } finally {

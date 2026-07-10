@@ -106,8 +106,8 @@ export default function FirstGoalScreen() {
     >
       <View style={styles.container}>
         <OnboardingHeader
-          step={9}
-          total={9}
+          step={8}
+          total={8}
           onBack={() => router.back()}
           dark={false}
         />

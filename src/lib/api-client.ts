@@ -416,6 +416,46 @@ export async function fetchCircleMembers(circleId: string): Promise<CircleMember
   return res.members;
 }
 
+/**
+ * Push circle settings to the server so other members can pull them on sync.
+ * Called by the admin after saving settings locally. Fire-and-forget.
+ */
+export async function pushCircleSettings(
+  circleId: string,
+  settings: Record<string, unknown>,
+): Promise<void> {
+  await apiFetch(`/api/circles/${circleId}/settings`, { method: 'PUT', body: settings });
+}
+
+/**
+ * Pull the latest circle settings from the server.
+ * Called during syncFromServer so members always see the admin's latest settings.
+ * Returns null if the admin has never pushed settings.
+ */
+export async function fetchCircleSettings(
+  circleId: string,
+): Promise<Record<string, unknown> | null> {
+  try {
+    const res = await apiFetch<{ settings: Record<string, unknown> | null }>(
+      `/api/circles/${circleId}/settings`,
+    );
+    return res.settings;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Ask the server to remove a member from a circle.
+ * The server will push a notification to the removed user and remaining members.
+ */
+export async function removeCircleMemberFromServer(
+  circleId:     string,
+  targetUserId: string,
+): Promise<void> {
+  await apiFetch(`/api/circles/${circleId}/members/${targetUserId}`, { method: 'DELETE' });
+}
+
 // ─── Sync endpoints ───────────────────────────────────────────────────────────
 
 export type SyncPushRecord = {

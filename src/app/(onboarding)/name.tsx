@@ -68,7 +68,7 @@ export default function NameScreen() {
         showsVerticalScrollIndicator={false}
         bottomOffset={20}
       >
-        <OnboardingHeader step={1} total={9} dark={false} />
+        <OnboardingHeader step={1} total={8} dark={false} />
 
         <View style={styles.content}>
           <Animated.View entering={FadeInDown.delay(80).duration(500)}>

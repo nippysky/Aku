@@ -175,7 +175,7 @@ export default function VerifyScreen() {
       >
         <OnboardingHeader
           step={3}
-          total={9}
+          total={8}
           onBack={() => router.back()}
           dark={false}
         />

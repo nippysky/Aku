@@ -218,11 +218,23 @@ export default function RootLayout() {
       });
     };
 
+    // Trigger immediate syncFromServer when circle membership changes arrive.
+    // Handles both foreground (received) and background/quit-state (response tapped).
+    const syncOnCircleEvent = (data: Record<string, unknown> | null | undefined) => {
+      const type = data?.type as string | undefined;
+      if (type === 'circle_member_removed' || type === 'circle_member_joined') {
+        import('../store/circles.store').then(({ useCirclesStore }) => {
+          useCirclesStore.getState().syncFromServer(user.id).catch(() => {});
+        });
+      }
+    };
+
     // Foreground: app is open when notification arrives
     const foregroundSub = ExpoNotifications.addNotificationReceivedListener(
       (notif) => {
         const { title, body, data } = notif.request.content;
         persistNotif(notif.request.identifier, title, body, data as Record<string, unknown>);
+        syncOnCircleEvent(data as Record<string, unknown>);
       },
     );
 
@@ -236,6 +248,7 @@ export default function RootLayout() {
           body,
           data as Record<string, unknown>,
         );
+        syncOnCircleEvent(data as Record<string, unknown>);
       },
     );
 

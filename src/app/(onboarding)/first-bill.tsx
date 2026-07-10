@@ -145,8 +145,8 @@ export default function FirstBillScreen() {
         style={styles.container}
       >
         <OnboardingHeader
-          step={7}
-          total={9}
+          step={6}
+          total={8}
           onBack={() => router.back()}
           dark={false}
         />

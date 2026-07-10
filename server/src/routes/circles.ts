@@ -253,6 +253,143 @@ router.get('/preview/:code', async (c) => {
   });
 });
 
+// ─── PUT /api/circles/:id/settings ───────────────────────────────────────────
+// Owner saves circle settings so all members can see them on next sync.
+// Accepts a JSON body that is stored verbatim in settings_json.
+
+router.put('/:id/settings', async (c) => {
+  const { sub: userId } = c.get('jwtPayload');
+  const circleId        = c.req.param('id');
+
+  // Only the owner can update settings
+  const circleRows = await db.select({ ownerId: circles.ownerId })
+    .from(circles)
+    .where(eq(circles.id, circleId))
+    .limit(1);
+
+  if (circleRows.length === 0) return c.json({ error: 'Circle not found' }, 404);
+  if (circleRows[0].ownerId !== userId) return c.json({ error: 'Forbidden' }, 403);
+
+  const body = await c.req.json();
+  const settingsJson = JSON.stringify(body);
+
+  await db.update(circles)
+    .set({ settingsJson } as any)
+    .where(eq(circles.id, circleId));
+
+  return c.json({ success: true });
+});
+
+// ─── GET /api/circles/:id/settings ───────────────────────────────────────────
+// Members fetch the latest circle settings (set by the owner).
+
+router.get('/:id/settings', async (c) => {
+  const { sub: userId } = c.get('jwtPayload');
+  const circleId        = c.req.param('id');
+
+  // Verify requester is a member
+  const membership = await db.select({ id: circleMembers.id })
+    .from(circleMembers)
+    .where(and(eq(circleMembers.circleId, circleId), eq(circleMembers.userId, userId)))
+    .limit(1);
+
+  if (membership.length === 0) return c.json({ error: 'Not a member' }, 403);
+
+  const circleRows = await db.select({ settingsJson: (circles as any).settingsJson })
+    .from(circles)
+    .where(eq(circles.id, circleId))
+    .limit(1);
+
+  const raw = circleRows[0]?.settingsJson as string | null;
+  const settings = raw ? JSON.parse(raw) : null;
+
+  return c.json({ settings });
+});
+
+// ─── DELETE /api/circles/:id/members/:userId ──────────────────────────────────
+// Owner removes a member. Sends push to the removed user AND all remaining
+// members. WS-nudges all affected users so their devices refresh immediately.
+
+router.delete('/:id/members/:targetUserId', async (c) => {
+  const { sub: ownerId, name: ownerName } = c.get('jwtPayload');
+  const circleId     = c.req.param('id');
+  const targetUserId = c.req.param('targetUserId');
+
+  // Verify requester is the circle owner
+  const circleRows = await db.select({ ownerId: circles.ownerId, name: circles.name })
+    .from(circles)
+    .where(eq(circles.id, circleId))
+    .limit(1);
+
+  if (circleRows.length === 0) return c.json({ error: 'Circle not found' }, 404);
+  const circle = circleRows[0];
+  if (circle.ownerId !== ownerId) return c.json({ error: 'Forbidden' }, 403);
+
+  // Get target user's name
+  const targetUserRows = await db.select({ name: users.name })
+    .from(users)
+    .where(eq(users.id, targetUserId))
+    .limit(1);
+  const targetName = targetUserRows[0]?.name ?? 'A member';
+
+  // Get all remaining members (before deletion)
+  const allMemberRows = await db.select({ userId: circleMembers.userId })
+    .from(circleMembers)
+    .where(eq(circleMembers.circleId, circleId));
+
+  // Delete the membership
+  await db.delete(circleMembers)
+    .where(and(eq(circleMembers.circleId, circleId), eq(circleMembers.userId, targetUserId)));
+
+  // Push to removed member
+  const removedTokenRows = await db.select({ token: pushTokens.token })
+    .from(pushTokens)
+    .where(eq(pushTokens.userId, targetUserId));
+
+  if (removedTokenRows.length > 0) {
+    sendExpoPush(
+      removedTokenRows.map((r) => r.token),
+      {
+        title:     `You've been removed from "${circle.name}"`,
+        body:      `${ownerName ?? 'The admin'} removed you from this circle.`,
+        channelId: 'circles',
+        data: { type: 'circle_member_removed', screen: 'home', circleId },
+      },
+    ).catch(() => {});
+  }
+
+  // Push to remaining members
+  const remainingIds = allMemberRows
+    .map((r) => r.userId)
+    .filter((id) => id !== targetUserId && id !== ownerId);
+
+  if (remainingIds.length > 0) {
+    const remainingTokenRows = await db.select({ token: pushTokens.token })
+      .from(pushTokens)
+      .where(inArray(pushTokens.userId, remainingIds));
+
+    if (remainingTokenRows.length > 0) {
+      sendExpoPush(
+        remainingTokenRows.map((r) => r.token),
+        {
+          title:     `${targetName} was removed from "${circle.name}"`,
+          body:      `${ownerName ?? 'The admin'} removed them from the circle.`,
+          channelId: 'circles',
+          data: { type: 'circle_member_removed', screen: 'circle', circleId },
+        },
+      ).catch(() => {});
+    }
+  }
+
+  // WS nudge — all affected users refresh
+  notifyUser(targetUserId);
+  for (const memberId of allMemberRows.map((r) => r.userId)) {
+    notifyUser(memberId);
+  }
+
+  return c.json({ success: true });
+});
+
 // ─── GET /api/circles/:id/members ─────────────────────────────────────────────
 // Returns members of a circle with their names and avatars.
 // Only accessible to current members of the circle.

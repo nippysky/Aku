@@ -106,8 +106,8 @@ export default function FirstBudgetScreen() {
     >
       <View style={styles.container}>
         <OnboardingHeader
-          step={8}
-          total={9}
+          step={7}
+          total={8}
           onBack={() => router.back()}
           dark={false}
         />

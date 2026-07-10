@@ -132,7 +132,7 @@ export default function PinSetupScreen() {
           <View style={styles.headerWrapper}>
             <OnboardingHeader
               step={4}
-              total={9}
+              total={8}
               onBack={() => router.back()}
               dark={true}
             />

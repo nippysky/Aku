@@ -115,12 +115,19 @@ export const pushTokens = pgTable('push_tokens', {
 // The full circle data (contributions, settings) stays encrypted in sync_records.
 
 export const circles = pgTable('circles', {
-  id:         text('id').primaryKey(),                // matches client SQLite households.id
-  name:       text('name').notNull(),
-  emoji:      text('emoji').notNull().default('💰'),
-  inviteCode: text('invite_code').notNull().unique(),  // 8-char alphanumeric
-  ownerId:    text('owner_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  createdAt:  timestamp('created_at').notNull().defaultNow(),
+  id:           text('id').primaryKey(),                // matches client SQLite households.id
+  name:         text('name').notNull(),
+  emoji:        text('emoji').notNull().default('💰'),
+  inviteCode:   text('invite_code').notNull().unique(),  // 8-char alphanumeric
+  ownerId:      text('owner_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  /**
+   * JSON blob of non-sensitive settings set by the admin.
+   * Synced to all members on their next syncFromServer() call.
+   * Keys: frequency, targetAmount, perMemberAmount, deadline, description,
+   *       accountName, accountNumber, bankName, notes
+   */
+  settingsJson: text('settings_json'),
+  createdAt:    timestamp('created_at').notNull().defaultNow(),
 }, (t) => [
   index('idx_circles_owner').on(t.ownerId),
 ]);

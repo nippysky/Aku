@@ -93,7 +93,7 @@ export default function EmailScreen() {
       >
         <OnboardingHeader
           step={2}
-          total={9}
+          total={8}
           onBack={() => router.back()}
           dark={false}
         />
