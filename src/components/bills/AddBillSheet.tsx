@@ -1,12 +1,12 @@
 import React, { useCallback, useState } from 'react';
 import {
   Pressable,
-  ScrollView,
   StyleSheet,
   Switch,
   Text,
   View,
 } from 'react-native';
+import { ScrollView } from 'react-native-gesture-handler';
 // Switch is used by notification reminder toggles below
 import { useForm, Controller } from 'react-hook-form';
 import {

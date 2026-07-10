@@ -30,7 +30,6 @@ import {
   DollarSign,
   TrendingUp,
   Download,
-  Layers,
   Trash2,
   FileText,
   Lock,
@@ -45,7 +44,6 @@ import {
 } from 'lucide-react-native';
 import { BottomSheetModal, BottomSheetView, BottomSheetBackdrop } from '@gorhom/bottom-sheet';
 import type { BottomSheetBackdropProps } from '@gorhom/bottom-sheet';
-import { getActiveIconLabel } from '../../lib/app-icons';
 import { useTheme } from '../../theme';
 import { useAuthStore } from '../../store/auth.store';
 import { useCirclesStore } from '../../store/circles.store';
@@ -311,24 +309,6 @@ export default function ProfileScreen() {
   // ── Create Circle sheet ───────────────────────────────────────────────
   const [showCreateCircle, setShowCreateCircle] = useState(false);
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
-
-  // ── Active app icon ───────────────────────────────────────────────────
-  const [activeIconId, setActiveIconId] = useState<string>('default');
-  useEffect(() => {
-    if (Platform.OS === 'ios') {
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const mod = require('expo-alternate-app-icons') as {
-          getAlternateAppIconAsync?: () => Promise<string | null>;
-        };
-        mod.getAlternateAppIconAsync?.()
-          .then((name: string | null) => { setActiveIconId(name ?? 'default'); })
-          .catch(() => {});
-      } catch {
-        // package not yet installed / not a native build
-      }
-    }
-  }, []);
 
   // ── Biometric toggle ──────────────────────────────────────────────────
   const handleBiometricToggle = useCallback(async (value: boolean) => {
@@ -1079,19 +1059,6 @@ export default function ProfileScreen() {
             onPress={() => router.push('/currency-rates' as never)}
             isLast={Platform.OS !== 'ios'}
           />
-          {Platform.OS === 'ios' && (
-            <SettingsRow
-              icon={Layers}
-              label="App Icon"
-              onPress={() => router.push('/app-icon' as never)}
-              rightElement={
-                <Text style={[text.caption, { color: colors.textTertiary }]}>
-                  {getActiveIconLabel(activeIconId)}
-                </Text>
-              }
-              isLast
-            />
-          )}
         </SettingsGroup>
 
         {/* ── Data ── */}

@@ -124,12 +124,14 @@ export function SheetModal({ visible, onClose, children }: SheetModalProps) {
   return (
     <BottomSheetModal
       ref={ref}
-      snapPoints={['80%']}
+      snapPoints={['85%']}
       enablePanDownToClose
       onDismiss={handleGorhomDismiss}
       backdropComponent={renderBackdrop}
       backgroundStyle={{ backgroundColor: colors.card }}
       handleIndicatorStyle={{ backgroundColor: colors.border, width: 36 }}
+      // Keyboard: "interactive" snaps sheet above keyboard; "adjustResize"
+      // overrides the activity-level "pan" so the sheet itself resizes on Android.
       keyboardBehavior="interactive"
       keyboardBlurBehavior="restore"
       android_keyboardInputMode="adjustResize"

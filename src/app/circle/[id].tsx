@@ -15,17 +15,17 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  FlatList,
   Modal,
   Platform,
   Pressable,
-  ScrollView,
   Share,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
+// RNGH ScrollView: resolves gesture conflict with BottomSheetScrollView's pan
+// handler so horizontal carousels inside sheets actually scroll.
+import { ScrollView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import Animated, { FadeInDown } from 'react-native-reanimated';
@@ -58,6 +58,7 @@ import {
 import {
   BottomSheetModal,
   BottomSheetScrollView,
+  BottomSheetTextInput,
   BottomSheetView,
   BottomSheetBackdrop,
 } from '@gorhom/bottom-sheet';
@@ -217,8 +218,6 @@ function TabSwitcher({
     <ScrollView
       horizontal
       showsHorizontalScrollIndicator={false}
-      directionalLockEnabled
-      nestedScrollEnabled
       style={{ marginTop: 14 }}
       contentContainerStyle={{ flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 100, padding: 3, alignSelf: 'flex-start' }}
     >
@@ -1111,7 +1110,7 @@ export default function CircleDetailScreen() {
           </Text>
           <AmountInput label="Amount" value={logAmountKobo} onChange={setLogAmountKobo} size="md" style={{ marginBottom: 12 }} />
           <View style={[styles.inputWrap, { borderColor: colors.border, backgroundColor: colors.inputBackground, marginBottom: 20 }]}>
-            <TextInput
+            <BottomSheetTextInput
               value={logNote}
               onChangeText={setLogNote}
               placeholder="Add a note (optional)"
@@ -1150,7 +1149,7 @@ export default function CircleDetailScreen() {
           {/* Circle Name */}
           <Text style={[text.label, { color: colors.textSecondary, marginBottom: 6 }]}>Circle Name</Text>
           <View style={[styles.inputWrap, { borderColor: colors.border, backgroundColor: colors.inputBackground, marginBottom: 20 }]}>
-            <TextInput
+            <BottomSheetTextInput
               value={editName}
               onChangeText={setEditName}
               placeholder="e.g. Family Fund, Trip Savings"
@@ -1162,26 +1161,22 @@ export default function CircleDetailScreen() {
 
           {/* Emoji */}
           <Text style={[text.label, { color: colors.textSecondary, marginBottom: 8 }]}>Circle Icon</Text>
-          <FlatList
-            data={CIRCLE_EMOJIS}
-            keyExtractor={(e) => e}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={{ gap: 8, marginBottom: 20 }}
-            renderItem={({ item: e }) => (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginBottom: 20 }}>
+            {CIRCLE_EMOJIS.map((e) => (
               <Pressable
+                key={e}
                 onPress={() => setEditEmoji(e)}
                 style={{ width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: editEmoji === e ? '#163A2F' : colors.backgroundSecondary, borderWidth: 1.5, borderColor: editEmoji === e ? '#163A2F' : colors.border }}
               >
                 <Text style={{ fontSize: 22 }}>{e}</Text>
               </Pressable>
-            )}
-          />
+            ))}
+          </ScrollView>
 
           {/* Purpose */}
           <Text style={[text.label, { color: colors.textSecondary, marginBottom: 6 }]}>Purpose (optional)</Text>
           <View style={[styles.inputWrap, { borderColor: colors.border, backgroundColor: colors.inputBackground, marginBottom: 16 }]}>
-            <TextInput
+            <BottomSheetTextInput
               value={editDesc}
               onChangeText={setEditDesc}
               placeholder="e.g. Monthly house savings, Trip fund"
@@ -1195,7 +1190,7 @@ export default function CircleDetailScreen() {
 
           {/* Frequency */}
           <Text style={[text.label, { color: colors.textSecondary, marginBottom: 8 }]}>Contribution Frequency</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} directionalLockEnabled nestedScrollEnabled contentContainerStyle={{ gap: 8, marginBottom: 16 }}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginBottom: 16 }}>
             {(Object.keys(FREQ_LABELS) as CircleFrequency[]).map((f) => (
               <Pressable
                 key={f}
@@ -1255,7 +1250,7 @@ export default function CircleDetailScreen() {
           <View style={{ marginBottom: 14 }}>
             <Text style={[text.label, { color: colors.textSecondary, marginBottom: 6 }]}>Institution / Platform</Text>
             <View style={[styles.inputWrap, { borderColor: colors.border, backgroundColor: colors.inputBackground }]}>
-              <TextInput
+              <BottomSheetTextInput
                 value={editBankName}
                 onChangeText={setEditBankName}
                 placeholder="e.g. GTBank, Opay, PayPal, Venmo"
@@ -1267,7 +1262,7 @@ export default function CircleDetailScreen() {
           <View style={{ marginBottom: 14 }}>
             <Text style={[text.label, { color: colors.textSecondary, marginBottom: 6 }]}>Account / Reference</Text>
             <View style={[styles.inputWrap, { borderColor: colors.border, backgroundColor: colors.inputBackground }]}>
-              <TextInput
+              <BottomSheetTextInput
                 value={editAcctNumber}
                 onChangeText={setEditAcctNumber}
                 placeholder="Account number, phone, wallet ID…"
@@ -1280,7 +1275,7 @@ export default function CircleDetailScreen() {
           <View style={{ marginBottom: 14 }}>
             <Text style={[text.label, { color: colors.textSecondary, marginBottom: 6 }]}>Recipient Name</Text>
             <View style={[styles.inputWrap, { borderColor: colors.border, backgroundColor: colors.inputBackground }]}>
-              <TextInput
+              <BottomSheetTextInput
                 value={editAcctName}
                 onChangeText={setEditAcctName}
                 placeholder="Who receives the payment"
@@ -1292,7 +1287,7 @@ export default function CircleDetailScreen() {
           <View style={{ marginBottom: 20 }}>
             <Text style={[text.label, { color: colors.textSecondary, marginBottom: 6 }]}>Notes (optional)</Text>
             <View style={[styles.inputWrap, { borderColor: colors.border, backgroundColor: colors.inputBackground }]}>
-              <TextInput
+              <BottomSheetTextInput
                 value={editNotes}
                 onChangeText={setEditNotes}
                 placeholder="Any extra instructions for members"
@@ -1429,7 +1424,7 @@ export default function CircleDetailScreen() {
 
           <Text style={[text.label, { color: colors.textSecondary, marginBottom: 6 }]}>Reason (optional but recommended)</Text>
           <View style={[styles.inputWrap, { borderColor: colors.border, backgroundColor: colors.inputBackground, marginBottom: 20 }]}>
-            <TextInput
+            <BottomSheetTextInput
               value={denyReason}
               onChangeText={setDenyReason}
               placeholder="e.g. Wrong amount, already received, not yet due…"

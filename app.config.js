@@ -18,13 +18,6 @@ module.exports = {
     bundleIdentifier: 'com.nippysky.aku',
     googleServicesFile: './GoogleService-Info.plist',
     supportsTablet: false,
-    alternateIcons: {
-      'aku-midnight': { image: './assets/images/icons/icon-midnight.png' },
-      'aku-gold':     { image: './assets/images/icons/icon-gold.png' },
-      'aku-linen':    { image: './assets/images/icons/icon-linen.png' },
-      'aku-graphite': { image: './assets/images/icons/icon-graphite.png' },
-      'aku-coral':    { image: './assets/images/icons/icon-coral.png' },
-    },
     infoPlist: {
       NSFaceIDUsageDescription:
         'Akù uses Face ID to keep your financial data secure and unlock the app instantly.',
@@ -56,6 +49,10 @@ module.exports = {
       'android.permission.SCHEDULE_EXACT_ALARM',
     ],
     predictiveBackGestureEnabled: false,
+    // "pan" lets react-native-keyboard-controller own keyboard avoidance.
+    // Without this, Android's native adjustResize fights the library and
+    // covers inputs on Samsung and other OEM keyboards.
+    softwareKeyboardLayoutMode: 'pan',
   },
   web: {
     output: 'static',

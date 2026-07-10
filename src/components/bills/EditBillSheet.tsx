@@ -1,12 +1,12 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   Pressable,
-  ScrollView,
   StyleSheet,
   Switch,
   Text,
   View,
 } from 'react-native';
+import { ScrollView } from 'react-native-gesture-handler';
 import { useForm, Controller } from 'react-hook-form';
 import {
   Home, Zap, Car, UtensilsCrossed, Heart, BookOpen, Tv,

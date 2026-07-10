@@ -10,7 +10,6 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   FlatList,
   Pressable,
-  ScrollView,
   StyleSheet,
   Switch,
   Text,
@@ -38,6 +37,7 @@ import { format, parseISO } from 'date-fns';
 import { useTheme } from '../theme';
 import { Card } from '../components/ui/Card';
 import { SheetModal } from '../components/ui/SheetModal';
+import { BottomSheetTextInput } from '@gorhom/bottom-sheet';
 import { AmountInput } from '../components/ui/AmountInput';
 import { Button } from '../components/ui/Button';
 import { AkuDatePicker } from '../components/ui/AkuDatePicker';
@@ -164,16 +164,12 @@ function AddExpenseRecurringSheet({ isOpen, onClose }: AddExpenseSheetProps) {
 
   return (
     <SheetModal visible={isOpen} onClose={() => { reset(); onClose(); }}>
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.sheetContent}
-        keyboardShouldPersistTaps="handled"
-      >
+      <View style={styles.sheetContent}>
         {/* Name */}
         <Text style={[text.label, { color: colors.textSecondary, marginBottom: 6 }]}>
           Name
         </Text>
-        <TextInput
+        <BottomSheetTextInput
           value={name}
           onChangeText={setName}
           placeholder="e.g. Netflix, Gym"
@@ -278,7 +274,7 @@ function AddExpenseRecurringSheet({ isOpen, onClose }: AddExpenseSheetProps) {
         </View>
 
         <Button label="Save" onPress={handleSave} loading={saving} style={{ marginTop: 24 }} />
-      </ScrollView>
+      </View>
 
       <AkuDatePicker
         isOpen={dateOpen}
@@ -361,16 +357,12 @@ function AddIncomeRecurringSheet({ isOpen, onClose }: AddIncomeSheetProps) {
 
   return (
     <SheetModal visible={isOpen} onClose={() => { reset(); onClose(); }}>
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.sheetContent}
-        keyboardShouldPersistTaps="handled"
-      >
+      <View style={styles.sheetContent}>
         {/* Name */}
         <Text style={[text.label, { color: colors.textSecondary, marginBottom: 6 }]}>
           Name
         </Text>
-        <TextInput
+        <BottomSheetTextInput
           value={name}
           onChangeText={setName}
           placeholder="e.g. Monthly Salary, Rent Income"
@@ -533,7 +525,7 @@ function AddIncomeRecurringSheet({ isOpen, onClose }: AddIncomeSheetProps) {
             <Text style={[text.label, { color: colors.textSecondary, marginBottom: 6, marginTop: 14 }]}>
               Allocation %
             </Text>
-            <TextInput
+            <BottomSheetTextInput
               value={allocationPct}
               onChangeText={setAllocationPct}
               keyboardType="numeric"
@@ -561,7 +553,7 @@ function AddIncomeRecurringSheet({ isOpen, onClose }: AddIncomeSheetProps) {
           loading={saving}
           style={{ marginTop: 24, backgroundColor: colors.primary }}
         />
-      </ScrollView>
+      </View>
 
       <AkuDatePicker
         isOpen={dateOpen}
