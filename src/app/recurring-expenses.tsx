@@ -191,7 +191,7 @@ function AddExpenseRecurringSheet({ isOpen, onClose }: AddExpenseSheetProps) {
         <Text style={[text.label, { color: colors.textSecondary, marginBottom: 6, marginTop: 16 }]}>
           Amount
         </Text>
-        <AmountInput value={amount} onChange={setAmount} />
+        <AmountInput value={amount} onChange={setAmount} asBottomSheetInput />
 
         {/* Frequency */}
         <Text style={[text.label, { color: colors.textSecondary, marginBottom: 8, marginTop: 16 }]}>
@@ -384,7 +384,7 @@ function AddIncomeRecurringSheet({ isOpen, onClose }: AddIncomeSheetProps) {
         <Text style={[text.label, { color: colors.textSecondary, marginBottom: 6, marginTop: 16 }]}>
           Amount
         </Text>
-        <AmountInput value={amount} onChange={setAmount} />
+        <AmountInput value={amount} onChange={setAmount} asBottomSheetInput />
 
         {/* Frequency */}
         <Text style={[text.label, { color: colors.textSecondary, marginBottom: 8, marginTop: 16 }]}>

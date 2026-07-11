@@ -14,7 +14,7 @@
  *  daily_digest     → /(tabs)/expenses     (log today's spending)
  *  daily_reminder   → /(tabs)/expenses     (server push → log spending)
  *  weekly_summary   → /(tabs)/index        (home — financial overview)
- *  household_invite → /circle/join         (join circle)
+ *  household_invite → /pool/join         (join pool))
  *  default          → /(tabs)/index        (home)
  */
 import { useEffect, useRef } from 'react';
@@ -154,16 +154,16 @@ function resolveRoute(data: NotificationData): ResolvedRoute | null {
     // Circle/household invite
     case 'household_invite':
     case 'circle_invite':
-      return { href: '/circle/join', type: 'detail' };
+      return { href: '/pool/join', type: 'detail' };
 
     // New member joined a circle — navigate to that specific circle
     case 'circle_member_joined':
-      if (circleId) return { href: `/circle/${circleId}`, type: 'detail' };
+      if (circleId) return { href: `/pool/${circleId}`, type: 'detail' };
       return { href: '/(tabs)/index', type: 'tab' };
 
     // Contribution logged/verified in a circle
     case 'circle_event':
-      if (circleId) return { href: `/circle/${circleId}`, type: 'detail' };
+      if (circleId) return { href: `/pool/${circleId}`, type: 'detail' };
       return { href: '/(tabs)/index', type: 'tab' };
   }
 
@@ -200,7 +200,7 @@ function resolveRoute(data: NotificationData): ResolvedRoute | null {
         return { href: '/notifications', type: 'detail' };
 
       case 'circle':
-        if (circleId) return { href: `/circle/${circleId}`, type: 'detail' };
+        if (circleId) return { href: `/pool/${circleId}`, type: 'detail' };
         return { href: '/(tabs)/index', type: 'tab' };
 
       case 'home':

@@ -1,9 +1,9 @@
 /**
- * circle/join.tsx — Join a Circle by invite code
+ * pool/join.tsx — Join a Pool by invite code
  *
  * Three-step flow:
  *   1. Code entry   — user types / pastes 8-char code
- *   2. Preview      — previewCircle() fetches circle info; shows emoji, name,
+ *   2. Preview      — previewPool() fetches pool info; shows emoji, name,
  *                     owner, member count + avatar strip. No membership created yet.
  *   3. Success      — joinByCode() records membership → auto-navigate to circle
  *
@@ -109,7 +109,7 @@ export default function JoinCircleScreen() {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       const data = await previewCircle(code);
       if (data.alreadyMember) {
-        setCodeError('You\'re already a member of this circle.');
+        setCodeError('You\'re already a member of this Pool.');
         return;
       }
       setPreview(data);
@@ -132,9 +132,9 @@ export default function JoinCircleScreen() {
       setJoinedName(result.circleName);
       setMode('success');
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      setTimeout(() => router.replace(`/circle/${result.circleId}` as never), 1800);
+      setTimeout(() => router.replace(`/pool/${result.circleId}` as never), 1800);
     } catch (e: any) {
-      showToast('error', e?.message ?? 'Could not join circle');
+      showToast('error', e?.message ?? 'Could not join pool');
       setMode('code'); // back to code entry
     } finally {
       setIsJoining(false);
@@ -152,9 +152,9 @@ export default function JoinCircleScreen() {
       setJoinedName(dlName);
       setMode('success');
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      setTimeout(() => router.replace(`/circle/${cid}` as never), 1800);
+      setTimeout(() => router.replace(`/pool/${cid}` as never), 1800);
     } catch (e: any) {
-      showToast('error', e?.message ?? 'Could not join circle');
+      showToast('error', e?.message ?? 'Could not join pool');
     } finally {
       setIsJoining(false);
     }
@@ -209,7 +209,7 @@ export default function JoinCircleScreen() {
   if (mode === 'deeplink') {
     return (
       <View style={[styles.screen, { backgroundColor: colors.background }]}>
-        <Header title="Join Circle" />
+        <Header title="Join Pool" />
         <View style={[styles.body, { paddingHorizontal: layout.screenPadding, paddingBottom: insets.bottom + 32 }]}>
           {!dlLoaded ? (
             <ActivityIndicator color={colors.primary} style={{ marginTop: 60 }} />
@@ -219,14 +219,14 @@ export default function JoinCircleScreen() {
                 <Text style={{ fontSize: 56 }}>{'💰'}</Text>
               </View>
               <Text style={{ fontFamily: font.displayLight, fontSize: fontSize['2xl'], color: colors.text, marginTop: 20, textAlign: 'center' }}>
-                {dlName || 'A Circle'}
+                {dlName || 'A Pool'}
               </Text>
               <Text style={[text.body, { color: colors.textSecondary, textAlign: 'center', marginTop: 8, lineHeight: 22, paddingHorizontal: 24 }]}>
-                You've been invited to join this circle.
+                You've been invited to join this pool.
               </Text>
               <View style={{ marginTop: 36, width: '100%', gap: 12 }}>
                 <Button
-                  label={isJoining ? 'Joining…' : `Join ${dlName || 'Circle'}`}
+                  label={isJoining ? 'Joining…' : `Join ${dlName || 'Pool'}`}
                   onPress={handleDeepLinkJoin}
                   disabled={isJoining}
                   size="lg"
@@ -377,7 +377,7 @@ export default function JoinCircleScreen() {
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
-      <Header title="Join a Circle" />
+      <Header title="Join a Pool" />
 
       <KeyboardAwareScrollView
         keyboardShouldPersistTaps="handled"
@@ -394,7 +394,7 @@ export default function JoinCircleScreen() {
             Enter your invite code
           </Text>
           <Text style={[text.body, { color: colors.textSecondary, textAlign: 'center', marginTop: 10, lineHeight: 22, paddingHorizontal: 16 }]}>
-            Ask the Circle owner for their 8-character code, or tap the invite link they sent you.
+            Ask the Pool owner for their 8-character code, or tap the invite link they sent you.
           </Text>
         </Animated.View>
 

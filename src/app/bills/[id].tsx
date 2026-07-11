@@ -14,8 +14,6 @@ import {
   Pencil,
   Calendar,
   RefreshCw,
-  Users,
-  Lock,
   FileText,
   Bell,
   BellOff,
@@ -28,6 +26,7 @@ import {
   BookOpen,
   Tv,
   ShoppingBag,
+  Users,
   PiggyBank,
   Shield,
   MoreHorizontal,
@@ -313,11 +312,6 @@ export default function BillDetailScreen() {
               icon={RefreshCw}
               label="Frequency"
               value={BILL_FREQUENCY_LABELS[bill.frequency]}
-            />
-            <DetailRow
-              icon={bill.isShared ? Users : Lock}
-              label="Visibility"
-              value={bill.isShared ? 'Shared with household' : 'Private'}
             />
             {bill.notes && (
               <View style={[styles.detailRow, { borderBottomWidth: 0 }]}>

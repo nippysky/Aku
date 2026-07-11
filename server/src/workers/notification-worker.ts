@@ -47,6 +47,35 @@ interface PushPayload {
   data:      Record<string, string>;
 }
 
+interface NotifPrefs {
+  billReminders:  boolean;
+  budgetAlerts:   boolean;
+  goalMilestones: boolean;
+  dailyDigest:    boolean;
+}
+
+const DEFAULT_PREFS: NotifPrefs = {
+  billReminders:  true,
+  budgetAlerts:   true,
+  goalMilestones: true,
+  dailyDigest:    true,  // server-worker default is enabled (user can opt out)
+};
+
+function parsePrefs(json: string | null): NotifPrefs {
+  if (!json) return DEFAULT_PREFS;
+  try {
+    const parsed = JSON.parse(json) as Partial<NotifPrefs>;
+    return {
+      billReminders:  parsed.billReminders  ?? DEFAULT_PREFS.billReminders,
+      budgetAlerts:   parsed.budgetAlerts   ?? DEFAULT_PREFS.budgetAlerts,
+      goalMilestones: parsed.goalMilestones ?? DEFAULT_PREFS.goalMilestones,
+      dailyDigest:    parsed.dailyDigest    ?? DEFAULT_PREFS.dailyDigest,
+    };
+  } catch {
+    return DEFAULT_PREFS;
+  }
+}
+
 interface UserRow {
   userId:              string;
   token:               string;
@@ -62,6 +91,7 @@ interface UserRow {
   hasActiveGoals:      boolean | null;
   goalsOnTrack:        number | null;
   totalGoalsCount:     number | null;
+  notifPrefsJson:      string | null;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -119,7 +149,20 @@ async function allStoredTimezones(): Promise<string[]> {
 
 // ─── Message selection — Tier 1 + Tier 2 ─────────────────────────────────────
 
-function pickDailyMessage(u: UserRow, now: Date): PushPayload {
+/**
+ * Pick a deterministic variant index based on userId + day-of-year (+ optional salt).
+ * Ensures the same user gets a different message each day without relying on Math.random().
+ */
+function rotateIdx(userId: string, pool: number, salt = 0): number {
+  const dayOfYear = Math.floor(Date.now() / 86_400_000);
+  let hash = dayOfYear ^ salt;
+  for (let i = 0; i < userId.length; i++) {
+    hash = ((hash * 31) + userId.charCodeAt(i)) >>> 0;
+  }
+  return hash % pool;
+}
+
+function pickDailyMessage(u: UserRow, now: Date, prefs: NotifPrefs): PushPayload | null {
   const msPerHour    = 3_600_000;
   const accountAgeH  = (now.getTime() - u.createdAt.getTime()) / msPerHour;
   const lastSyncAgeH = u.lastSyncAt
@@ -128,169 +171,279 @@ function pickDailyMessage(u: UserRow, now: Date): PushPayload {
 
   const baseData = { type: 'daily_reminder', screen: 'expenses', action: 'log' };
 
-  // ── NEW USER onboarding sequence (days 1 / 2 / 3) ──────────────────────
+  // ── NEW USER onboarding sequence (days 1 / 2 / 3) ──────────────────────────
+  // Always send — user has not configured prefs yet.
   if (accountAgeH < NEW_USER_DAYS * 24) {
     const dayNum = Math.floor(accountAgeH / 24) + 1;
 
     if (dayNum === 1) return {
       title:     'Welcome to Akù! 👋',
-      body:      'Log your first expense to start tracking your money.',
+      body:      'Tap to log your first expense and start understanding your money.',
       channelId: 'digest',
       data:      { ...baseData, screen: 'expenses' },
     };
 
     if (dayNum === 2) return {
-      title:     'Set a budget today 🎯',
-      body:      'Budgets show you exactly where your money is going.',
+      title:     'Set your first budget 🎯',
+      body:      'Budgets keep your spending honest. Takes less than a minute to set up.',
       channelId: 'digest',
       data:      { ...baseData, screen: 'budgets' },
     };
 
     return {
-      title:     'Create your first savings goal 💰',
-      body:      'What are you saving for? Akù makes it easy to track progress.',
+      title:     'What are you saving for? 💰',
+      body:      'Add a savings goal and watch Akù track your progress automatically.',
       channelId: 'digest',
       data:      { ...baseData, screen: 'goals' },
     };
   }
 
-  // ── DORMANT re-engagement (7+ days silent) ──────────────────────────────
-  if (lastSyncAgeH >= DORMANT_HOURS) {
+  // ── DORMANT re-engagement (7+ days silent) ─────────────────────────────────
+  if (lastSyncAgeH >= DORMANT_HOURS && prefs.dailyDigest) {
     const days = Math.floor(lastSyncAgeH / 24);
-    return {
-      title:     'Your finances need you 🚨',
-      body:      `You haven't logged anything in ${days} days. Don't lose track!`,
-      channelId: 'digest',
-      data:      { ...baseData, action: 'reopen' },
-    };
+    const pool: Array<{ title: string; body: string }> = [
+      { title: 'Your finances are calling 📵', body: `${days} days without a log. Don't let the gaps pile up — open Akù now.` },
+      { title: 'Still here for you 🤝',        body: `It has been ${days} days. A quick catch-up keeps your financial picture clear.` },
+      { title: 'Where did the money go? 🔍',   body: `${days} days of untracked spending. Tap to fill the gaps before you forget.` },
+    ];
+    const { title, body } = pool[rotateIdx(u.userId, pool.length, 7)];
+    return { title, body, channelId: 'digest', data: { ...baseData, action: 'reopen' } };
   }
 
-  // ── LAPSING nudge (3–6 days silent) ────────────────────────────────────
-  if (lastSyncAgeH >= LAPSING_HOURS) {
-    return {
-      title:     'Haven\'t seen you in a bit 👀',
-      body:      'A quick expense log keeps your finances sharp. Tap to catch up.',
-      channelId: 'digest',
-      data:      baseData,
-    };
+  // ── LAPSING nudge (3–6 days silent) ───────────────────────────────────────
+  if (lastSyncAgeH >= LAPSING_HOURS && prefs.dailyDigest) {
+    const pool: Array<{ title: string; body: string }> = [
+      { title: "Haven't seen you in a bit 👀",  body: 'A 30-second expense log keeps your finances sharp. Tap to catch up.' },
+      { title: 'Your wallet has been busy 💳',  body: 'A few days have passed. Log what you spent before the details blur.' },
+      { title: 'Consistency is the edge 📐',    body: 'Small daily logs add up to serious financial clarity. Tap to continue.' },
+    ];
+    const { title, body } = pool[rotateIdx(u.userId, pool.length, 3)];
+    return { title, body, channelId: 'digest', data: baseData };
   }
 
-  // ── ACTIVE user — Tier 2 personalisation ────────────────────────────────
+  // ── ACTIVE user — Tier 2 personalisation ──────────────────────────────────
 
-  if (u.hasOverBudget) return {
-    title:     '⚠️ Budget exceeded!',
-    body:      'You\'ve gone over budget this period. Tap to review your spending.',
-    channelId: 'digest',
-    data:      { ...baseData, screen: 'budgets' },
-  };
+  // Budget alerts (gated by pref)
+  if (prefs.budgetAlerts) {
+    if (u.hasOverBudget) {
+      const pool: Array<{ title: string; body: string }> = [
+        { title: 'Budget exceeded! ⚠️',  body: 'You have gone over budget this period. Tap to see where the overspend happened.' },
+        { title: 'Budget limit hit 🔴',   body: 'One or more budgets are maxed out. Time to review your spending.' },
+      ];
+      const { title, body } = pool[rotateIdx(u.userId, pool.length, 1)];
+      return { title, body, channelId: 'digest', data: { ...baseData, screen: 'budgets' } };
+    }
 
-  if (u.budgetUtilization != null && u.budgetUtilization >= 0.8) {
-    const pct = Math.round(u.budgetUtilization * 100);
-    return {
-      title:     `Budget at ${pct}% 🔴`,
-      body:      'You\'re close to your limit — time to review what\'s left.',
-      channelId: 'digest',
-      data:      { ...baseData, screen: 'budgets' },
-    };
+    if (u.budgetUtilization != null && u.budgetUtilization >= 0.9) {
+      const pct = Math.round(u.budgetUtilization * 100);
+      return {
+        title:     `${pct}% of your budget used 🔴`,
+        body:      'You are nearly at your limit. Review what is left before the period ends.',
+        channelId: 'digest',
+        data:      { ...baseData, screen: 'budgets' },
+      };
+    }
+
+    if (u.budgetUtilization != null && u.budgetUtilization >= 0.8) {
+      const pct = Math.round(u.budgetUtilization * 100);
+      return {
+        title:     `Budget at ${pct}% 🟡`,
+        body:      'Approaching your budget ceiling. Tap to check your remaining headroom.',
+        channelId: 'digest',
+        data:      { ...baseData, screen: 'budgets' },
+      };
+    }
   }
 
-  if (u.spendingStreak != null && u.spendingStreak >= 3) return {
-    title:     `${u.spendingStreak}-day logging streak! 🔥`,
-    body:      'Keep the momentum — log today\'s expenses.',
+  // Non-digest users: only goal nudges if goalMilestones is on
+  if (!prefs.dailyDigest) {
+    if (
+      prefs.goalMilestones &&
+      u.hasActiveGoals &&
+      u.totalGoalsCount != null &&
+      u.goalsOnTrack != null &&
+      u.goalsOnTrack < u.totalGoalsCount
+    ) {
+      const behind = u.totalGoalsCount - u.goalsOnTrack;
+      return {
+        title:     `${behind} goal${behind > 1 ? 's' : ''} falling behind 🎯`,
+        body:      `You are off-pace on ${behind === 1 ? 'a savings goal' : 'some savings goals'}. Contribute today to close the gap.`,
+        channelId: 'digest',
+        data:      { ...baseData, screen: 'goals' },
+      };
+    }
+    return null;
+  }
+
+  // Streak celebrations — milestone tiers
+  if (u.spendingStreak != null && u.spendingStreak >= 30) return {
+    title:     `${u.spendingStreak}-day streak! You're unstoppable 🏆`,
+    body:      'A month of consistent tracking. That is serious financial discipline. Keep it going.',
     channelId: 'digest',
     data:      baseData,
   };
 
-  if (u.weeklyChangePct != null && u.weeklyChangePct >= 20) return {
-    title:     `Spending up ${Math.round(u.weeklyChangePct)}% this week 📈`,
-    body:      u.topCategory
-      ? `${u.topCategory} is your biggest driver. Tap to review.`
-      : 'Tap to see what\'s driving it.',
+  if (u.spendingStreak != null && u.spendingStreak >= 14) return {
+    title:     `${u.spendingStreak} days in a row 🔥`,
+    body:      'Two weeks of daily logs. You are building a habit that pays off — literally.',
     channelId: 'digest',
-    data:      { ...baseData, screen: 'expenses' },
+    data:      baseData,
   };
+
+  if (u.spendingStreak != null && u.spendingStreak >= 7) return {
+    title:     'Week-long streak 🔥',
+    body:      `${u.spendingStreak} days logged in a row. This is how financial clarity is built.`,
+    channelId: 'digest',
+    data:      baseData,
+  };
+
+  if (u.spendingStreak != null && u.spendingStreak >= 3) return {
+    title:     `${u.spendingStreak}-day logging streak 🔥`,
+    body:      'You are on a roll. Keep the momentum — log today\'s expenses.',
+    channelId: 'digest',
+    data:      baseData,
+  };
+
+  // Spending spike (larger jump gets more urgent copy)
+  if (u.weeklyChangePct != null && u.weeklyChangePct >= 30) {
+    const pct = Math.round(u.weeklyChangePct);
+    const pool: Array<{ title: string; body: string }> = [
+      { title: `Spending up ${pct}% this week 📈`,        body: u.topCategory ? `${u.topCategory} is driving it. Tap to see the full breakdown.` : 'That is a big jump. Find out where the money is going.' },
+      { title: `Heads up — ${pct}% more spent this week 📈`, body: u.topCategory ? `${u.topCategory} was your biggest category. Worth a quick look.` : 'Your spending spiked this week. Check expenses to stay on track.' },
+    ];
+    const { title, body } = pool[rotateIdx(u.userId, pool.length, 20)];
+    return { title, body, channelId: 'digest', data: { ...baseData, screen: 'expenses' } };
+  }
+
+  if (u.weeklyChangePct != null && u.weeklyChangePct >= 20) {
+    const pct = Math.round(u.weeklyChangePct);
+    return {
+      title:     `Spending up ${pct}% this week 📈`,
+      body:      u.topCategory ? `${u.topCategory} is your biggest driver this week. Tap to review.` : 'Tap to see what is driving the increase.',
+      channelId: 'digest',
+      data:      { ...baseData, screen: 'expenses' },
+    };
+  }
+
+  // Spending drop — positive reinforcement
+  if (u.weeklyChangePct != null && u.weeklyChangePct <= -25) {
+    const pct = Math.abs(Math.round(u.weeklyChangePct));
+    const pool: Array<{ title: string; body: string }> = [
+      { title: `Spending down ${pct}% this week 📉`,  body: 'Excellent discipline. Your future self thanks you. Log today to keep it up.' },
+      { title: `You spent ${pct}% less this week 📉`, body: 'That restraint adds up. Keep tracking and watch it compound.' },
+    ];
+    const { title, body } = pool[rotateIdx(u.userId, pool.length, 25)];
+    return { title, body, channelId: 'digest', data: baseData };
+  }
 
   if (u.weeklyChangePct != null && u.weeklyChangePct <= -20) return {
     title:     `Spending down ${Math.abs(Math.round(u.weeklyChangePct))}% this week 📉`,
-    body:      'Great discipline! Log today to keep it up.',
+    body:      'Great discipline this week. Log today to extend the run.',
     channelId: 'digest',
     data:      baseData,
   };
 
-  if (u.topCategory && u.monthlyExpenseCount != null && u.monthlyExpenseCount >= 5) return {
-    title:     `${u.topCategory} is your top spend this month 💡`,
-    body:      'Tap to see your full breakdown.',
-    channelId: 'digest',
-    data:      { ...baseData, screen: 'expenses' },
-  };
+  // Top-category callout
+  if (u.topCategory && u.monthlyExpenseCount != null && u.monthlyExpenseCount >= 5) {
+    const pool: Array<{ title: string; body: string }> = [
+      { title: `${u.topCategory} is your top spend 💡`,          body: 'It is claiming the most from your budget this month. Tap to see the breakdown.' },
+      { title: `Most of your money went to ${u.topCategory} 💡`, body: 'See if that aligns with your priorities — tap to review.' },
+    ];
+    const { title, body } = pool[rotateIdx(u.userId, pool.length, 5)];
+    return { title, body, channelId: 'digest', data: { ...baseData, screen: 'expenses' } };
+  }
 
+  // Goal nudge (gated by pref)
   if (
+    prefs.goalMilestones &&
     u.hasActiveGoals &&
     u.totalGoalsCount != null &&
     u.goalsOnTrack != null &&
     u.goalsOnTrack < u.totalGoalsCount
   ) {
     const behind = u.totalGoalsCount - u.goalsOnTrack;
-    return {
-      title:     `${behind} goal${behind > 1 ? 's' : ''} need${behind === 1 ? 's' : ''} attention 🎯`,
-      body:      'You\'re falling behind on savings. Contribute today.',
-      channelId: 'digest',
-      data:      { ...baseData, screen: 'goals' },
-    };
+    const pool: Array<{ title: string; body: string }> = [
+      { title: `${behind} goal${behind > 1 ? 's' : ''} falling behind 🎯`, body: 'You are off-pace on your savings. A contribution today closes the gap.' },
+      { title: 'Your savings goals need attention 🎯',                      body: `${behind} of your goals are lagging. Tap to contribute and get back on track.` },
+    ];
+    const { title, body } = pool[rotateIdx(u.userId, pool.length, 9)];
+    return { title, body, channelId: 'digest', data: { ...baseData, screen: 'goals' } };
   }
 
-  // ── Default ─────────────────────────────────────────────────────────────
-  return {
-    title:     'How did you spend today? 💸',
-    body:      'Take 30 seconds to log your expenses. Every penny counts.',
-    channelId: 'digest',
-    data:      baseData,
-  };
+  // ── Generic daily reminders — rotating pool ────────────────────────────────
+  const genericPool: Array<{ title: string; body: string }> = [
+    { title: 'How did you spend today? 💸',     body: 'Take 30 seconds to log your expenses. Every entry is a data point for your future.' },
+    { title: 'Your money log is waiting 📋',    body: 'Log what you spent today while it is fresh. The habit stacks up fast.' },
+    { title: 'Small logs, big picture 🗺️',      body: "Today's expense log is tomorrow's financial insight. Tap to add it." },
+    { title: 'Track it, own it 💪',             body: 'You cannot improve what you do not measure. Log today\'s spending now.' },
+    { title: 'Your future self is watching 🔮', body: 'Every expense logged is a step toward financial clarity. Tap to add today.' },
+    { title: 'Money in, money out 🔄',          body: 'Logging takes seconds. Knowing where your money goes is worth far more.' },
+    { title: "What's left in the tank? ⛽",     body: 'Check in on your spending and see how today compared to your budget.' },
+    { title: '30 seconds to clarity ⏱️',        body: 'A quick log now keeps your finances sharp. Open Akù and add your expenses.' },
+  ];
+  const { title, body } = genericPool[rotateIdx(u.userId, genericPool.length)];
+  return { title, body, channelId: 'digest', data: baseData };
 }
 
-function pickWeeklyMessage(u: UserRow): PushPayload {
-  const data = { type: 'weekly_summary', screen: 'home' };
+function pickWeeklyMessage(u: UserRow, prefs: NotifPrefs): PushPayload | null {
+  // Weekly summary is part of the daily digest pref
+  if (!prefs.dailyDigest) return null;
 
-  if (u.weeklyChangePct != null && u.weeklyChangePct >= 25) return {
-    title:     `Spending jumped ${Math.round(u.weeklyChangePct)}% this week 📈`,
-    body:      u.topCategory
-      ? `${u.topCategory} was your biggest expense. See your full review.`
-      : 'Your week in review — see where the money went.',
-    channelId: 'digest',
-    data,
-  };
+  const baseData = { type: 'weekly_summary', screen: 'home' };
 
-  if (u.weeklyChangePct != null && u.weeklyChangePct <= -25) return {
-    title:     `Great week — spending down ${Math.abs(Math.round(u.weeklyChangePct))}% 📉`,
-    body:      'You spent less than last week. Keep it up!',
-    channelId: 'digest',
-    data,
-  };
-
-  if (u.topCategory) return {
-    title:     'Your week in review 📊',
-    body:      `${u.topCategory} was your top category. Tap for the full breakdown.`,
-    channelId: 'digest',
-    data,
-  };
-
-  if (u.hasActiveGoals && u.goalsOnTrack != null && u.totalGoalsCount != null) {
-    const onTrack = u.goalsOnTrack;
-    const total   = u.totalGoalsCount;
-    if (total > 0) return {
-      title:     'Your week in review 📊',
-      body:      `${onTrack} of ${total} goal${total > 1 ? 's' : ''} on track. See how your week shaped up.`,
-      channelId: 'digest',
-      data,
-    };
+  // Spending spike
+  if (u.weeklyChangePct != null && u.weeklyChangePct >= 25) {
+    const pct = Math.round(u.weeklyChangePct);
+    const pool: Array<{ title: string; body: string }> = [
+      { title: `Spending jumped ${pct}% this week 📈`, body: u.topCategory ? `${u.topCategory} was your biggest expense. See your full weekly review.` : 'That is a significant jump. Tap for your weekly breakdown.' },
+      { title: `Up ${pct}% from last week 📈`,         body: u.topCategory ? `${u.topCategory} drove most of it. Tap to see the full picture.` : 'Your weekly spending rose sharply. Tap to review.' },
+    ];
+    const { title, body } = pool[rotateIdx(u.userId, pool.length, 25)];
+    return { title, body, channelId: 'digest', data: baseData };
   }
 
-  return {
-    title:     'Your week in review 📊',
-    body:      'See how your finances shaped up this week.',
-    channelId: 'digest',
-    data,
-  };
+  // Spending drop — celebration
+  if (u.weeklyChangePct != null && u.weeklyChangePct <= -25) {
+    const pct = Math.abs(Math.round(u.weeklyChangePct));
+    const pool: Array<{ title: string; body: string }> = [
+      { title: `Great week — down ${pct}% 📉`, body: 'You spent significantly less than last week. That discipline compounds. Keep it up!' },
+      { title: `${pct}% less spent this week 📉`, body: 'Your best week in a while. See your weekly summary to appreciate the progress.' },
+    ];
+    const { title, body } = pool[rotateIdx(u.userId, pool.length, 75)];
+    return { title, body, channelId: 'digest', data: baseData };
+  }
+
+  // Top-category weekly
+  if (u.topCategory) {
+    const pool: Array<{ title: string; body: string }> = [
+      { title: 'Your week in review 📊',     body: `${u.topCategory} was your top category this week. Tap for the full breakdown.` },
+      { title: 'Weekly spending recap 📊',   body: `${u.topCategory} claimed the most of your budget. See where else your money went.` },
+    ];
+    const { title, body } = pool[rotateIdx(u.userId, pool.length, 50)];
+    return { title, body, channelId: 'digest', data: baseData };
+  }
+
+  // Goal progress recap
+  if (prefs.goalMilestones && u.hasActiveGoals && u.goalsOnTrack != null && u.totalGoalsCount != null && u.totalGoalsCount > 0) {
+    const onTrack = u.goalsOnTrack;
+    const total   = u.totalGoalsCount;
+    const pool: Array<{ title: string; body: string }> = [
+      { title: 'Your week in review 📊',   body: `${onTrack} of ${total} goal${total > 1 ? 's' : ''} on track. See how your week shaped up.` },
+      { title: 'Weekly goals check 🎯',    body: `${onTrack}/${total} goals pacing on schedule. Tap to see your full weekly summary.` },
+    ];
+    const { title, body } = pool[rotateIdx(u.userId, pool.length, 10)];
+    return { title, body, channelId: 'digest', data: baseData };
+  }
+
+  // Generic weekly pool
+  const genericPool: Array<{ title: string; body: string }> = [
+    { title: 'Your week in review 📊',          body: 'See how your finances shaped up this week. Every week is a new chance to improve.' },
+    { title: 'Weekly financial check-in 📊',    body: 'Another week, another opportunity to understand your money. Tap to review.' },
+    { title: 'How was your week financially? 📊', body: 'Your weekly summary is ready. Patterns start showing when you look weekly.' },
+    { title: 'End of week money check 📊',      body: 'See your weekly summary. Small insights compound into big financial wins.' },
+  ];
+  const { title, body } = genericPool[rotateIdx(u.userId, genericPool.length, 100)];
+  return { title, body, channelId: 'digest', data: baseData };
 }
 
 // ─── Core personalised send ───────────────────────────────────────────────────
@@ -344,6 +497,7 @@ async function runPersonalisedJob(
         hasActiveGoals:      userInsights.hasActiveGoals,
         goalsOnTrack:        userInsights.goalsOnTrack,
         totalGoalsCount:     userInsights.totalGoalsCount,
+        notifPrefsJson:      userInsights.notifPrefsJson,
       })
       .from(pushTokens)
       .innerJoin(users, eq(pushTokens.userId, users.id))
@@ -382,6 +536,12 @@ async function runPersonalisedJob(
       const variantMap = new Map<string, { tokens: string[]; userIds: string[]; payload: PushPayload }>();
 
       for (const row of eligibleRows) {
+        const prefs = parsePrefs(row.notifPrefsJson ?? null);
+
+        // Skip users who opted out of all push notification types
+        const wantsAnything = prefs.dailyDigest || prefs.budgetAlerts || prefs.goalMilestones;
+        if (!wantsAnything) continue;
+
         const userRow: UserRow = {
           userId:              row.userId,
           token:               row.token,
@@ -397,11 +557,15 @@ async function runPersonalisedJob(
           hasActiveGoals:      row.hasActiveGoals,
           goalsOnTrack:        row.goalsOnTrack,
           totalGoalsCount:     row.totalGoalsCount,
+          notifPrefsJson:      row.notifPrefsJson ?? null,
         };
 
         const payload = notifType === 'daily_reminder'
-          ? pickDailyMessage(userRow, now)
-          : pickWeeklyMessage(userRow);
+          ? pickDailyMessage(userRow, now, prefs)
+          : pickWeeklyMessage(userRow, prefs);
+
+        // null = user opted out of this specific message category
+        if (!payload) continue;
 
         const variantKey = `${payload.title}|||${payload.body}`;
         if (!variantMap.has(variantKey)) {

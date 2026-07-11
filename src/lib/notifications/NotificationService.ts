@@ -95,7 +95,7 @@ class NotificationService {
     });
 
     await Notifications.setNotificationChannelAsync('circles', {
-      name: 'Circle Activity',
+      name: 'Pool Activity',
       importance: Notifications.AndroidImportance.HIGH,
       vibrationPattern: [0, 250, 250, 250],
       enableVibrate: true,

@@ -13,7 +13,7 @@ import { ArrowLeft, ExternalLink } from 'lucide-react-native';
 import { useTheme } from '../theme';
 import { ScreenHeader } from '../components/ui/ScreenHeader';
 
-const TERMS_URL = 'https://nippysky.com/doings/aku/terms';
+const TERMS_URL = 'https://nippysky.com/ventures/aku/terms';
 
 export default function TermsScreen() {
   const { colors, text } = useTheme();

@@ -235,7 +235,7 @@ const SLIDES: Slide[] = [
     key:          'circle',
     Illustration: IllustrationCircle,
     headline:     'Save better together',
-    body:         'Create a Circle with family or friends. Pool contributions and hit shared goals faster.',
+    body:         'Create a Pool with family or friends. Contribute together and hit shared goals faster.',
   },
   {
     key:          'private',

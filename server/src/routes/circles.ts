@@ -1,11 +1,12 @@
 /**
  * Circles routes
  *
- * POST /api/circles              — Register a new circle (owner calls on creation)
- * POST /api/circles/join         — Join a circle by 8-char invite code
- * GET  /api/circles              — List all circles the authenticated user belongs to
- * GET  /api/circles/preview/:code — Preview a circle by invite code (no membership created)
- * GET  /api/circles/:id/members  — Get members of a circle (owner or member only)
+ * POST   /api/circles              — Register a new circle (owner calls on creation)
+ * POST   /api/circles/join         — Join a circle by 8-char invite code
+ * GET    /api/circles              — List all circles the authenticated user belongs to
+ * PATCH  /api/circles/:id          — Update circle name (owner only)
+ * GET    /api/circles/preview/:code — Preview a circle by invite code (no membership created)
+ * GET    /api/circles/:id/members  — Get members of a circle (owner or member only)
  */
 import { Hono } from 'hono';
 import { eq, and, inArray } from 'drizzle-orm';
@@ -144,7 +145,7 @@ router.post('/join', async (c) => {
           tokenRows.map((r) => r.token),
           {
             title:     `${memberName ?? 'Someone'} joined "${circle.name}" 🎉`,
-            body:      `You now have a new circle member. Check your circle!`,
+            body:      `You now have a new Pool member. Check your Pool!`,
             channelId: 'circles',
             data: {
               type:     'circle_member_joined',
@@ -253,6 +254,44 @@ router.get('/preview/:code', async (c) => {
   });
 });
 
+// ─── PATCH /api/circles/:id ──────────────────────────────────────────────────
+// Owner updates circle name (and optionally emoji). Called immediately after
+// the user saves a name change so the server stays in sync with local SQLite.
+
+router.patch('/:id', async (c) => {
+  const { sub: userId } = c.get('jwtPayload');
+  const circleId        = c.req.param('id');
+
+  const circleRows = await db.select({ ownerId: circles.ownerId })
+    .from(circles)
+    .where(eq(circles.id, circleId))
+    .limit(1);
+
+  if (circleRows.length === 0) return c.json({ error: 'Circle not found' }, 404);
+  if (circleRows[0].ownerId !== userId) return c.json({ error: 'Forbidden' }, 403);
+
+  const body = await c.req.json<{ name?: string; emoji?: string }>();
+  const updates: Record<string, string> = {};
+  if (body.name?.trim())  updates.name  = body.name.trim();
+  if (body.emoji?.trim()) updates.emoji = body.emoji.trim();
+
+  if (Object.keys(updates).length === 0) {
+    return c.json({ error: 'Nothing to update' }, 400);
+  }
+
+  await db.update(circles).set(updates as any).where(eq(circles.id, circleId));
+
+  // Nudge all members via WS so they reload and see the new name
+  const allMembers = await db
+    .select({ userId: circleMembers.userId })
+    .from(circleMembers)
+    .where(eq(circleMembers.circleId, circleId));
+
+  for (const m of allMembers) notifyUser(m.userId);
+
+  return c.json({ success: true });
+});
+
 // ─── PUT /api/circles/:id/settings ───────────────────────────────────────────
 // Owner saves circle settings so all members can see them on next sync.
 // Accepts a JSON body that is stored verbatim in settings_json.
@@ -351,7 +390,7 @@ router.delete('/:id/members/:targetUserId', async (c) => {
       removedTokenRows.map((r) => r.token),
       {
         title:     `You've been removed from "${circle.name}"`,
-        body:      `${ownerName ?? 'The admin'} removed you from this circle.`,
+        body:      `${ownerName ?? 'The admin'} removed you from this Pool.`,
         channelId: 'circles',
         data: { type: 'circle_member_removed', screen: 'home', circleId },
       },
@@ -373,7 +412,7 @@ router.delete('/:id/members/:targetUserId', async (c) => {
         remainingTokenRows.map((r) => r.token),
         {
           title:     `${targetName} was removed from "${circle.name}"`,
-          body:      `${ownerName ?? 'The admin'} removed them from the circle.`,
+          body:      `${ownerName ?? 'The admin'} removed them from the Pool.`,
           channelId: 'circles',
           data: { type: 'circle_member_removed', screen: 'circle', circleId },
         },

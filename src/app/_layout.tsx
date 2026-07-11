@@ -41,6 +41,11 @@ export default function RootLayout() {
   // Track whether we've registered the push token for this session
   const pushTokenRegistered = useRef(false);
 
+  // Track the last calendar day recurring items were processed.
+  // Used by the foreground AppState handler to catch midnight crossovers
+  // when the app stays open all night without locking.
+  const lastRecurringDateRef = useRef<string>('');
+
   // Resolve dark mode: respect in-app preference, then fall back to system
   const isDark =
     themeMode === 'dark'  ? true  :
@@ -108,6 +113,9 @@ export default function RootLayout() {
 
     // Fired when transitioning locked → unlocked with a valid user
     if (wasLocked && !isLocked && user) {
+      const today = new Date().toISOString().slice(0, 10);
+      lastRecurringDateRef.current = today;
+
       const { processOverdue: processExpenses } = useRecurringExpensesStore.getState();
       const { processOverdue: processIncome }   = useRecurringIncomeStore.getState();
 
@@ -135,6 +143,27 @@ export default function RootLayout() {
         import('expo-notifications').then(({ setBadgeCountAsync }) => {
           setBadgeCountAsync(0).catch(() => {});
         });
+
+        // Midnight crossover: if the date changed since last recurring-process run,
+        // run processOverdue again so items due today get logged even if the app
+        // stayed open all night (no unlock transition).
+        const today = new Date().toISOString().slice(0, 10);
+        if (user && !isLocked && lastRecurringDateRef.current && lastRecurringDateRef.current < today) {
+          lastRecurringDateRef.current = today;
+          const { processOverdue: processExpenses } = useRecurringExpensesStore.getState();
+          const { processOverdue: processIncome }   = useRecurringIncomeStore.getState();
+          Promise.all([processExpenses(user.id), processIncome(user.id)])
+            .then(([expLogged, incLogged]) => {
+              const allLogged = [...expLogged, ...incLogged];
+              if (allLogged.length > 0) {
+                const { showToast } = useUIStore.getState();
+                const names = allLogged.map((l) => l.name).join(', ');
+                showToast('info', `Auto-logged: ${names}`);
+              }
+            })
+            .catch(() => {});
+        }
+
         // Pull delta from server — only fires when DEK is loaded (user unlocked)
         const { dek, lastSyncAt } = useSyncStore.getState();
         if (dek && user && !isLocked) {

@@ -80,6 +80,11 @@ function fromDb(row: typeof schema.recurringExpenses.$inferSelect): RecurringExp
   };
 }
 
+// ─── Concurrency guard ────────────────────────────────────────────────────────
+// Prevents processOverdue from running concurrently (e.g. rapid unlock events).
+// Key: userId → true if in-flight. Module-level so it persists across store updates.
+const processingGuard = new Map<string, boolean>();
+
 // ─── State ────────────────────────────────────────────────────────────────────
 
 interface RecurringExpensesState {
@@ -93,7 +98,9 @@ interface RecurringExpensesState {
   toggleActive:  (id: string) => Promise<void>;
   /**
    * Auto-log all overdue active items as expenses.
-   * Called once after PIN unlock. Returns count logged.
+   * Called once after PIN unlock and on foreground resume when date changed.
+   * Returns the list of items that were logged. Safe to call concurrently —
+   * a module-level guard prevents double-processing per user.
    */
   processOverdue: (userId: string) => Promise<{ name: string; amount: number }[]>;
 }
@@ -200,9 +207,15 @@ export const useRecurringExpensesStore = create<RecurringExpensesState>()((set, 
   },
 
   processOverdue: async (userId) => {
+    // Concurrency guard — skip if already processing for this user
+    if (processingGuard.get(userId)) return [];
+    processingGuard.set(userId, true);
+
     const db      = getDatabase();
     const today   = format(new Date(), 'yyyy-MM-dd');
     const logged: { name: string; amount: number }[] = [];
+
+    try {
 
     // Query active items due on or before today
     const overdue = await db
@@ -249,17 +262,20 @@ export const useRecurringExpensesStore = create<RecurringExpensesState>()((set, 
       logged.push({ name: item.name, amount: item.amount });
     }
 
-    // Refresh in-memory list after processing
-    if (logged.length > 0) {
-      const rows = await db
-        .select()
-        .from(schema.recurringExpenses)
-        .where(eq(schema.recurringExpenses.userId, userId))
-        .orderBy(schema.recurringExpenses.name);
-      set({ items: rows.map(fromDb) });
-      triggerPush();
-    }
+      // Refresh in-memory list after processing
+      if (logged.length > 0) {
+        const rows = await db
+          .select()
+          .from(schema.recurringExpenses)
+          .where(eq(schema.recurringExpenses.userId, userId))
+          .orderBy(schema.recurringExpenses.name);
+        set({ items: rows.map(fromDb) });
+        triggerPush();
+      }
 
-    return logged;
+      return logged;
+    } finally {
+      processingGuard.delete(userId);
+    }
   },
 }));

@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ActionSheetIOS,
   Alert,
   Platform,
   Pressable,
@@ -41,6 +40,7 @@ import {
   Plus,
   LogIn,
   Repeat,
+  HelpCircle,
 } from 'lucide-react-native';
 import { BottomSheetModal, BottomSheetView, BottomSheetBackdrop } from '@gorhom/bottom-sheet';
 import type { BottomSheetBackdropProps } from '@gorhom/bottom-sheet';
@@ -64,8 +64,8 @@ import type { ThemeMode } from '../../store/ui.store';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const PRIVACY_URL = 'https://aku.app/privacy';
-const TERMS_URL   = 'https://aku.app/terms';
+const PRIVACY_URL = 'https://nippysky.com/ventures/aku/privacy';
+const TERMS_URL   = 'https://nippysky.com/ventures/aku/terms';
 
 // ─── Theme options ────────────────────────────────────────────────────────────
 
@@ -236,6 +236,9 @@ export default function ProfileScreen() {
   const { budgets }  = useBudgetsStore();
   const { goals }    = useGoalsStore();
   const { allRecords: incomeRecords, loadAll: loadAllInc } = useIncomeStore();
+
+  // ── Avatar picker sheet ───────────────────────────────────────────────
+  const avatarPickerRef = useRef<BottomSheetModal>(null);
 
   // ── Theme picker sheet ────────────────────────────────────────────────
   const themeSheetRef = useRef<BottomSheetModal>(null);
@@ -437,22 +440,8 @@ export default function ProfileScreen() {
   }, [saveAvatarData, showToast]);
 
   const handlePickAvatar = useCallback(() => {
-    if (Platform.OS === 'ios') {
-      ActionSheetIOS.showActionSheetWithOptions(
-        { options: ['Cancel', 'Take Photo', 'Choose from Library'], cancelButtonIndex: 0 },
-        (idx) => {
-          if (idx === 1) void pickAndSaveAvatar('camera');
-          if (idx === 2) void pickAndSaveAvatar('library');
-        },
-      );
-    } else {
-      Alert.alert('Profile Photo', 'Choose a source', [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Take Photo',           onPress: () => void pickAndSaveAvatar('camera') },
-        { text: 'Choose from Library',  onPress: () => void pickAndSaveAvatar('library') },
-      ]);
-    }
-  }, [pickAndSaveAvatar]);
+    avatarPickerRef.current?.present();
+  }, []);
 
   // ── Generate PDF bank statement (with optional date range) ───────────
   const handleExportData = useCallback(async (bounds?: { from: string | null; to: string | null }) => {
@@ -638,7 +627,7 @@ export default function ProfileScreen() {
   .debit { color:#D63B3B; }
   .credit { color:#16C172; }
   .empty { color:#B0B8B4; font-style:italic; text-align:center; padding:18px 0; font-size:11px; }
-  .subtotal-row td { font-weight:700; background:#F3F7F4; border-top:1.5px solid rgba(22,58,47,0.15); border-bottom:1.5px solid rgba(22,58,47,0.15); color:#163A2F; font-size:12px; }
+  .subtotal td { font-weight:700; background:#F3F7F4; border-top:1.5px solid rgba(22,58,47,0.15); border-bottom:1.5px solid rgba(22,58,47,0.15); color:#163A2F; font-size:12px; }
 
   /* ── Badges ── */
   .badge { display:inline-block; padding:2px 8px; border-radius:20px; font-size:8.5px; font-weight:700; letter-spacing:0.5px; text-transform:uppercase; }
@@ -685,7 +674,7 @@ export default function ProfileScreen() {
     <div class="pband-val">${rangeLabel}</div>
   </div>
   <div class="pband-block" style="text-align:right">
-    <div class="pband-label">Circle</div>
+    <div class="pband-label">Pool</div>
     <div class="pband-val">${activeCircle?.name ?? '—'}</div>
   </div>
 </div>
@@ -799,7 +788,7 @@ export default function ProfileScreen() {
 
 <!-- FOOTER -->
 <div class="footer">
-  <div class="footer-l"><strong>Akù Personal Finance</strong> · aku.app<br/>This document is for personal reference only. Not a certified financial statement.</div>
+  <div class="footer-l"><strong>Akù Personal Finance</strong> · nippysky.com<br/>This document is for personal reference only. Not a certified financial statement.</div>
   <div class="footer-r">Generated ${dateLabel}</div>
 </div>
 
@@ -826,8 +815,8 @@ export default function ProfileScreen() {
 
   // ── Feedback ──────────────────────────────────────────────────────────
   const handleFeedback = useCallback(() => {
-    Linking.openURL('mailto:hello@aku.app?subject=Feedback').catch(() => {
-      showToast('info', 'Send feedback to hello@aku.app');
+    Linking.openURL('mailto:contact@nippysky.com?subject=Feedback').catch(() => {
+      showToast('info', 'Send feedback to contact@nippysky.com');
     });
   }, [showToast]);
 
@@ -887,7 +876,7 @@ export default function ProfileScreen() {
 
 
         {/* ── Circles section ── */}
-        <SectionHeader label="My Circles" />
+        <SectionHeader label="My Pools" />
 
         {circles.length > 0 ? (
           <>
@@ -896,7 +885,7 @@ export default function ProfileScreen() {
                 <SettingsRow
                   icon={Users}
                   label={circle.name}
-                  onPress={() => router.push(`/circle/${circle.id}` as never)}
+                  onPress={() => router.push(`/pool/${circle.id}` as never)}
                   isFirst
                   isLast
                   rightElement={
@@ -923,17 +912,17 @@ export default function ProfileScreen() {
                 onPress={() => setShowCreateCircle(true)}
               >
                 <Plus size={15} color={colors.primary} strokeWidth={2.2} />
-                <Text style={[text.caption, { color: colors.primary, fontFamily: font.sansSemiBold }]}>New Circle</Text>
+                <Text style={[text.caption, { color: colors.primary, fontFamily: font.sansSemiBold }]}>New Pool</Text>
               </Pressable>
               <Pressable
                 style={({ pressed }) => [
                   styles.circleActionBtn,
                   { backgroundColor: colors.backgroundSecondary, borderColor: colors.border, opacity: pressed ? 0.75 : 1 },
                 ]}
-                onPress={() => router.push('/circle/join' as never)}
+                onPress={() => router.push('/pool/join' as never)}
               >
                 <LogIn size={15} color={colors.primary} strokeWidth={2} />
-                <Text style={[text.caption, { color: colors.primary, fontFamily: font.sansMedium }]}>Join Circle</Text>
+                <Text style={[text.caption, { color: colors.primary, fontFamily: font.sansMedium }]}>Join Pool</Text>
               </Pressable>
             </View>
           </>
@@ -945,7 +934,7 @@ export default function ProfileScreen() {
             </View>
 
             <Text style={[text.bodyMedium, { color: colors.text, fontFamily: font.sansSemiBold, textAlign: 'center' }]}>
-              No Circles yet
+              No Pools yet
             </Text>
             <Text style={[text.caption, { color: colors.textSecondary, textAlign: 'center', lineHeight: 19 }]}>
               Save together, track together.{'\n'}Create one or join with an invite code.
@@ -961,7 +950,7 @@ export default function ProfileScreen() {
             >
               <Plus size={17} color="#F5F2EC" strokeWidth={2.2} />
               <Text style={[text.bodySm, { color: '#F5F2EC', fontFamily: font.sansSemiBold }]}>
-                Create a Circle
+                Create a Pool
               </Text>
             </Pressable>
 
@@ -971,11 +960,11 @@ export default function ProfileScreen() {
                 styles.circlesEmptySecondary,
                 { borderColor: colors.primary + '50', opacity: pressed ? 0.7 : 1 },
               ]}
-              onPress={() => router.push('/circle/join' as never)}
+              onPress={() => router.push('/pool/join' as never)}
             >
               <LogIn size={17} color={colors.primary} strokeWidth={2} />
               <Text style={[text.bodySm, { color: colors.primary, fontFamily: font.sansMedium }]}>
-                Join a Circle
+                Join a Pool
               </Text>
             </Pressable>
           </Card>
@@ -1083,11 +1072,16 @@ export default function ProfileScreen() {
         <SectionHeader label="About" />
         <SettingsGroup>
           <SettingsRow
+            icon={HelpCircle}
+            label="FAQ & Help"
+            onPress={() => router.push('/faq' as never)}
+            isFirst
+          />
+          <SettingsRow
             icon={Shield}
             label="Privacy Policy"
             onPress={() => WebBrowser.openBrowserAsync(PRIVACY_URL)}
             isExternal
-            isFirst
           />
           <SettingsRow
             icon={FileText}
@@ -1121,6 +1115,79 @@ export default function ProfileScreen() {
           </Pressable>
         </View>
       </ScrollView>
+
+      {/* ── Avatar picker sheet ── */}
+      <BottomSheetModal
+        ref={avatarPickerRef}
+        snapPoints={['28%']}
+        backdropComponent={renderBackdrop}
+        backgroundStyle={{ backgroundColor: colors.card }}
+        handleIndicatorStyle={{ backgroundColor: colors.border }}
+      >
+        <BottomSheetView style={{ padding: 24, gap: 12 }}>
+          <Text
+            style={{
+              fontFamily:    font.displayLight,
+              fontSize:      fontSize.xl,
+              color:         colors.text,
+              marginBottom:  8,
+              letterSpacing: -0.3,
+            }}
+          >
+            Change Photo
+          </Text>
+
+          {/* Take photo */}
+          <Pressable
+            onPress={() => {
+              avatarPickerRef.current?.dismiss();
+              pickAndSaveAvatar('camera');
+            }}
+            style={({ pressed }) => [
+              {
+                flexDirection:  'row',
+                alignItems:     'center',
+                gap:            14,
+                paddingVertical: 14,
+                paddingHorizontal: 16,
+                borderRadius:   radius.lg,
+                backgroundColor: pressed ? colors.backgroundSecondary : colors.backgroundSecondary,
+                opacity: pressed ? 0.7 : 1,
+              },
+            ]}
+          >
+            <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: colors.primary + '18', alignItems: 'center', justifyContent: 'center' }}>
+              <Camera size={18} color={colors.primary} strokeWidth={1.8} />
+            </View>
+            <Text style={[text.bodyMedium, { color: colors.text }]}>Take a photo</Text>
+          </Pressable>
+
+          {/* Choose from library */}
+          <Pressable
+            onPress={() => {
+              avatarPickerRef.current?.dismiss();
+              pickAndSaveAvatar('library');
+            }}
+            style={({ pressed }) => [
+              {
+                flexDirection:  'row',
+                alignItems:     'center',
+                gap:            14,
+                paddingVertical: 14,
+                paddingHorizontal: 16,
+                borderRadius:   radius.lg,
+                backgroundColor: colors.backgroundSecondary,
+                opacity: pressed ? 0.7 : 1,
+              },
+            ]}
+          >
+            <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: colors.primary + '18', alignItems: 'center', justifyContent: 'center' }}>
+              <Download size={18} color={colors.primary} strokeWidth={1.8} />
+            </View>
+            <Text style={[text.bodyMedium, { color: colors.text }]}>Choose from library</Text>
+          </Pressable>
+        </BottomSheetView>
+      </BottomSheetModal>
 
       {/* ── Theme picker sheet ── */}
       <BottomSheetModal
@@ -1395,7 +1462,7 @@ const styles = StyleSheet.create({
     padding:      16,
     marginBottom: 24,
   },
-  // ── My Circles empty state ────────────────────────────────────────────────
+  // ── My Pools empty state ────────────────────────────────────────────────
   circlesEmptyCard: {
     paddingVertical:   28,
     paddingHorizontal: 20,

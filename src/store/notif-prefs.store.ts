@@ -7,6 +7,7 @@
 
 import { create } from 'zustand';
 import { getSQLiteDatabase } from '../lib/database/client';
+import { updateNotifPrefs } from '../lib/api-client';
 
 // ─── Preference keys ──────────────────────────────────────────────────────────
 
@@ -81,6 +82,16 @@ export const useNotifPrefsStore = create<NotifPrefsState>()((set, get) => ({
       dailyDigest:    KEY_DAILY_DIGEST,
     };
     appStateSet(keyMap[key], value);
+
+    // Sync updated prefs to the server so the notification worker respects them.
+    // Fire-and-forget — updateNotifPrefs catches its own errors.
+    const current = useNotifPrefsStore.getState();
+    updateNotifPrefs({
+      billReminders:  key === 'billReminders'  ? value : current.billReminders,
+      budgetAlerts:   key === 'budgetAlerts'   ? value : current.budgetAlerts,
+      goalMilestones: key === 'goalMilestones' ? value : current.goalMilestones,
+      dailyDigest:    key === 'dailyDigest'    ? value : current.dailyDigest,
+    });
   },
 }));
 

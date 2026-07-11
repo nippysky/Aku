@@ -50,7 +50,7 @@ async function getToken(): Promise<string | null> {
 }
 
 type FetchOptions = {
-  method?:  'GET' | 'POST' | 'PUT' | 'DELETE';
+  method?:  'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
   body?:    object | FormData;
   noAuth?:  boolean;   // set true for unauthenticated routes (magic-link send)
 };
@@ -328,6 +328,27 @@ export async function reportInsight(payload: UserInsightPayload): Promise<void> 
   });
 }
 
+/**
+ * Sync notification preferences to the server so the server-side notification
+ * worker can respect the user's choices. Call fire-and-forget after any
+ * preference toggle in the notification settings screen.
+ */
+export async function updateNotifPrefs(prefs: {
+  billReminders:  boolean;
+  budgetAlerts:   boolean;
+  goalMilestones: boolean;
+  dailyDigest:    boolean;
+}): Promise<void> {
+  try {
+    await apiFetch('/api/notifications/preferences', {
+      method: 'PATCH',
+      body:   prefs,
+    });
+  } catch {
+    // Non-critical — prefs will sync on the next insight report or app restart
+  }
+}
+
 // ─── Circle endpoints ─────────────────────────────────────────────────────────
 
 /**
@@ -414,6 +435,18 @@ export type CircleMemberInfo = {
 export async function fetchCircleMembers(circleId: string): Promise<CircleMemberInfo[]> {
   const res = await apiFetch<{ members: CircleMemberInfo[] }>(`/api/circles/${circleId}/members`);
   return res.members;
+}
+
+/**
+ * Update circle name (and optionally emoji) on the server.
+ * Called immediately after the owner saves a name change locally.
+ * The server notifies all members via WS so they reload.
+ */
+export async function updateCircleOnServer(
+  circleId: string,
+  updates:  { name?: string; emoji?: string },
+): Promise<void> {
+  await apiFetch(`/api/circles/${circleId}`, { method: 'PATCH', body: updates });
 }
 
 /**

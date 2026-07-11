@@ -1,7 +1,7 @@
 /**
  * expenses/[id].tsx — Expense detail screen.
  *
- * Shows full expense info: amount, category, description, date, shared flag.
+ * Shows full expense info: amount, category, description, date.
  * Header actions: edit (opens EditExpenseSheet) and delete (Alert confirmation).
  */
 import React, { useCallback, useState } from 'react';
@@ -232,12 +232,6 @@ export default function ExpenseDetailScreen() {
               value={expense.description}
             />
           ) : null}
-          <InfoRow
-            icon={Users}
-            label="Shared expense"
-            value={expense.isShared ? 'Yes — shared with household' : 'Personal'}
-            valueColor={expense.isShared ? colors.primary : colors.text}
-          />
         </Animated.View>
 
         {/* ── Delete button ── */}

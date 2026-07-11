@@ -78,6 +78,9 @@ function fromDb(row: typeof schema.recurringIncome.$inferSelect): RecurringIncom
   };
 }
 
+// ─── Concurrency guard ────────────────────────────────────────────────────────
+const processingGuard = new Map<string, boolean>();
+
 // ─── State ────────────────────────────────────────────────────────────────────
 
 interface RecurringIncomeState {
@@ -91,7 +94,7 @@ interface RecurringIncomeState {
   toggleActive:  (id: string) => Promise<void>;
   /**
    * Auto-log all overdue active items as income entries.
-   * Called once after PIN unlock. Returns logged items.
+   * Safe to call concurrently — module-level guard prevents double-processing per user.
    */
   processOverdue: (userId: string) => Promise<{ name: string; amount: number }[]>;
 }
@@ -202,10 +205,15 @@ export const useRecurringIncomeStore = create<RecurringIncomeState>()((set, get)
   },
 
   processOverdue: async (userId) => {
+    // Concurrency guard
+    if (processingGuard.get(userId)) return [];
+    processingGuard.set(userId, true);
+
     const db      = getDatabase();
     const today   = format(new Date(), 'yyyy-MM-dd');
     const logged: { name: string; amount: number }[] = [];
 
+    try {
     const overdue = await db
       .select()
       .from(schema.recurringIncome)
@@ -288,5 +296,8 @@ export const useRecurringIncomeStore = create<RecurringIncomeState>()((set, get)
     }
 
     return logged;
+    } finally {
+      processingGuard.delete(userId);
+    }
   },
 }));

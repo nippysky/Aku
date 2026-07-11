@@ -12,7 +12,7 @@ import { create } from 'zustand';
 import { eq, and, inArray, notInArray } from 'drizzle-orm';
 import { getDatabase, schema } from '../lib/database/client';
 import { generateUUID } from '../lib/uuid';
-import { registerCircle, joinCircleByCode, fetchUserCircles, fetchCircleMembers, fetchCircleSettings } from '../lib/api-client';
+import { registerCircle, joinCircleByCode, fetchUserCircles, fetchCircleMembers, fetchCircleSettings, updateCircleOnServer } from '../lib/api-client';
 import type { Household, HouseholdMember, CircleFrequency, ContributionType } from '../types';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -483,10 +483,14 @@ export const useCirclesStore = create<CirclesState>()((set, get) => ({
       .update(schema.households)
       .set({ name })
       .where(eq(schema.households.id, circleId));
+    // Optimistic UI update
     set((s) => ({
       activeCircle: s.activeCircle?.id === circleId ? { ...s.activeCircle, name } : s.activeCircle,
       circles: s.circles.map((c) => c.id === circleId ? { ...c, name } : c),
     }));
+    // Push to server so the name persists across restarts and syncs to all members.
+    // Fire-and-forget — local SQLite is already updated; server failure is non-fatal.
+    updateCircleOnServer(circleId, { name }).catch(() => {});
   },
 
   loadMembers: async (circleId) => {

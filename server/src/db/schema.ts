@@ -195,5 +195,13 @@ export const userInsights = pgTable('user_insights', {
   goalsOnTrack:        integer('goals_on_track').notNull().default(0),
   hasActiveGoals:      boolean('has_active_goals').notNull().default(false),
 
+  /**
+   * JSON blob of client notification preferences, stored as-sent from the device.
+   * Shape: { billReminders: boolean, budgetAlerts: boolean, goalMilestones: boolean, dailyDigest: boolean }
+   * The notification worker reads this before sending Tier 1/2 push messages.
+   * null = preferences never synced (treat all as enabled / default).
+   */
+  notifPrefsJson:      text('notif_prefs_json'),
+
   updatedAt:           timestamp('updated_at').notNull().defaultNow(),
 });

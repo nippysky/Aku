@@ -13,7 +13,7 @@ import { ArrowLeft, ExternalLink } from 'lucide-react-native';
 import { useTheme } from '../theme';
 import { ScreenHeader } from '../components/ui/ScreenHeader';
 
-const PRIVACY_URL = 'https://nippysky.com/doings/aku/privacy-policy';
+const PRIVACY_URL = 'https://nippysky.com/ventures/aku/privacy';
 
 export default function PrivacyScreen() {
   const { colors, text, spacing } = useTheme();

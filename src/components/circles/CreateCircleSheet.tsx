@@ -204,7 +204,7 @@ export function CreateCircleSheet({ isOpen, onClose, onSuccess }: CreateCircleSh
   const handleSubmit = useCallback(async () => {
     const trimmedName = name.trim();
     if (!trimmedName) {
-      setNameError('Circle name is required');
+      setNameError('Pool name is required');
       return;
     }
     if (!user) return;
@@ -224,7 +224,7 @@ export function CreateCircleSheet({ isOpen, onClose, onSuccess }: CreateCircleSh
       handleClose();
       onSuccess?.();
     } catch {
-      showToast('error', 'Failed to create circle');
+      showToast('error', 'Failed to create pool');
     } finally {
       setIsSubmitting(false);
     }
@@ -431,7 +431,7 @@ export function CreateCircleSheet({ isOpen, onClose, onSuccess }: CreateCircleSh
         {/* ── Submit button ── */}
         <View style={styles.submitRow}>
           <Button
-            label={isSubmitting ? 'Creating…' : `Create ${emoji} ${name.trim() || 'Circle'}`}
+            label={isSubmitting ? 'Creating…' : `Create ${emoji} ${name.trim() || 'Pool'}`}
             onPress={handleSubmit}
             disabled={isSubmitting}
             variant="primary"

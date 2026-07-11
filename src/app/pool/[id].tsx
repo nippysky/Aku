@@ -1,5 +1,5 @@
 /**
- * circle/[id].tsx — Contribution Group Detail
+ * pool/[id].tsx — Pool Detail
  *
  * Three tabs (admin) / two tabs (member):
  *  [Members]      — member payment status, goal progress, payment details
@@ -436,7 +436,7 @@ export default function CircleDetailScreen() {
       deadline:         editDeadline || null,
     });
     editSheetRef.current?.dismiss();
-    showToast('success', 'Circle updated');
+    showToast('success', 'Pool updated');
   }, [circleId, circle, editName, editEmoji, editDesc, editTargetKobo, editFrequency, editPerMember, editDeadline, updateCircleName, saveSettings, showToast]);
 
   // ── Payment details form (admin only) ─────────────────────────────────────
@@ -469,7 +469,7 @@ export default function CircleDetailScreen() {
   const circleEmoji  = settings?.emoji ?? '💰';
   const inviteCode   = (circle as any)?.inviteCode ?? '';
   const joinUrl      = `https://nippysky.com/ventures/aku/join?code=${inviteCode}`;
-  const circleName   = circle?.name ?? 'Circle';
+  const circleName   = circle?.name ?? 'Pool';
 
   // ── Invite actions ────────────────────────────────────────────────────────
   const handleCopyCode = useCallback(async () => {
@@ -483,10 +483,10 @@ export default function CircleDetailScreen() {
     if (!inviteCode) { showToast('info', 'No invite code available'); return; }
     try {
       const message =
-        `${circleEmoji} Join "${circleName}" on Akù — the smart money circle app!\n\n` +
+        `${circleEmoji} Join "${circleName}" on Akù — the smart money pool app!\n\n` +
         `Tap to join instantly:\n${joinUrl}\n\n` +
         `Or enter code: ${inviteCode}`;
-      await Share.share({ message, title: `Join ${circleName} on Akù` });
+      await Share.share({ message, title: `Join ${circleName} pool on Akù` });
     } catch {
       showToast('error', 'Could not open share sheet');
     }
@@ -554,7 +554,7 @@ export default function CircleDetailScreen() {
   const handleRemoveMember = useCallback((memberId: string, memberUserId: string, memberName: string) => {
     showAlert({
       title:        'Remove Member',
-      message:      `Remove ${memberName} from this circle?\n\nAll members will be notified. Their contribution history will remain.`,
+      message:      `Remove ${memberName} from this pool?\n\nAll members will be notified. Their contribution history will remain.`,
       confirmLabel: 'Remove',
       danger:       true,
       onConfirm:    async () => {
@@ -592,7 +592,7 @@ export default function CircleDetailScreen() {
   if (!circle) {
     return (
       <View style={[styles.screen, { backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center' }]}>
-        <Text style={[text.body, { color: colors.textSecondary }]}>Circle not found.</Text>
+        <Text style={[text.body, { color: colors.textSecondary }]}>Pool not found.</Text>
       </View>
     );
   }
@@ -1100,6 +1100,7 @@ export default function CircleDetailScreen() {
         handleIndicatorStyle={{ backgroundColor: colors.border }}
         keyboardBehavior="interactive"
         keyboardBlurBehavior="restore"
+        android_keyboardInputMode="adjustResize"
       >
         <BottomSheetScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: insets.bottom + 24 }}>
           <Text style={{ fontFamily: font.displayLight, fontSize: fontSize.xl, color: colors.text, marginBottom: 4 }}>
@@ -1108,7 +1109,7 @@ export default function CircleDetailScreen() {
           <Text style={[text.caption, { color: colors.textTertiary, marginBottom: 20 }]}>
             Enter the amount you've contributed. The admin will verify it.
           </Text>
-          <AmountInput label="Amount" value={logAmountKobo} onChange={setLogAmountKobo} size="md" style={{ marginBottom: 12 }} />
+          <AmountInput label="Amount" value={logAmountKobo} onChange={setLogAmountKobo} size="md" style={{ marginBottom: 12 }} asBottomSheetInput />
           <View style={[styles.inputWrap, { borderColor: colors.border, backgroundColor: colors.inputBackground, marginBottom: 20 }]}>
             <BottomSheetTextInput
               value={logNote}
@@ -1127,7 +1128,7 @@ export default function CircleDetailScreen() {
         </BottomSheetScrollView>
       </BottomSheetModal>
 
-      {/* ── Edit Circle Sheet (admin only) ── */}
+      {/* ── Edit Pool Sheet (admin only) ── */}
       <BottomSheetModal
         ref={editSheetRef}
         snapPoints={['85%']}
@@ -1136,18 +1137,19 @@ export default function CircleDetailScreen() {
         handleIndicatorStyle={{ backgroundColor: colors.border }}
         keyboardBehavior="interactive"
         keyboardBlurBehavior="restore"
+        android_keyboardInputMode="adjustResize"
       >
         <BottomSheetScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: insets.bottom + 24 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-            <Text style={{ fontFamily: font.displayLight, fontSize: fontSize.xl, color: colors.text }}>Edit Circle</Text>
+            <Text style={{ fontFamily: font.displayLight, fontSize: fontSize.xl, color: colors.text }}>Edit Pool</Text>
             <AdminPill />
           </View>
           <Text style={[text.caption, { color: colors.textTertiary, marginBottom: 20 }]}>
             Update name, goal, frequency, and contribution rules.
           </Text>
 
-          {/* Circle Name */}
-          <Text style={[text.label, { color: colors.textSecondary, marginBottom: 6 }]}>Circle Name</Text>
+          {/* Pool Name */}
+          <Text style={[text.label, { color: colors.textSecondary, marginBottom: 6 }]}>Pool Name</Text>
           <View style={[styles.inputWrap, { borderColor: colors.border, backgroundColor: colors.inputBackground, marginBottom: 20 }]}>
             <BottomSheetTextInput
               value={editName}
@@ -1224,7 +1226,7 @@ export default function CircleDetailScreen() {
               : <Calendar size={16} color={colors.textTertiary} strokeWidth={1.8} />}
           </Pressable>
 
-          <Button variant="primary" label={isSaving ? 'Saving…' : 'Save Circle Details'} onPress={handleSaveDetails} disabled={isSaving} />
+          <Button variant="primary" label={isSaving ? 'Saving…' : 'Save Pool Details'} onPress={handleSaveDetails} disabled={isSaving} />
         </BottomSheetScrollView>
       </BottomSheetModal>
 
@@ -1237,6 +1239,7 @@ export default function CircleDetailScreen() {
         handleIndicatorStyle={{ backgroundColor: colors.border }}
         keyboardBehavior="interactive"
         keyboardBlurBehavior="restore"
+        android_keyboardInputMode="adjustResize"
       >
         <BottomSheetScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: insets.bottom + 24 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
@@ -1325,7 +1328,7 @@ export default function CircleDetailScreen() {
           >
             <Settings2 size={18} color={colors.primary} strokeWidth={1.8} />
             <View style={{ flex: 1 }}>
-              <Text style={{ fontFamily: font.sansSemiBold, fontSize: fontSize.sm, color: colors.text }}>Edit Circle Details</Text>
+              <Text style={{ fontFamily: font.sansSemiBold, fontSize: fontSize.sm, color: colors.text }}>Edit Pool Details</Text>
               <Text style={[text.caption, { color: colors.textTertiary }]}>Name, emoji, goal, frequency, deadline</Text>
             </View>
           </Pressable>
@@ -1352,7 +1355,7 @@ export default function CircleDetailScreen() {
         handleIndicatorStyle={{ backgroundColor: colors.border }}
       >
         <BottomSheetScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: insets.bottom + 24 }}>
-          {/* Circle card */}
+          {/* Pool card */}
           <View style={[styles.inviteCircleCard, { backgroundColor: '#163A2F' }]}>
             <Text style={{ fontSize: 36, marginBottom: 8 }}>{circleEmoji}</Text>
             <Text style={{ fontFamily: font.displayLight, fontSize: fontSize['2xl'], color: '#FAF9F5', letterSpacing: -0.5, textAlign: 'center' }}>
@@ -1411,6 +1414,7 @@ export default function CircleDetailScreen() {
         handleIndicatorStyle={{ backgroundColor: colors.border }}
         keyboardBehavior="interactive"
         keyboardBlurBehavior="restore"
+        android_keyboardInputMode="adjustResize"
       >
         <BottomSheetScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: insets.bottom + 24 }}>
           <Text style={{ fontFamily: font.displayLight, fontSize: fontSize.xl, color: colors.text, marginBottom: 4 }}>
