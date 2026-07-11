@@ -63,9 +63,6 @@ export function AmountInput({
   placeholder = '0',
   asBottomSheetInput = false,
 }: AmountInputProps) {
-  const ActiveTextInput = asBottomSheetInput
-    ? (BottomSheetTextInput as unknown as typeof TextInput)
-    : TextInput;
   const { colors, text, font, fontSize, spacing, radius, layout } = useTheme();
   const currencySymbol = useUIStore((s) => s.currency.symbol);
   const [isFocused, setIsFocused] = useState(false);
@@ -188,30 +185,56 @@ export function AmountInput({
         </Text>
 
         {/* Amount input */}
-        <ActiveTextInput
-          ref={inputRef as React.RefObject<TextInput>}
-          style={[
-            styles.input,
-            {
-              fontSize: amountFontSize,
-              fontFamily: font.displayLight,
-              color: colors.text,
-              lineHeight: amountFontSize * 1.1,
-            },
-          ]}
-          value={displayValue}
-          onChangeText={handleChangeText}
-          onFocus={handleFocus}
-          onBlur={handleBlur}
-          keyboardType="numeric"
-          placeholder={placeholder}
-          placeholderTextColor={colors.inputPlaceholder}
-          editable={editable}
-          selectTextOnFocus
-          // @ts-ignore — includeFontPadding is a valid Android prop not in RN types
-          includeFontPadding={false}
-          textAlignVertical="center"
-        />
+        {asBottomSheetInput ? (
+          <BottomSheetTextInput
+            style={[
+              styles.input,
+              {
+                fontSize: amountFontSize,
+                fontFamily: font.displayLight,
+                color: colors.text,
+                lineHeight: amountFontSize * 1.1,
+              },
+            ]}
+            value={displayValue}
+            onChangeText={handleChangeText}
+            onFocus={handleFocus}
+            onBlur={handleBlur}
+            keyboardType="numeric"
+            placeholder={placeholder}
+            placeholderTextColor={colors.inputPlaceholder}
+            editable={editable}
+            selectTextOnFocus
+            // @ts-ignore
+            includeFontPadding={false}
+            textAlignVertical="center"
+          />
+        ) : (
+          <TextInput
+            ref={inputRef}
+            style={[
+              styles.input,
+              {
+                fontSize: amountFontSize,
+                fontFamily: font.displayLight,
+                color: colors.text,
+                lineHeight: amountFontSize * 1.1,
+              },
+            ]}
+            value={displayValue}
+            onChangeText={handleChangeText}
+            onFocus={handleFocus}
+            onBlur={handleBlur}
+            keyboardType="numeric"
+            placeholder={placeholder}
+            placeholderTextColor={colors.inputPlaceholder}
+            editable={editable}
+            selectTextOnFocus
+            // @ts-ignore
+            includeFontPadding={false}
+            textAlignVertical="center"
+          />
+        )}
       </AnimatedView>
 
       {hasError && (

@@ -103,11 +103,6 @@ export function Input({
   numberOfLines,
   ...textInputProps
 }: InputProps) {
-  // Use gorhom's BottomSheetTextInput when inside a sheet so the sheet moves
-  // up with the keyboard instead of the keyboard covering the input.
-  const ActiveTextInput = asBottomSheetInput
-    ? (BottomSheetTextInput as unknown as typeof TextInput)
-    : TextInput;
   const { colors, layout, text, font, fontSize, spacing, radius, isDark } = useTheme();
   const [isFocused, setIsFocused] = useState(false);
   const internalRef = useRef<TextInput>(null);
@@ -213,28 +208,52 @@ export function Input({
           </View>
         )}
 
-        <ActiveTextInput
-          ref={ref as React.RefObject<TextInput>}
-          style={[
-            text.body,
-            styles.input,
-            {
-              color: colors.text,
-              paddingLeft: iconPaddingLeft,
-              paddingRight: iconPaddingRight,
-              height: inputHeight,
-              textAlignVertical: multiline ? 'top' : 'center',
-              paddingTop: multiline ? spacing[3] : 0,
-            },
-          ]}
-          placeholderTextColor={colors.inputPlaceholder}
-          onFocus={handleFocus}
-          onBlur={handleBlur}
-          editable={editable}
-          multiline={multiline}
-          numberOfLines={numberOfLines}
-          {...textInputProps}
-        />
+        {asBottomSheetInput ? (
+          <BottomSheetTextInput
+            style={[
+              text.body,
+              styles.input,
+              {
+                color: colors.text,
+                paddingLeft: iconPaddingLeft,
+                paddingRight: iconPaddingRight,
+                height: inputHeight,
+                textAlignVertical: multiline ? 'top' : 'center',
+                paddingTop: multiline ? spacing[3] : 0,
+              },
+            ]}
+            placeholderTextColor={colors.inputPlaceholder}
+            onFocus={handleFocus}
+            onBlur={handleBlur}
+            editable={editable}
+            multiline={multiline}
+            numberOfLines={numberOfLines}
+            {...textInputProps}
+          />
+        ) : (
+          <TextInput
+            ref={ref}
+            style={[
+              text.body,
+              styles.input,
+              {
+                color: colors.text,
+                paddingLeft: iconPaddingLeft,
+                paddingRight: iconPaddingRight,
+                height: inputHeight,
+                textAlignVertical: multiline ? 'top' : 'center',
+                paddingTop: multiline ? spacing[3] : 0,
+              },
+            ]}
+            placeholderTextColor={colors.inputPlaceholder}
+            onFocus={handleFocus}
+            onBlur={handleBlur}
+            editable={editable}
+            multiline={multiline}
+            numberOfLines={numberOfLines}
+            {...textInputProps}
+          />
+        )}
 
         {/* Right element */}
         {rightElement && (
