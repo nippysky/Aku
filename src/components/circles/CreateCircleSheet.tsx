@@ -34,7 +34,7 @@ import { SheetModal } from '../ui/SheetModal';
 import { AmountInput } from '../ui/AmountInput';
 import { Button } from '../ui/Button';
 import { AkuDatePicker } from '../ui/AkuDatePicker';
-import { useCirclesStore } from '../../store/circles.store';
+import { useCirclesStore } from '../../store/pools.store';
 import { useAuthStore } from '../../store/auth.store';
 import { useUIStore } from '../../store/ui.store';
 import type { CircleFrequency } from '../../types';

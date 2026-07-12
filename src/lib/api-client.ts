@@ -270,11 +270,11 @@ export async function sendTestPush(): Promise<{ sent: number }> {
 }
 
 /**
- * Fan out a circle event push notification to a list of recipient user IDs.
+ * Fan out a pool event push notification to a list of recipient user IDs.
  * Server resolves their registered push tokens and sends the notification.
  * Best-effort — silently ignores errors so it never blocks the caller.
  */
-export async function sendCircleNotification(
+export async function sendPoolNotification(
   recipientUserIds: string[],
   title: string,
   body: string,
@@ -282,7 +282,7 @@ export async function sendCircleNotification(
 ): Promise<void> {
   if (recipientUserIds.length === 0) return;
   try {
-    await apiFetch('/api/notifications/circle-event', {
+    await apiFetch('/api/notifications/pool-event', {
       method: 'POST',
       body:   { recipientUserIds, title, body, data: data ?? {} },
     });
@@ -349,26 +349,26 @@ export async function updateNotifPrefs(prefs: {
   }
 }
 
-// ─── Circle endpoints ─────────────────────────────────────────────────────────
+// ─── Pool endpoints ──────────────────────────────────────────────────────────
 
 /**
- * Register a newly created circle with the server so other users can find it
+ * Register a newly created pool with the server so other users can find it
  * by invite code. Call fire-and-forget after creating locally.
  */
-export async function registerCircle(
+export async function registerPool(
   id:         string,
   name:       string,
   emoji:      string,
   inviteCode: string,
 ): Promise<void> {
-  await apiFetch('/api/circles', {
+  await apiFetch('/api/pools', {
     method: 'POST',
     body:   { id, name, emoji, inviteCode },
   });
 }
 
-export type CircleJoinResult = {
-  circleId:   string;
+export type PoolJoinResult = {
+  poolId:     string;
   name:       string;
   emoji:      string;
   inviteCode: string;
@@ -377,17 +377,17 @@ export type CircleJoinResult = {
 };
 
 /**
- * Join a circle by its 8-character invite code.
- * Returns circle metadata so the client can seed its local SQLite records.
+ * Join a pool by its 8-character invite code.
+ * Returns pool metadata so the client can seed its local SQLite records.
  */
-export async function joinCircleByCode(code: string): Promise<CircleJoinResult> {
-  return apiFetch<CircleJoinResult>('/api/circles/join', {
+export async function joinPoolByCode(code: string): Promise<PoolJoinResult> {
+  return apiFetch<PoolJoinResult>('/api/pools/join', {
     method: 'POST',
     body:   { code },
   });
 }
 
-export type ServerCircle = {
+export type ServerPool = {
   id:         string;
   name:       string;
   emoji:      string;
@@ -396,13 +396,13 @@ export type ServerCircle = {
   role:       string;
 };
 
-/** Fetch all circles the authenticated user belongs to from the server. */
-export async function fetchUserCircles(): Promise<ServerCircle[]> {
-  const res = await apiFetch<{ circles: ServerCircle[] }>('/api/circles');
-  return res.circles;
+/** Fetch all pools the authenticated user belongs to from the server. */
+export async function fetchUserPools(): Promise<ServerPool[]> {
+  const res = await apiFetch<{ pools: ServerPool[] }>('/api/pools');
+  return res.pools;
 }
 
-export type CirclePreview = {
+export type PoolPreview = {
   id:            string;
   name:          string;
   emoji:         string;
@@ -413,14 +413,14 @@ export type CirclePreview = {
 };
 
 /**
- * Preview a circle by its 8-char invite code — no membership created.
+ * Preview a pool by its 8-char invite code — no membership created.
  * Use before the final "Join" confirmation step.
  */
-export async function previewCircle(code: string): Promise<CirclePreview> {
-  return apiFetch<CirclePreview>(`/api/circles/preview/${encodeURIComponent(code)}`);
+export async function previewPool(code: string): Promise<PoolPreview> {
+  return apiFetch<PoolPreview>(`/api/pools/preview/${encodeURIComponent(code)}`);
 }
 
-export type CircleMemberInfo = {
+export type PoolMemberInfo = {
   userId:    string;
   name:      string;
   avatarData: string | null;
@@ -429,48 +429,48 @@ export type CircleMemberInfo = {
 };
 
 /**
- * Fetch all members of a circle the authenticated user belongs to.
+ * Fetch all members of a pool the authenticated user belongs to.
  * Used by syncFromServer to seed other members' profiles into local SQLite.
  */
-export async function fetchCircleMembers(circleId: string): Promise<CircleMemberInfo[]> {
-  const res = await apiFetch<{ members: CircleMemberInfo[] }>(`/api/circles/${circleId}/members`);
+export async function fetchPoolMembers(poolId: string): Promise<PoolMemberInfo[]> {
+  const res = await apiFetch<{ members: PoolMemberInfo[] }>(`/api/pools/${poolId}/members`);
   return res.members;
 }
 
 /**
- * Update circle name (and optionally emoji) on the server.
+ * Update pool name (and optionally emoji) on the server.
  * Called immediately after the owner saves a name change locally.
  * The server notifies all members via WS so they reload.
  */
-export async function updateCircleOnServer(
-  circleId: string,
-  updates:  { name?: string; emoji?: string },
+export async function updatePoolOnServer(
+  poolId:  string,
+  updates: { name?: string; emoji?: string },
 ): Promise<void> {
-  await apiFetch(`/api/circles/${circleId}`, { method: 'PATCH', body: updates });
+  await apiFetch(`/api/pools/${poolId}`, { method: 'PATCH', body: updates });
 }
 
 /**
- * Push circle settings to the server so other members can pull them on sync.
+ * Push pool settings to the server so other members can pull them on sync.
  * Called by the admin after saving settings locally. Fire-and-forget.
  */
-export async function pushCircleSettings(
-  circleId: string,
+export async function pushPoolSettings(
+  poolId:   string,
   settings: Record<string, unknown>,
 ): Promise<void> {
-  await apiFetch(`/api/circles/${circleId}/settings`, { method: 'PUT', body: settings });
+  await apiFetch(`/api/pools/${poolId}/settings`, { method: 'PUT', body: settings });
 }
 
 /**
- * Pull the latest circle settings from the server.
+ * Pull the latest pool settings from the server.
  * Called during syncFromServer so members always see the admin's latest settings.
  * Returns null if the admin has never pushed settings.
  */
-export async function fetchCircleSettings(
-  circleId: string,
+export async function fetchPoolSettings(
+  poolId: string,
 ): Promise<Record<string, unknown> | null> {
   try {
     const res = await apiFetch<{ settings: Record<string, unknown> | null }>(
-      `/api/circles/${circleId}/settings`,
+      `/api/pools/${poolId}/settings`,
     );
     return res.settings;
   } catch {
@@ -479,14 +479,22 @@ export async function fetchCircleSettings(
 }
 
 /**
- * Ask the server to remove a member from a circle.
+ * Ask the server to remove a member from a pool.
  * The server will push a notification to the removed user and remaining members.
  */
-export async function removeCircleMemberFromServer(
-  circleId:     string,
+export async function removePoolMemberFromServer(
+  poolId:       string,
   targetUserId: string,
 ): Promise<void> {
-  await apiFetch(`/api/circles/${circleId}/members/${targetUserId}`, { method: 'DELETE' });
+  await apiFetch(`/api/pools/${poolId}/members/${targetUserId}`, { method: 'DELETE' });
+}
+
+/**
+ * Delete an entire pool (owner only).
+ * The server notifies all members via push + WS before deleting.
+ */
+export async function deletePoolOnServer(poolId: string): Promise<void> {
+  await apiFetch(`/api/pools/${poolId}`, { method: 'DELETE' });
 }
 
 // ─── Sync endpoints ───────────────────────────────────────────────────────────

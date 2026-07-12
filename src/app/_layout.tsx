@@ -243,16 +243,20 @@ export default function RootLayout() {
         type:        (data?.type as string) ?? 'general',
         title,
         body:        body ?? '',
-        referenceId: (data?.id as string) ?? (data?.circleId as string) ?? null,
+        referenceId: (data?.id as string) ?? (data?.poolId as string) ?? null,
       });
     };
 
-    // Trigger immediate syncFromServer when circle membership changes arrive.
+    // Trigger immediate syncFromServer when pool membership changes arrive.
     // Handles both foreground (received) and background/quit-state (response tapped).
     const syncOnCircleEvent = (data: Record<string, unknown> | null | undefined) => {
       const type = data?.type as string | undefined;
-      if (type === 'circle_member_removed' || type === 'circle_member_joined') {
-        import('../store/circles.store').then(({ useCirclesStore }) => {
+      if (
+        type === 'pool_member_removed' ||
+        type === 'pool_member_joined'  ||
+        type === 'pool_deleted'
+      ) {
+        import('../store/pools.store').then(({ useCirclesStore }) => {
           useCirclesStore.getState().syncFromServer(user.id).catch(() => {});
         });
       }

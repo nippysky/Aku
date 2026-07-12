@@ -8,7 +8,7 @@ import { useTheme } from '../../theme';
 import { Layout } from '../../theme/spacing';
 import { FontFamily, FontSize } from '../../theme/typography';
 import { useAuthStore } from '../../store/auth.store';
-import { useCirclesStore } from '../../store/circles.store';
+import { useCirclesStore } from '../../store/pools.store';
 
 type TabIconProps = {
   color:   ColorValue;

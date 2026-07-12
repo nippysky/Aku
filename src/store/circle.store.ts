@@ -13,7 +13,7 @@
 import { create } from 'zustand';
 import { eq } from 'drizzle-orm';
 import { getDatabase, schema } from '../lib/database/client';
-import { sendCircleNotification, pushCircleSettings, removeCircleMemberFromServer } from '../lib/api-client';
+import { sendPoolNotification, pushPoolSettings, removePoolMemberFromServer } from '../lib/api-client';
 import { generateUUID } from '../lib/uuid';
 import { trackReviewEvent } from '../lib/review';
 
@@ -384,7 +384,7 @@ export const useCircleStore = create<CircleState>()((set, get) => ({
       set({ memberStatuses: buildMemberStatuses(members, contributions, get().settings, members.length) });
 
       // Push to server so members can pull on their next syncFromServer
-      pushCircleSettings(circleId, data).catch(() => {});
+      pushPoolSettings(circleId, data).catch(() => {});
     } catch (e: any) {
       set({ error: e?.message ?? 'Failed to save settings' });
     } finally {
@@ -428,11 +428,11 @@ export const useCircleStore = create<CircleState>()((set, get) => ({
           .map((m) => m.userId);
         const fmt = (n: number) => `${Math.round(n / 100).toLocaleString()}`;
         if (recipientIds.length > 0) {
-          sendCircleNotification(
+          sendPoolNotification(
             recipientIds,
             'New contribution 💰',
             `${contributorName} logged ${fmt(amount)} — awaiting verification.`,
-            { type: 'circle_event', screen: 'circle', circleId },
+            { type: 'pool_event', screen: 'pool', poolId: circleId },
           ).catch(() => {});
         }
       } catch { /* non-critical */ }
@@ -475,11 +475,11 @@ export const useCircleStore = create<CircleState>()((set, get) => ({
             .filter((m) => m.userId !== verifiedBy)
             .map((m) => m.userId);
           if (recipientIds.length > 0) {
-            sendCircleNotification(
+            sendPoolNotification(
               recipientIds,
               'Contribution verified ✅',
               `${fmt(verified.amount)} from ${verified.userName} has been verified!`,
-              { type: 'circle_event', screen: 'circle', circleId: verified.circleId },
+              { type: 'pool_event', screen: 'pool', poolId: verified.circleId },
             ).catch(() => {});
           }
         }
@@ -538,11 +538,11 @@ export const useCircleStore = create<CircleState>()((set, get) => ({
       if (target) {
         const fmt = (n: number) => `${Math.round(n / 100).toLocaleString()}`;
         const reasonNote = reason?.trim() ? ` Reason: "${reason.trim()}"` : '';
-        sendCircleNotification(
+        sendPoolNotification(
           [target.userId],
           'Contribution not verified ❌',
           `Your ${fmt(target.amount)} entry was declined by the admin.${reasonNote}`,
-          { type: 'circle_event', screen: 'circle', circleId: target.circleId },
+          { type: 'pool_event', screen: 'pool', poolId: target.circleId },
         ).catch(() => {});
       }
     } catch (e: any) {
@@ -574,7 +574,7 @@ export const useCircleStore = create<CircleState>()((set, get) => ({
       // Fire server-side removal so the server can push to the removed user
       // and all remaining members, and trigger WS nudges
       if (circleId) {
-        removeCircleMemberFromServer(circleId, memberUserId).catch(() => {});
+        removePoolMemberFromServer(circleId, memberUserId).catch(() => {});
       }
     } catch (e: any) {
       set({ error: e?.message ?? 'Failed to remove member' });

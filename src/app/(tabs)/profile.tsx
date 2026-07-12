@@ -16,7 +16,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as Linking from 'expo-linking';
 import * as Haptics from 'expo-haptics';
-import * as WebBrowser from 'expo-web-browser';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { Asset } from 'expo-asset';
@@ -46,7 +45,7 @@ import { BottomSheetModal, BottomSheetView, BottomSheetBackdrop } from '@gorhom/
 import type { BottomSheetBackdropProps } from '@gorhom/bottom-sheet';
 import { useTheme } from '../../theme';
 import { useAuthStore } from '../../store/auth.store';
-import { useCirclesStore } from '../../store/circles.store';
+import { useCirclesStore } from '../../store/pools.store';
 import { useUIStore } from '../../store/ui.store';
 import { useBillsStore } from '../../store/bills.store';
 import { useExpensesStore } from '../../store/expenses.store';
@@ -64,8 +63,6 @@ import type { ThemeMode } from '../../store/ui.store';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const PRIVACY_URL = 'https://nippysky.com/ventures/aku/privacy';
-const TERMS_URL   = 'https://nippysky.com/ventures/aku/terms';
 
 // ─── Theme options ────────────────────────────────────────────────────────────
 
@@ -347,7 +344,7 @@ export default function ProfileScreen() {
   const handleDeleteAccount = useCallback(() => {
     Alert.alert(
       'Delete Account',
-      'This will permanently delete your Akù account and everything in it — expenses, bills, goals, budgets, income, and circles. This cannot be undone.',
+      'This will permanently delete your Akù account and everything in it — expenses, bills, goals, budgets, income, and pools. This cannot be undone.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -1080,14 +1077,12 @@ export default function ProfileScreen() {
           <SettingsRow
             icon={Shield}
             label="Privacy Policy"
-            onPress={() => WebBrowser.openBrowserAsync(PRIVACY_URL)}
-            isExternal
+            onPress={() => router.push('/privacy')}
           />
           <SettingsRow
             icon={FileText}
             label="Terms of Service"
-            onPress={() => WebBrowser.openBrowserAsync(TERMS_URL)}
-            isExternal
+            onPress={() => router.push('/terms')}
           />
           <SettingsRow
             icon={MessageSquare}

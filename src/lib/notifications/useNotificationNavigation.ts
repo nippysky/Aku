@@ -14,7 +14,7 @@
  *  daily_digest     → /(tabs)/expenses     (log today's spending)
  *  daily_reminder   → /(tabs)/expenses     (server push → log spending)
  *  weekly_summary   → /(tabs)/index        (home — financial overview)
- *  household_invite → /pool/join         (join pool))
+ *  pool_invite       → /pool/join         (join pool)
  *  default          → /(tabs)/index        (home)
  */
 import { useEffect, useRef } from 'react';
@@ -24,10 +24,10 @@ import * as Notifications from 'expo-notifications';
 // ─── Notification data payload (shared with server worker) ────────────────────
 
 export interface NotificationData {
-  type?:     string;   // 'bill_reminder' | 'budget_alert' | 'goal_milestone' | 'circle_member_joined' | …
-  screen?:   string;   // legacy / override: 'bill' | 'budgets' | 'goal' | 'circle' | 'home'
+  type?:     string;   // 'bill_reminder' | 'budget_alert' | 'goal_milestone' | 'pool_member_joined' | …
+  screen?:   string;   // legacy / override: 'bill' | 'budgets' | 'goal' | 'pool' | 'home'
   id?:       string;   // entity ID — bill/budget/goal primary key
-  circleId?: string;   // circle ID — for circle_member_joined + circle_event notifications
+  poolId?:   string;   // pool ID — for pool_member_joined + pool_event notifications
   action?:   string;   // optional action hint ('log', 'review', 'pay')
 }
 
@@ -113,7 +113,7 @@ interface ResolvedRoute {
  *  3. Home tab fallback
  */
 function resolveRoute(data: NotificationData): ResolvedRoute | null {
-  const { type, screen, id, circleId } = data;
+  const { type, screen, id, poolId } = data;
 
   // ── Type-based routing (preferred) ──────────────────────────────────────
 
@@ -151,19 +151,22 @@ function resolveRoute(data: NotificationData): ResolvedRoute | null {
     case 'weekly_summary':
       return { href: '/(tabs)/index', type: 'tab' };
 
-    // Circle/household invite
-    case 'household_invite':
-    case 'circle_invite':
+    // Pool invite
+    case 'pool_invite':
       return { href: '/pool/join', type: 'detail' };
 
-    // New member joined a circle — navigate to that specific circle
-    case 'circle_member_joined':
-      if (circleId) return { href: `/pool/${circleId}`, type: 'detail' };
+    // New member joined a pool — navigate to that specific pool
+    case 'pool_member_joined':
+      if (poolId) return { href: `/pool/${poolId}`, type: 'detail' };
       return { href: '/(tabs)/index', type: 'tab' };
 
-    // Contribution logged/verified in a circle
-    case 'circle_event':
-      if (circleId) return { href: `/pool/${circleId}`, type: 'detail' };
+    // Contribution logged/verified in a pool
+    case 'pool_event':
+      if (poolId) return { href: `/pool/${poolId}`, type: 'detail' };
+      return { href: '/(tabs)/index', type: 'tab' };
+
+    // Pool was deleted by admin — go home so user sees updated list
+    case 'pool_deleted':
       return { href: '/(tabs)/index', type: 'tab' };
   }
 
@@ -199,8 +202,8 @@ function resolveRoute(data: NotificationData): ResolvedRoute | null {
       case 'notifications':
         return { href: '/notifications', type: 'detail' };
 
-      case 'circle':
-        if (circleId) return { href: `/pool/${circleId}`, type: 'detail' };
+      case 'pool':
+        if (poolId) return { href: `/pool/${poolId}`, type: 'detail' };
         return { href: '/(tabs)/index', type: 'tab' };
 
       case 'home':

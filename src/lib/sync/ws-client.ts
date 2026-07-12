@@ -119,7 +119,7 @@ class WsClient {
             const userId = store.user?.id;
             store.refreshProfile().catch(() => {});
             if (userId) {
-              import('../../store/circles.store').then(({ useCirclesStore }) => {
+              import('../../store/pools.store').then(({ useCirclesStore }) => {
                 useCirclesStore.getState().syncFromServer(userId).catch(() => {});
               });
             }
@@ -144,7 +144,7 @@ class WsClient {
               store.refreshProfile().catch(() => {});
               // Circles are outside sync_records — fetch separately
               if (userId) {
-                import('../../store/circles.store').then(({ useCirclesStore }) => {
+                import('../../store/pools.store').then(({ useCirclesStore }) => {
                   useCirclesStore.getState().syncFromServer(userId).catch(() => {});
                 });
               }

@@ -94,7 +94,7 @@ class NotificationService {
       showBadge: false,
     });
 
-    await Notifications.setNotificationChannelAsync('circles', {
+    await Notifications.setNotificationChannelAsync('pools', {
       name: 'Pool Activity',
       importance: Notifications.AndroidImportance.HIGH,
       vibrationPattern: [0, 250, 250, 250],

@@ -30,8 +30,8 @@ import * as Haptics from 'expo-haptics';
 import { useTheme } from '../../theme';
 import { useAuthStore } from '../../store/auth.store';
 import { useUIStore } from '../../store/ui.store';
-import { useCirclesStore } from '../../store/circles.store';
-import { previewCircle, type CirclePreview } from '../../lib/api-client';
+import { useCirclesStore } from '../../store/pools.store';
+import { previewPool, type PoolPreview } from '../../lib/api-client';
 import { Button } from '../../components/ui/Button';
 import { InitialsAvatar } from '../../components/ui/InitialsAvatar';
 
@@ -60,8 +60,8 @@ export default function JoinCircleScreen() {
   const [codeError, setCodeError] = useState('');
   const [previewing, setPreviewing] = useState(false);
 
-  // preview data (from previewCircle API)
-  const [preview, setPreview] = useState<CirclePreview | null>(null);
+  // preview data (from previewPool API)
+  const [preview, setPreview] = useState<PoolPreview | null>(null);
 
   // deep-link preview (from in-memory circles store)
   const [dlName,  setDlName]  = useState('');
@@ -107,7 +107,7 @@ export default function JoinCircleScreen() {
     setPreviewing(true);
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      const data = await previewCircle(code);
+      const data = await previewPool(code);
       if (data.alreadyMember) {
         setCodeError('You\'re already a member of this Pool.');
         return;
@@ -132,7 +132,7 @@ export default function JoinCircleScreen() {
       setJoinedName(result.circleName);
       setMode('success');
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      setTimeout(() => router.replace(`/pool/${result.circleId}` as never), 1800);
+      setTimeout(() => router.replace(`/pool/${result.poolId}` as never), 1800);
     } catch (e: any) {
       showToast('error', e?.message ?? 'Could not join pool');
       setMode('code'); // back to code entry

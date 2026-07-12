@@ -4,7 +4,7 @@
  * POST   /api/notifications/token         — Register a device push token (+ timezone)
  * DELETE /api/notifications/token         — Deregister a device push token
  * POST   /api/notifications/insight       — Upsert user financial insight signals
- * POST   /api/notifications/circle-event  — Fan out circle push to recipient user IDs
+ * POST   /api/notifications/pool-event    — Fan out pool push to recipient user IDs
  * POST   /api/notifications/test          — Send a test push to the caller's own devices
  */
 import { Hono } from 'hono';
@@ -155,11 +155,11 @@ router.post('/insight', authMiddleware, async (c) => {
   return c.json({ success: true });
 });
 
-// ─── POST /api/notifications/circle-event ────────────────────────────────────
+// ─── POST /api/notifications/pool-event ─────────────────────────────────────
 // Fan out a push notification to a list of recipient user IDs.
-// Called by any circle member after logging / verifying a contribution.
+// Called by any pool member after logging / verifying a contribution.
 
-router.post('/circle-event', authMiddleware, async (c) => {
+router.post('/pool-event', authMiddleware, async (c) => {
   let body: {
     recipientUserIds?: string[];
     title?: string;
@@ -195,14 +195,14 @@ router.post('/circle-event', authMiddleware, async (c) => {
       await sendExpoPush(tokens, {
         title,
         body:      bodyText,
-        channelId: 'circles',
+        channelId: 'pools',
         data:      data ?? {},
       });
     }
 
     return c.json({ success: true, sent: tokens.length });
   } catch (err) {
-    console.error('[notifications] circle-event error:', err);
+    console.error('[notifications] pool-event error:', err);
     return c.json({ error: 'Failed to send notifications' }, 500);
   }
 });

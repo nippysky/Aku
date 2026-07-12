@@ -18,7 +18,6 @@ import {
   Modal,
   Platform,
   Pressable,
-  Share,
   StyleSheet,
   Text,
   View,
@@ -39,10 +38,8 @@ import {
   CheckCircle2,
   Copy,
   Crown,
-  Link2,
   Plus,
   Settings2,
-  Share2,
   ShieldCheck,
   Trash2,
   TrendingUp,
@@ -65,7 +62,7 @@ import {
 import type { BottomSheetBackdropProps } from '@gorhom/bottom-sheet';
 import { useTheme } from '../../theme';
 import { useAuthStore } from '../../store/auth.store';
-import { useCirclesStore } from '../../store/circles.store';
+import { useCirclesStore } from '../../store/pools.store';
 import { useCircleStore } from '../../store/circle.store';
 import { useUIStore } from '../../store/ui.store';
 import { useCurrencyFormat } from '../../hooks/useCurrencyFormat';
@@ -334,7 +331,7 @@ export default function CircleDetailScreen() {
   const { colors, font, fontSize, text, layout } = useTheme();
 
   const { user }                    = useAuthStore();
-  const { circles, syncVersion }    = useCirclesStore();
+  const { circles, syncVersion, deleteCircle } = useCirclesStore();
   const { updateName: updateCircleName } = useCirclesStore();
   const { showToast }               = useUIStore();
   const { fmt }                     = useCurrencyFormat();
@@ -468,7 +465,6 @@ export default function CircleDetailScreen() {
   // ── Derived display values ─────────────────────────────────────────────────
   const circleEmoji  = settings?.emoji ?? '💰';
   const inviteCode   = (circle as any)?.inviteCode ?? '';
-  const joinUrl      = `https://nippysky.com/ventures/aku/join?code=${inviteCode}`;
   const circleName   = circle?.name ?? 'Pool';
 
   // ── Invite actions ────────────────────────────────────────────────────────
@@ -478,19 +474,6 @@ export default function CircleDetailScreen() {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     showToast('success', `Code ${inviteCode} copied!`);
   }, [inviteCode, showToast]);
-
-  const handleShareLink = useCallback(async () => {
-    if (!inviteCode) { showToast('info', 'No invite code available'); return; }
-    try {
-      const message =
-        `${circleEmoji} Join "${circleName}" on Akù — the smart money pool app!\n\n` +
-        `Tap to join instantly:\n${joinUrl}\n\n` +
-        `Or enter code: ${inviteCode}`;
-      await Share.share({ message, title: `Join ${circleName} pool on Akù` });
-    } catch {
-      showToast('error', 'Could not open share sheet');
-    }
-  }, [inviteCode, circleEmoji, circleName, joinUrl, showToast]);
 
   // ── Copy payment details ──────────────────────────────────────────────────
   const handleCopy = useCallback(async () => {
@@ -549,6 +532,33 @@ export default function CircleDetailScreen() {
     setDenyReason('');
     showToast('info', 'Contribution declined');
   }, [denyTarget, denyReason, denyContribution, showToast]);
+
+  // ── Delete pool (admin only) ──────────────────────────────────────────────
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleDeletePool = useCallback(() => {
+    settingsMenuRef.current?.dismiss();
+    setTimeout(() => {
+      showAlert({
+        title:        'Delete Pool',
+        message:      `Permanently delete "${circleName}"?\n\nAll members will be notified and removed. This cannot be undone.`,
+        confirmLabel: 'Delete',
+        danger:       true,
+        onConfirm:    async () => {
+          if (!circleId) return;
+          setIsDeleting(true);
+          try {
+            await deleteCircle(circleId);
+            router.replace('/(tabs)/index' as never);
+          } catch {
+            showToast('error', 'Failed to delete pool. Try again.');
+          } finally {
+            setIsDeleting(false);
+          }
+        },
+      });
+    }, 300);
+  }, [circleId, circleName, deleteCircle, router, showToast, showAlert]);
 
   // ── Remove member (admin only) ────────────────────────────────────────────
   const handleRemoveMember = useCallback((memberId: string, memberUserId: string, memberName: string) => {
@@ -659,7 +669,7 @@ export default function CircleDetailScreen() {
         <View style={[styles.emptyCard, { borderColor: colors.border }]}>
           <Users size={24} color={colors.textTertiary} strokeWidth={1.4} />
           <Text style={[text.bodySm, { color: colors.textTertiary, marginTop: 6, textAlign: 'center' }]}>
-            No members yet.{'\n'}Tap Invite to share the code or link.
+            No members yet.{'\n'}Tap Invite to share the code.
           </Text>
         </View>
       ) : (
@@ -1162,7 +1172,7 @@ export default function CircleDetailScreen() {
           </View>
 
           {/* Emoji */}
-          <Text style={[text.label, { color: colors.textSecondary, marginBottom: 8 }]}>Circle Icon</Text>
+          <Text style={[text.label, { color: colors.textSecondary, marginBottom: 8 }]}>Pool Icon</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginBottom: 20 }}>
             {CIRCLE_EMOJIS.map((e) => (
               <Pressable
@@ -1311,7 +1321,7 @@ export default function CircleDetailScreen() {
       {/* ── Admin Settings Menu Sheet ── */}
       <BottomSheetModal
         ref={settingsMenuRef}
-        snapPoints={['30%']}
+        snapPoints={['42%']}
         backdropComponent={renderBackdrop}
         backgroundStyle={{ backgroundColor: colors.card }}
         handleIndicatorStyle={{ backgroundColor: colors.border }}
@@ -1335,12 +1345,29 @@ export default function CircleDetailScreen() {
 
           <Pressable
             onPress={() => { settingsMenuRef.current?.dismiss(); setTimeout(openPaySheet, 250); }}
-            style={[styles.menuItem, { borderColor: colors.border, marginTop: 10, borderBottomWidth: 0 }]}
+            style={[styles.menuItem, { borderColor: colors.border, marginTop: 10 }]}
           >
             <CreditCard size={18} color={colors.primary} strokeWidth={1.8} />
             <View style={{ flex: 1 }}>
               <Text style={{ fontFamily: font.sansSemiBold, fontSize: fontSize.sm, color: colors.text }}>Edit Payment Details</Text>
               <Text style={[text.caption, { color: colors.textTertiary }]}>Bank account, mobile money, etc.</Text>
+            </View>
+          </Pressable>
+
+          {/* Danger zone */}
+          <View style={{ height: 1, backgroundColor: colors.border, marginVertical: 14, opacity: 0.5 }} />
+
+          <Pressable
+            onPress={handleDeletePool}
+            disabled={isDeleting}
+            style={[styles.menuItem, { borderColor: 'rgba(255,59,48,0.2)', backgroundColor: 'rgba(255,59,48,0.06)' }]}
+          >
+            <Trash2 size={18} color="#FF3B30" strokeWidth={1.8} />
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontFamily: font.sansSemiBold, fontSize: fontSize.sm, color: '#FF3B30' }}>
+                {isDeleting ? 'Deleting…' : 'Delete Pool'}
+              </Text>
+              <Text style={[text.caption, { color: 'rgba(255,59,48,0.7)' }]}>Permanently removes pool for all members</Text>
             </View>
           </Pressable>
         </BottomSheetView>
@@ -1384,23 +1411,16 @@ export default function CircleDetailScreen() {
           {/* Actions */}
           <View style={{ gap: 10, marginTop: 14 }}>
             <Pressable
-              onPress={handleShareLink}
+              onPress={handleCopyCode}
               style={[styles.shareBtn, { backgroundColor: '#163A2F' }]}
             >
-              <Share2 size={18} color="#FAF9F5" strokeWidth={1.8} />
-              <Text style={{ fontFamily: font.sansSemiBold, fontSize: fontSize.sm, color: '#FAF9F5' }}>Share Invite Link</Text>
-            </Pressable>
-            <Pressable
-              onPress={handleCopyCode}
-              style={[styles.shareBtn, { backgroundColor: colors.backgroundSecondary, borderWidth: 1, borderColor: colors.border }]}
-            >
-              <Link2 size={18} color={colors.text} strokeWidth={1.8} />
-              <Text style={{ fontFamily: font.sansSemiBold, fontSize: fontSize.sm, color: colors.text }}>Copy Code Only</Text>
+              <Copy size={18} color="#FAF9F5" strokeWidth={1.8} />
+              <Text style={{ fontFamily: font.sansSemiBold, fontSize: fontSize.sm, color: '#FAF9F5' }}>Copy Invite Code</Text>
             </Pressable>
           </View>
 
           <Text style={[text.caption, { color: colors.textTertiary, textAlign: 'center', marginTop: 14, lineHeight: 18 }]}>
-            Share the link or code. Anyone with it can join this circle.
+            Share the code. Anyone with it can join this pool.
           </Text>
         </BottomSheetScrollView>
       </BottomSheetModal>

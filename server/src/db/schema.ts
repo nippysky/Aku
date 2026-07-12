@@ -108,13 +108,13 @@ export const pushTokens = pgTable('push_tokens', {
 // Deduplication log for server-sent push notifications.
 // Prevents the worker from re-sending the same type on the same calendar day.
 
-// ─── Circles ──────────────────────────────────────────────────────────────────
-// Lightweight server-side registry for contribution circles.
+// ─── Pools ───────────────────────────────────────────────────────────────────
+// Lightweight server-side registry for contribution pools.
 // Stores only non-sensitive metadata (name, emoji, invite code) so that
 // cross-device joins work without exposing encrypted financial data.
-// The full circle data (contributions, settings) stays encrypted in sync_records.
+// The full pool data (contributions, settings) stays encrypted in sync_records.
 
-export const circles = pgTable('circles', {
+export const pools = pgTable('pools', {
   id:           text('id').primaryKey(),                // matches client SQLite households.id
   name:         text('name').notNull(),
   emoji:        text('emoji').notNull().default('💰'),
@@ -129,19 +129,19 @@ export const circles = pgTable('circles', {
   settingsJson: text('settings_json'),
   createdAt:    timestamp('created_at').notNull().defaultNow(),
 }, (t) => [
-  index('idx_circles_owner').on(t.ownerId),
+  index('idx_pools_owner').on(t.ownerId),
 ]);
 
-export const circleMembers = pgTable('circle_members', {
+export const poolMembers = pgTable('pool_members', {
   id:       text('id').primaryKey(),
-  circleId: text('circle_id').notNull().references(() => circles.id, { onDelete: 'cascade' }),
+  poolId: text('pool_id').notNull().references(() => pools.id, { onDelete: 'cascade' }),
   userId:   text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   role:     text('role').notNull().default('member'),  // 'owner' | 'member'
   joinedAt: timestamp('joined_at').notNull().defaultNow(),
 }, (t) => [
-  unique('uq_circle_member').on(t.circleId, t.userId),
-  index('idx_circle_members_circle').on(t.circleId),
-  index('idx_circle_members_user').on(t.userId),
+  unique('uq_pool_member').on(t.poolId, t.userId),
+  index('idx_pool_members_pool').on(t.poolId),
+  index('idx_pool_members_user').on(t.userId),
 ]);
 
 // ─── Notification Log ─────────────────────────────────────────────────────────

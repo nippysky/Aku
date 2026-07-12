@@ -77,7 +77,7 @@ interface AlertItem {
  */
 function getHistoryHref(type: string, referenceId: string | null): string | null {
   switch (type) {
-    case 'circle_event': return referenceId ? `/pool/${referenceId}` : null;
+    case 'pool_event': return referenceId ? `/pool/${referenceId}` : null;
     case 'daily_reminder': return '/expenses';
     case 'weekly_summary': return '/analytics';
     default: return null;

@@ -12,7 +12,7 @@ import { create } from 'zustand';
 import { eq, and, inArray, notInArray } from 'drizzle-orm';
 import { getDatabase, schema } from '../lib/database/client';
 import { generateUUID } from '../lib/uuid';
-import { registerCircle, joinCircleByCode, fetchUserCircles, fetchCircleMembers, fetchCircleSettings, updateCircleOnServer } from '../lib/api-client';
+import { registerPool, joinPoolByCode, fetchUserPools, fetchPoolMembers, fetchPoolSettings, updatePoolOnServer, deletePoolOnServer } from '../lib/api-client';
 import type { Household, HouseholdMember, CircleFrequency, ContributionType } from '../types';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -60,10 +60,11 @@ interface CirclesState {
   load:             (userId: string) => Promise<void>;
   syncFromServer:   (userId: string) => Promise<void>;
   create:           (name: string, ownerId: string, settings?: CircleCreateSettings) => Promise<Household>;
-  joinByCode:       (code: string, userId: string) => Promise<{ circleId: string; circleName: string }>;
+  joinByCode:       (code: string, userId: string) => Promise<{ poolId: string; circleName: string }>;
   joinById:         (circleId: string, userId: string) => Promise<void>;
   updateName:       (circleId: string, name: string) => Promise<void>;
   loadMembers:      (circleId: string) => Promise<void>;
+  deleteCircle:     (circleId: string) => Promise<void>;
   clearError:       () => void;
 }
 
@@ -122,11 +123,11 @@ export const useCirclesStore = create<CirclesState>()((set, get) => ({
   // IMPORTANT: also syncs all circle members so the admin can see new joiners.
   syncFromServer: async (userId) => {
     try {
-      const serverCircles = await fetchUserCircles();
+      const serverPools = await fetchUserPools();
       const db  = getDatabase();
       const now = new Date().toISOString();
 
-      for (const c of serverCircles) {
+      for (const c of serverPools) {
         // ── Upsert the household (circle) row ──────────────────────────────
         const existing = await db
           .select({ id: schema.households.id })
@@ -190,7 +191,7 @@ export const useCirclesStore = create<CirclesState>()((set, get) => ({
         // circle, the admin never gets the new member's user record or membership
         // into their local SQLite, so they never show up in the Members tab.
         try {
-          const allMembers = await fetchCircleMembers(c.id);
+          const allMembers = await fetchPoolMembers(c.id);
           for (const m of allMembers) {
             // Upsert the member's user record so LEFT JOIN resolves their name
             try {
@@ -257,7 +258,7 @@ export const useCirclesStore = create<CirclesState>()((set, get) => ({
         // The admin pushes settings to the server on every save; members pull them
         // here so everyone sees the same frequency, goal, and per-member amounts.
         try {
-          const serverSettings = await fetchCircleSettings(c.id);
+          const serverSettings = await fetchPoolSettings(c.id);
           if (serverSettings && typeof serverSettings === 'object') {
             const existingSettings = await db
               .select({ id: schema.circleSettings.id })
@@ -307,9 +308,9 @@ export const useCirclesStore = create<CirclesState>()((set, get) => ({
 
       // ── CLEANUP: Remove circles user was removed/kicked from ──────────────
       // After the upsert loop, any local membership whose circleId isn't in
-      // serverCircles means the server removed the user — delete it locally
+      // serverPools means the server removed the user — delete it locally
       // so the circle disappears from their list immediately on next sync.
-      const serverCircleIds = serverCircles.map((c) => c.id);
+      const serverCircleIds = serverPools.map((c) => c.id);
       if (serverCircleIds.length > 0) {
         await db
           .delete(schema.householdMembers)
@@ -379,7 +380,7 @@ export const useCirclesStore = create<CirclesState>()((set, get) => ({
     // Register with server so other users can find this circle by invite code.
     // Fire-and-forget — never blocks local circle creation.
     const emoji = settings?.emoji ?? '💰';
-    registerCircle(circleId, name, emoji, inviteCode).catch(() => {
+    registerPool(circleId, name, emoji, inviteCode).catch(() => {
       // Non-fatal: the circle is usable locally; retry logic can be added later.
     });
 
@@ -394,25 +395,25 @@ export const useCirclesStore = create<CirclesState>()((set, get) => ({
     const now = new Date().toISOString();
 
     // 1. Ask the server — this is the authoritative source for invite codes
-    const result = await joinCircleByCode(code);
-    const { circleId, name, emoji, inviteCode, ownerId } = result;
+    const result = await joinPoolByCode(code);
+    const { poolId, name, emoji, inviteCode, ownerId } = result;
 
     // 2. Upsert the circle into local SQLite (in case we don't have it yet)
     const existingCircle = await db
       .select({ id: schema.households.id })
       .from(schema.households)
-      .where(eq(schema.households.id, circleId));
+      .where(eq(schema.households.id, poolId));
 
     if (existingCircle.length === 0) {
       await (db.insert(schema.households) as any).values({
-        id:         circleId,
+        id:         poolId,
         name,
         ownerId,
         inviteCode,
         createdAt:  now,
       });
       await (db.insert(schema.circleSettings) as any).values({
-        id:               circleId,
+        id:               poolId,
         emoji,
         description:      null,
         targetAmount:     null,
@@ -432,20 +433,22 @@ export const useCirclesStore = create<CirclesState>()((set, get) => ({
     const existingMember = await db
       .select({ id: schema.householdMembers.id })
       .from(schema.householdMembers)
-      .where(eq(schema.householdMembers.householdId, circleId));
+      .where(eq(schema.householdMembers.householdId, poolId));
 
     if (!existingMember.some((m: any) => m.userId === userId)) {
       await db.insert(schema.householdMembers).values({
         id:          generateUUID(),
-        householdId: circleId,
+        householdId: poolId,
         userId,
         role:        'member',
         joinedAt:    now,
       });
     }
 
-    await get().load(userId);
-    return { circleId, circleName: name };
+    // Sync ALL members from server so this device sees every participant
+    // (not just itself) when the pool screen mounts immediately after joining.
+    await get().syncFromServer(userId);
+    return { poolId, circleName: name };
   },
 
   // ── Join by circleId (deep link confirm) ─────────────────────────────────
@@ -490,7 +493,7 @@ export const useCirclesStore = create<CirclesState>()((set, get) => ({
     }));
     // Push to server so the name persists across restarts and syncs to all members.
     // Fire-and-forget — local SQLite is already updated; server failure is non-fatal.
-    updateCircleOnServer(circleId, { name }).catch(() => {});
+    updatePoolOnServer(circleId, { name }).catch(() => {});
   },
 
   loadMembers: async (circleId) => {
@@ -521,6 +524,41 @@ export const useCirclesStore = create<CirclesState>()((set, get) => ({
       joinedAt:    r.joinedAt,
     }));
     set({ members });
+  },
+
+  // ── Delete circle (owner only) ────────────────────────────────────────────
+  // 1. Calls server — server notifies all members via push + WS
+  // 2. Wipes all local SQLite data for this circle
+  // 3. Removes it from Zustand state so UI updates immediately
+  deleteCircle: async (circleId) => {
+    const db = getDatabase();
+
+    // Hit server first — it handles push notifications + WS nudges to members
+    await deletePoolOnServer(circleId);
+
+    // Clean up local SQLite
+    try {
+      await db.delete(schema.householdMembers)
+        .where(eq(schema.householdMembers.householdId, circleId));
+    } catch { /* ignore */ }
+    try {
+      await (db.delete(schema.circleSettings) as any)
+        .where(eq(schema.circleSettings.id, circleId));
+    } catch { /* ignore */ }
+    try {
+      await db.delete(schema.circleContributions)
+        .where(eq(schema.circleContributions.circleId, circleId));
+    } catch { /* ignore */ }
+    try {
+      await db.delete(schema.households)
+        .where(eq(schema.households.id, circleId));
+    } catch { /* ignore */ }
+
+    // Remove from state
+    set((s) => ({
+      circles:      s.circles.filter((c) => c.id !== circleId),
+      activeCircle: s.activeCircle?.id === circleId ? null : s.activeCircle,
+    }));
   },
 
   clearError: () => set({ error: null }),

@@ -53,7 +53,7 @@ const FAQ_DATA: FAQCategory[] = [
     items: [
       {
         q: "What is Aku?",
-        a: "Aku is a personal finance app that helps you track expenses, manage bills, set savings goals, and collaborate with people in your financial circle (called a Pool). Everything syncs securely across your devices.",
+        a: "Aku is a personal finance app that helps you track expenses, manage bills, set savings goals, and collaborate with people in your Pool. Everything syncs securely across your devices.",
       },
       {
         q: "How do I log my first expense?",
@@ -115,7 +115,7 @@ const FAQ_DATA: FAQCategory[] = [
     items: [
       {
         q: "What is a Pool?",
-        a: "A Pool is a shared financial circle — a group of people (family, housemates, colleagues) who contribute money together. You can log contributions, track who has paid, and see the group leaderboard.",
+        a: "A Pool is a shared group of people (family, housemates, colleagues) who contribute money together. You can log contributions, track who has paid, and see the group leaderboard.",
       },
       {
         q: "How do I create a Pool?",
