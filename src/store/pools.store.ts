@@ -1,5 +1,5 @@
 /**
- * circles.store.ts — User's Circle membership state
+ * pools.store.ts — User's Pool membership state
  *
  * Manages all circles the authenticated user belongs to (as owner or member).
  * "activeCircle" is the first/primary circle, kept for backward compatibility

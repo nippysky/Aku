@@ -28,7 +28,7 @@ function resetAllDataStores() {
   const { useExpensesStore } = require('./expenses.store');
   const { useBudgetsStore }  = require('./budgets.store');
   const { useGoalsStore }    = require('./goals.store');
-  const { useCirclesStore }  = require('./circles.store');
+  const { useCirclesStore }  = require('./pools.store');
   const { useCircleStore }   = require('./circle.store');
 
   useBillsStore.setState({ bills: [], isLoading: false, error: null });
