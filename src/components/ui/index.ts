@@ -1,8 +1,6 @@
 export { Button } from './Button';
 export { Input } from './Input';
 export { AmountInput } from './AmountInput';
-export { PinPad } from './PinPad';
-export type { PinPadRef } from './PinPad';
 export { Card } from './Card';
 export { StatusBadge } from './StatusBadge';
 export { EmptyState } from './EmptyState';

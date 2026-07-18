@@ -209,7 +209,7 @@ export async function syncAvatarData(avatarData: string): Promise<void> {
  * Returns the DEK as a 64-char hex string, or null if the server has no DEK
  * stored yet (brand-new account that hasn't completed PIN setup yet).
  *
- * Called on new-device restore inside setupPin() before generating a fresh key.
+ * Called on new-device restore inside setupDeviceSecurity() before generating a fresh key.
  */
 export async function fetchDek(): Promise<string | null> {
   const res = await apiFetch<{ dek: string | null }>('/api/user/dek');
@@ -270,28 +270,6 @@ export async function sendTestPush(): Promise<{ sent: number }> {
 }
 
 /**
- * Fan out a pool event push notification to a list of recipient user IDs.
- * Server resolves their registered push tokens and sends the notification.
- * Best-effort — silently ignores errors so it never blocks the caller.
- */
-export async function sendPoolNotification(
-  recipientUserIds: string[],
-  title: string,
-  body: string,
-  data?: Record<string, string>,
-): Promise<void> {
-  if (recipientUserIds.length === 0) return;
-  try {
-    await apiFetch('/api/notifications/pool-event', {
-      method: 'POST',
-      body:   { recipientUserIds, title, body, data: data ?? {} },
-    });
-  } catch {
-    // Non-critical — push notifications are additive
-  }
-}
-
-/**
  * Report aggregated financial insight signals to the server after each sync.
  * The server uses these to craft personalised push notifications.
  *
@@ -301,6 +279,8 @@ export async function sendPoolNotification(
  * Best-effort, fire-and-forget: call without awaiting.
  */
 export type UserInsightPayload = {
+  /** % of this month's income kept (income − expenses) / income. null = no income logged. */
+  savingsRatePct:      number | null;
   /** Highest budget utilization ratio (0.0–2.0+). null = no budgets. */
   budgetUtilization:   number | null;
   /** True if any budget is ≥ 100 % spent this period. */
@@ -347,154 +327,6 @@ export async function updateNotifPrefs(prefs: {
   } catch {
     // Non-critical — prefs will sync on the next insight report or app restart
   }
-}
-
-// ─── Pool endpoints ──────────────────────────────────────────────────────────
-
-/**
- * Register a newly created pool with the server so other users can find it
- * by invite code. Call fire-and-forget after creating locally.
- */
-export async function registerPool(
-  id:         string,
-  name:       string,
-  emoji:      string,
-  inviteCode: string,
-): Promise<void> {
-  await apiFetch('/api/pools', {
-    method: 'POST',
-    body:   { id, name, emoji, inviteCode },
-  });
-}
-
-export type PoolJoinResult = {
-  poolId:     string;
-  name:       string;
-  emoji:      string;
-  inviteCode: string;
-  ownerId:    string;
-  ownerName:  string | null;
-};
-
-/**
- * Join a pool by its 8-character invite code.
- * Returns pool metadata so the client can seed its local SQLite records.
- */
-export async function joinPoolByCode(code: string): Promise<PoolJoinResult> {
-  return apiFetch<PoolJoinResult>('/api/pools/join', {
-    method: 'POST',
-    body:   { code },
-  });
-}
-
-export type ServerPool = {
-  id:         string;
-  name:       string;
-  emoji:      string;
-  inviteCode: string;
-  ownerId:    string;
-  role:       string;
-};
-
-/** Fetch all pools the authenticated user belongs to from the server. */
-export async function fetchUserPools(): Promise<ServerPool[]> {
-  const res = await apiFetch<{ pools: ServerPool[] }>('/api/pools');
-  return res.pools;
-}
-
-export type PoolPreview = {
-  id:            string;
-  name:          string;
-  emoji:         string;
-  memberCount:   number;
-  ownerName:     string;
-  members:       { name: string; avatarData: string | null }[];
-  alreadyMember: boolean;
-};
-
-/**
- * Preview a pool by its 8-char invite code — no membership created.
- * Use before the final "Join" confirmation step.
- */
-export async function previewPool(code: string): Promise<PoolPreview> {
-  return apiFetch<PoolPreview>(`/api/pools/preview/${encodeURIComponent(code)}`);
-}
-
-export type PoolMemberInfo = {
-  userId:    string;
-  name:      string;
-  avatarData: string | null;
-  role:      string;
-  joinedAt:  string;
-};
-
-/**
- * Fetch all members of a pool the authenticated user belongs to.
- * Used by syncFromServer to seed other members' profiles into local SQLite.
- */
-export async function fetchPoolMembers(poolId: string): Promise<PoolMemberInfo[]> {
-  const res = await apiFetch<{ members: PoolMemberInfo[] }>(`/api/pools/${poolId}/members`);
-  return res.members;
-}
-
-/**
- * Update pool name (and optionally emoji) on the server.
- * Called immediately after the owner saves a name change locally.
- * The server notifies all members via WS so they reload.
- */
-export async function updatePoolOnServer(
-  poolId:  string,
-  updates: { name?: string; emoji?: string },
-): Promise<void> {
-  await apiFetch(`/api/pools/${poolId}`, { method: 'PATCH', body: updates });
-}
-
-/**
- * Push pool settings to the server so other members can pull them on sync.
- * Called by the admin after saving settings locally. Fire-and-forget.
- */
-export async function pushPoolSettings(
-  poolId:   string,
-  settings: Record<string, unknown>,
-): Promise<void> {
-  await apiFetch(`/api/pools/${poolId}/settings`, { method: 'PUT', body: settings });
-}
-
-/**
- * Pull the latest pool settings from the server.
- * Called during syncFromServer so members always see the admin's latest settings.
- * Returns null if the admin has never pushed settings.
- */
-export async function fetchPoolSettings(
-  poolId: string,
-): Promise<Record<string, unknown> | null> {
-  try {
-    const res = await apiFetch<{ settings: Record<string, unknown> | null }>(
-      `/api/pools/${poolId}/settings`,
-    );
-    return res.settings;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Ask the server to remove a member from a pool.
- * The server will push a notification to the removed user and remaining members.
- */
-export async function removePoolMemberFromServer(
-  poolId:       string,
-  targetUserId: string,
-): Promise<void> {
-  await apiFetch(`/api/pools/${poolId}/members/${targetUserId}`, { method: 'DELETE' });
-}
-
-/**
- * Delete an entire pool (owner only).
- * The server notifies all members via push + WS before deleting.
- */
-export async function deletePoolOnServer(poolId: string): Promise<void> {
-  await apiFetch(`/api/pools/${poolId}`, { method: 'DELETE' });
 }
 
 // ─── Sync endpoints ───────────────────────────────────────────────────────────

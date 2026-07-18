@@ -14,7 +14,8 @@
  *  daily_digest     → /(tabs)/expenses     (log today's spending)
  *  daily_reminder   → /(tabs)/expenses     (server push → log spending)
  *  weekly_summary   → /(tabs)/index        (home — financial overview)
- *  pool_invite       → /pool/join         (join pool)
+ *  hourly_reminder  → /(tabs)/expenses     (log expenses / income)
+ *  bedtime_reminder → /(tabs)/expenses     (final log check before sleep)
  *  default          → /(tabs)/index        (home)
  */
 import { useEffect, useRef } from 'react';
@@ -24,10 +25,9 @@ import * as Notifications from 'expo-notifications';
 // ─── Notification data payload (shared with server worker) ────────────────────
 
 export interface NotificationData {
-  type?:     string;   // 'bill_reminder' | 'budget_alert' | 'goal_milestone' | 'pool_member_joined' | …
-  screen?:   string;   // legacy / override: 'bill' | 'budgets' | 'goal' | 'pool' | 'home'
+  type?:     string;   // 'bill_reminder' | 'budget_alert' | 'goal_milestone' | 'hourly_reminder' | …
+  screen?:   string;   // legacy / override: 'bill' | 'budgets' | 'goal' | 'home'
   id?:       string;   // entity ID — bill/budget/goal primary key
-  poolId?:   string;   // pool ID — for pool_member_joined + pool_event notifications
   action?:   string;   // optional action hint ('log', 'review', 'pay')
 }
 
@@ -108,69 +108,16 @@ interface ResolvedRoute {
  * Map a notification data payload to an Expo Router href.
  *
  * Priority order:
- *  1. Specific `type` mapping (most precise)
- *  2. Legacy `screen` field (backwards-compat with older notification payloads)
+ *  1. Explicit `screen` field — the sender says exactly where to land
+ *     (server messages reuse one `type` across different target screens,
+ *      so `screen` is the most precise signal)
+ *  2. `type` mapping (fallback for payloads without a screen)
  *  3. Home tab fallback
  */
 function resolveRoute(data: NotificationData): ResolvedRoute | null {
-  const { type, screen, id, poolId } = data;
+  const { type, screen, id } = data;
 
-  // ── Type-based routing (preferred) ──────────────────────────────────────
-
-  switch (type) {
-    // Bill due reminders — go directly to the bill card
-    case 'bill_reminder':
-    case 'bill-upcoming':
-    case 'bill-due-today':
-    case 'bill-overdue':
-      if (id) return { href: `/bills/${id}`, type: 'detail' };
-      return { href: '/(tabs)/bills', type: 'tab' };
-
-    // Budget alerts — go to the specific budget detail
-    case 'budget_alert':
-    case 'budget-near-limit':
-    case 'budget-exceeded':
-      if (id) return { href: `/budgets/${id}`, type: 'detail' };
-      return { href: '/budgets', type: 'tab' };
-
-    // Goal milestones — go to the goal detail
-    case 'goal_milestone':
-    case 'goal-milestone':
-    case 'goal-completed':
-      if (id) return { href: `/goals/${id}`, type: 'detail' };
-      return { href: '/(tabs)/goals', type: 'tab' };
-
-    // Server push: daily spend reminder
-    // Contextual: open the Expenses tab so user can log what they spent
-    case 'daily_reminder':
-    case 'daily_digest':
-      return { href: '/(tabs)/expenses', type: 'tab' };
-
-    // Server push: weekly summary
-    // Open the home dashboard which shows the weekly financial overview
-    case 'weekly_summary':
-      return { href: '/(tabs)/index', type: 'tab' };
-
-    // Pool invite
-    case 'pool_invite':
-      return { href: '/pool/join', type: 'detail' };
-
-    // New member joined a pool — navigate to that specific pool
-    case 'pool_member_joined':
-      if (poolId) return { href: `/pool/${poolId}`, type: 'detail' };
-      return { href: '/(tabs)/index', type: 'tab' };
-
-    // Contribution logged/verified in a pool
-    case 'pool_event':
-      if (poolId) return { href: `/pool/${poolId}`, type: 'detail' };
-      return { href: '/(tabs)/index', type: 'tab' };
-
-    // Pool was deleted by admin — go home so user sees updated list
-    case 'pool_deleted':
-      return { href: '/(tabs)/index', type: 'tab' };
-  }
-
-  // ── Legacy screen-field routing (backwards compatibility) ────────────────
+  // ── Screen-based routing (preferred — sender-specified target) ──────────
 
   if (screen) {
     switch (screen) {
@@ -197,19 +144,58 @@ function resolveRoute(data: NotificationData): ResolvedRoute | null {
 
       case 'expense':
       case 'expenses':
+      case 'income':
+      case 'finance':
         return { href: '/(tabs)/expenses', type: 'tab' };
 
       case 'notifications':
         return { href: '/notifications', type: 'detail' };
 
-      case 'pool':
-        if (poolId) return { href: `/pool/${poolId}`, type: 'detail' };
+      case 'home':
         return { href: '/(tabs)/index', type: 'tab' };
 
-      case 'home':
-      default:
-        return { href: '/(tabs)/index', type: 'tab' };
+      // Unknown screen value — fall through to type-based routing below
     }
+  }
+
+  // ── Type-based routing (fallback) ───────────────────────────────────────
+
+  switch (type) {
+    // Bill due reminders — go directly to the bill card
+    case 'bill_reminder':
+    case 'bill-upcoming':
+    case 'bill-due-today':
+    case 'bill-overdue':
+      if (id) return { href: `/bills/${id}`, type: 'detail' };
+      return { href: '/(tabs)/bills', type: 'tab' };
+
+    // Budget alerts — go to the specific budget detail
+    case 'budget_alert':
+    case 'budget-near-limit':
+    case 'budget-exceeded':
+      if (id) return { href: `/budgets/${id}`, type: 'detail' };
+      return { href: '/budgets', type: 'tab' };
+
+    // Goal milestones — go to the goal detail
+    case 'goal_milestone':
+    case 'goal-milestone':
+    case 'goal-completed':
+      if (id) return { href: `/goals/${id}`, type: 'detail' };
+      return { href: '/(tabs)/goals', type: 'tab' };
+
+    // Server push: daily / hourly spend reminders
+    // Contextual: open the Finance tab so user can log expenses & income
+    case 'daily_reminder':
+    case 'daily_digest':
+    case 'hourly_reminder':
+    case 'bedtime_reminder':
+      return { href: '/(tabs)/expenses', type: 'tab' };
+
+    // Server push: weekly summary
+    // Open the home dashboard which shows the weekly financial overview
+    case 'weekly_summary':
+      return { href: '/(tabs)/index', type: 'tab' };
+
   }
 
   // ── Default: home ────────────────────────────────────────────────────────

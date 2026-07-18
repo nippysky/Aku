@@ -4,12 +4,11 @@
  * POST   /api/notifications/token         — Register a device push token (+ timezone)
  * DELETE /api/notifications/token         — Deregister a device push token
  * POST   /api/notifications/insight       — Upsert user financial insight signals
- * POST   /api/notifications/pool-event    — Fan out pool push to recipient user IDs
  * POST   /api/notifications/test          — Send a test push to the caller's own devices
  */
 import { Hono } from 'hono';
 import { randomBytes } from 'crypto';
-import { eq, and, inArray } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { pushTokens, userInsights } from '../db/schema.js';
 import { sendExpoPush } from '../lib/expo-push.js';
@@ -116,6 +115,7 @@ router.post('/insight', authMiddleware, async (c) => {
     totalGoalsCount?:     number;
     goalsOnTrack?:        number;
     hasActiveGoals?:      boolean;
+    savingsRatePct?:      number | null;
   };
 
   try {
@@ -140,6 +140,8 @@ router.post('/insight', authMiddleware, async (c) => {
     totalGoalsCount:     Math.min(Math.max(Math.round(Number(body.totalGoalsCount ?? 0)), 0), 10_000),
     goalsOnTrack:        Math.min(Math.max(Math.round(Number(body.goalsOnTrack ?? 0)), 0), 10_000),
     hasActiveGoals:      Boolean(body.hasActiveGoals ?? false),
+    savingsRatePct:      body.savingsRatePct != null
+      ? Math.min(Math.max(Number(body.savingsRatePct), -1000), 100) : null,
     updatedAt:           now,
   };
 
@@ -153,58 +155,6 @@ router.post('/insight', authMiddleware, async (c) => {
     });
 
   return c.json({ success: true });
-});
-
-// ─── POST /api/notifications/pool-event ─────────────────────────────────────
-// Fan out a push notification to a list of recipient user IDs.
-// Called by any pool member after logging / verifying a contribution.
-
-router.post('/pool-event', authMiddleware, async (c) => {
-  let body: {
-    recipientUserIds?: string[];
-    title?: string;
-    body?: string;
-    data?: Record<string, string>;
-  };
-  try {
-    body = await c.req.json();
-  } catch {
-    return c.json({ error: 'Invalid JSON body' }, 400);
-  }
-
-  const { recipientUserIds, title, body: bodyText, data } = body;
-
-  if (!Array.isArray(recipientUserIds) || recipientUserIds.length === 0) {
-    return c.json({ error: 'recipientUserIds must be a non-empty array' }, 400);
-  }
-  if (!title || !bodyText) {
-    return c.json({ error: 'title and body are required' }, 400);
-  }
-
-  const ids = recipientUserIds.slice(0, 50);
-
-  try {
-    const rows = await db
-      .select({ token: pushTokens.token })
-      .from(pushTokens)
-      .where(inArray(pushTokens.userId, ids));
-
-    const tokens = rows.map((r) => r.token);
-
-    if (tokens.length > 0) {
-      await sendExpoPush(tokens, {
-        title,
-        body:      bodyText,
-        channelId: 'pools',
-        data:      data ?? {},
-      });
-    }
-
-    return c.json({ success: true, sent: tokens.length });
-  } catch (err) {
-    console.error('[notifications] pool-event error:', err);
-    return c.json({ error: 'Failed to send notifications' }, 500);
-  }
 });
 
 // ─── POST /api/notifications/test ────────────────────────────────────────────

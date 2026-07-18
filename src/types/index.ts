@@ -13,7 +13,6 @@ export interface User {
   id:             UUID;
   name:           string;
   email:          string;
-  householdId:    UUID | null;
   avatarUrl:      string | null;
   /** Base64 data URI — stored in SQLite, never in SecureStore (size limit). */
   avatarData:     string | null;
@@ -35,103 +34,6 @@ export interface PinSetup {
 export interface BiometricConfig {
   enabled:   boolean;
   type:      'faceId' | 'touchId' | 'fingerprint' | 'none';
-}
-
-// ─── Household ────────────────────────────────────────────────────────────
-
-export interface Household {
-  id:         UUID;
-  name:       string;
-  ownerId:    UUID;
-  inviteCode: string | null;
-  createdAt:  ISO8601;
-}
-
-export interface HouseholdMember {
-  id:          UUID;
-  householdId: UUID;
-  userId:      UUID;
-  name:        string;
-  email:       string;
-  avatarUrl:   string | null;
-  role:        'owner' | 'member';
-  joinedAt:    ISO8601;
-}
-
-export interface HouseholdInvite {
-  id:          UUID;
-  householdId: UUID;
-  email:       string;
-  token:       string;
-  expiresAt:   ISO8601;
-  usedAt:      ISO8601 | null;
-  createdAt:   ISO8601;
-}
-
-// ─── Circle (contribution group) ─────────────────────────────────────────
-
-export type CircleFrequency =
-  | 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'yearly' | 'one-time';
-
-export type ContributionType = 'equal' | 'custom';
-
-export interface CircleSettings {
-  id:               UUID;          // = circleId
-  emoji:            string | null; // e.g. "💰", "🏠"
-  targetAmount:     number | null; // kobo; null = no fixed goal
-  description:      string | null;
-  frequency:        CircleFrequency | null; // contribution cadence
-  perMemberAmount:  number | null; // kobo per member per period; null = auto-split
-  contributionType: ContributionType;
-  deadline:         DateString | null; // optional end date
-  // Optional payment details (only if circle pools real money)
-  accountName:      string | null;
-  accountNumber:    string | null;
-  bankName:         string | null;
-  notes:            string | null;
-  updatedAt:        ISO8601;
-}
-
-/** Payment status of a member for the current period */
-export interface MemberPaymentStatus {
-  memberId:        UUID;
-  userId:          UUID;
-  name:            string;
-  email:           string;
-  avatarUrl:       string | null;
-  role:            'owner' | 'member';
-  expectedAmount:  number; // kobo — what they owe this period
-  verifiedAmount:  number; // kobo — what's been verified
-  pendingAmount:   number; // kobo — submitted but not yet verified
-  status:          'paid' | 'partial' | 'pending' | 'overdue';
-  shortfall:       number; // kobo — how much still needed
-}
-
-export interface CircleContribution {
-  id:         UUID;
-  circleId:   UUID;
-  userId:     UUID;
-  amount:     number;           // kobo
-  note:       string | null;
-  status:     'pending' | 'verified';
-  createdAt:  ISO8601;
-  verifiedAt: ISO8601 | null;
-  verifiedBy: UUID | null;
-  // Joined from users table:
-  userName:   string;
-  userEmail:  string;
-  avatarUrl:  string | null;
-}
-
-export interface CircleLeaderboardEntry {
-  userId:            UUID;
-  userName:          string;
-  avatarUrl:         string | null;
-  totalVerified:     number;    // kobo
-  totalPending:      number;    // kobo
-  contributionCount: number;
-  percentage:        number;    // 0–100 of verified total
-  rank:              number;
 }
 
 // ─── Bills ────────────────────────────────────────────────────────────────
@@ -169,14 +71,12 @@ export type BillCategory =
 export interface Bill {
   id:           UUID;
   userId:       UUID;
-  householdId:  UUID | null;
   name:         string;
   amount:       NGN;
   category:     BillCategory;
   dueDate:      DateString;       // next due date
   frequency:    BillFrequency;
   notes:        string | null;
-  isShared:     boolean;
   isPaid:       boolean;
   paidAt:       ISO8601 | null;
   status:       BillStatus;
@@ -216,12 +116,10 @@ export type ExpenseCategory =
 export interface Expense {
   id:          UUID;
   userId:      UUID;
-  householdId: UUID | null;
   amount:      NGN;
   category:    ExpenseCategory;
   description: string | null;
   date:        DateString;
-  isShared:    boolean;
   createdAt:   ISO8601;
   updatedAt:   ISO8601;
 }
@@ -247,11 +145,9 @@ export type BudgetStatus = 'healthy' | 'near-limit' | 'exceeded';
 export interface Budget {
   id:           UUID;
   userId:       UUID;
-  householdId:  UUID | null;
   category:     ExpenseCategory;
   amount:       NGN;
   period:       BudgetPeriod;
-  isShared:     boolean;
   createdAt:    ISO8601;
   updatedAt:    ISO8601;
 }
@@ -272,7 +168,6 @@ export type BudgetCreateInput = Omit<Budget,
 export interface Goal {
   id:           UUID;
   userId:       UUID;
-  householdId:  UUID | null;
   name:         string;
   targetAmount: NGN;
   savedAmount:  NGN;
@@ -280,7 +175,10 @@ export interface Goal {
   notes:        string | null;
   emoji:        string | null;
   color:        string | null;
-  isShared:     boolean;
+  /** Optional destination account — where the user sends this goal's savings. */
+  bankName:      string | null;
+  accountName:   string | null;
+  accountNumber: string | null;
   isCompleted:  boolean;
   completedAt:  ISO8601 | null;
   createdAt:    ISO8601;
@@ -355,7 +253,6 @@ export type NotificationType =
   | 'budget-exceeded'
   | 'goal-milestone'
   | 'goal-completed'
-  | 'household-invite'
   | 'weekly-summary';
 
 export interface AppNotification {
@@ -376,7 +273,6 @@ export interface OnboardingState {
   step:           number;
   name:           string;
   email:          string;
-  householdName:  string;
   isComplete:     boolean;
 }
 

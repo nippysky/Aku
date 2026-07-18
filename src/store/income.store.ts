@@ -3,7 +3,7 @@ import { eq, and, gte, lte } from 'drizzle-orm';
 import { getDatabase, schema } from '../lib/database/client';
 import { format } from 'date-fns';
 import { generateUUID } from '../lib/uuid';
-import { triggerPush } from '../lib/sync/trigger';
+import { triggerPush, triggerDelete } from '../lib/sync/trigger';
 import type {
   Income, IncomeCreateInput, IncomeUpdateInput,
   IncomeSummary, IncomeCategory,
@@ -206,7 +206,7 @@ export const useIncomeStore = create<IncomeState>()((set, get) => ({
     const allRecords = get().allRecords.filter((r) => r.id !== id);
     const summary = buildSummary(records, get().selectedMonth);
     set({ records, allRecords, summary });
-    triggerPush();
+    triggerDelete('income', id);
   },
 
   setMonth: (month) => set({ selectedMonth: month }),

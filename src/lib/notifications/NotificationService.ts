@@ -94,13 +94,8 @@ class NotificationService {
       showBadge: false,
     });
 
-    await Notifications.setNotificationChannelAsync('pools', {
-      name: 'Pool Activity',
-      importance: Notifications.AndroidImportance.HIGH,
-      vibrationPattern: [0, 250, 250, 250],
-      enableVibrate: true,
-      showBadge: true,
-    });
+    // Pools channel removed with the Pools feature — delete on existing installs
+    try { await Notifications.deleteNotificationChannelAsync('pools'); } catch { /* never existed */ }
   }
 
   // ── Bill Reminders ───────────────────────────────────────────────────────

@@ -138,8 +138,6 @@ export function EditExpenseSheet({ expense, onClose, onSuccess }: EditExpenseShe
           category:    data.category,
           description: data.description.trim() || null,
           date:        data.date,
-          isShared:    false,
-          householdId: null,
         });
         showToast('success', 'Expense updated');
         handleClose();

@@ -1,57 +1,42 @@
-import React, { useCallback, useEffect } from 'react';
+/**
+ * (auth)/index.tsx — Lock screen.
+ *
+ * No app passcode: unlocking uses the device's own security via the system
+ * sheet (Face ID / Touch ID / fingerprint, falling back to the device
+ * PIN / pattern / passcode automatically). Devices without any enrolled
+ * security unlock freely.
+ */
+import React, { useCallback, useEffect, useState } from 'react';
 import {
+  Pressable,
   StatusBar,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
-import Animated, {
-  FadeInDown,
-  FadeInUp,
-} from 'react-native-reanimated';
+import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import Svg, { Path, Ellipse } from 'react-native-svg';
-import { Button } from '../../components/ui';
+import Svg, { Path, Circle } from 'react-native-svg';
+import { Lock } from 'lucide-react-native';
 import { useAuthStore } from '../../store';
 import { Palette } from '../../theme/colors';
 import { FontFamily, FontSize } from '../../theme/typography';
 import { Spacing, Layout } from '../../theme/spacing';
 
-// ─── Akù "A" monogram (small, for auth) ───────────────────────────────────
+// ─── Small monogram ────────────────────────────────────────────────────────
 
 function AkuMonogramSmall() {
   return (
-    <Svg width={56} height={56} viewBox="0 0 140 140" fill="none">
-      {/* Left leg — thick bold */}
+    <Svg width={56} height={56} viewBox="0 0 56 56">
+      <Circle cx={28} cy={28} r={26} stroke={Palette.gold} strokeWidth={1.5} fill="none" opacity={0.5} />
       <Path
-        d="M70 20 L18 122"
+        d="M18 38 L28 16 L38 38 M22.5 30 L33.5 30"
         stroke={Palette.gold}
-        strokeWidth={14}
+        strokeWidth={2.2}
         strokeLinecap="round"
-      />
-      {/* Right leg */}
-      <Path
-        d="M70 20 L122 122"
-        stroke={Palette.gold}
-        strokeWidth={14}
-        strokeLinecap="round"
-      />
-      {/* Straight crossbar */}
-      <Path
-        d="M38 83 L102 83"
-        stroke={Palette.gold}
-        strokeWidth={11}
-        strokeLinecap="round"
-      />
-      {/* Apostrophe — filled teardrop above apex */}
-      <Ellipse
-        cx={86}
-        cy={13}
-        rx={6.5}
-        ry={10}
-        fill={Palette.gold}
-        transform="rotate(-8, 86, 13)"
+        strokeLinejoin="round"
+        fill="none"
       />
     </Svg>
   );
@@ -63,87 +48,73 @@ export default function AuthGateScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
 
-  const { user, biometric, authenticateBiometric } = useAuthStore();
+  const { user, unlockWithDeviceAuth } = useAuthStore();
+  const [attempted, setAttempted] = useState(false);
 
   const userName = user?.name ?? '';
 
-  const biometricLabel = biometric.type === 'faceId'
-    ? 'Use Face ID'
-    : biometric.type === 'fingerprint' || biometric.type === 'touchId'
-    ? 'Use Touch ID'
-    : 'Use biometrics';
-
-  // Auto-trigger biometric on mount if enabled
-  const tryBiometric = useCallback(async () => {
-    if (!biometric.enabled) return;
-    const success = await authenticateBiometric();
+  const tryUnlock = useCallback(async () => {
+    const success = await unlockWithDeviceAuth();
     if (success) {
       router.replace('/(tabs)');
+    } else {
+      setAttempted(true);
     }
-  }, [biometric.enabled, authenticateBiometric, router]);
+  }, [unlockWithDeviceAuth, router]);
 
+  // Auto-trigger the system auth sheet shortly after mount
   useEffect(() => {
-    // Slight delay so screen renders before native prompt appears
     const timer = setTimeout(() => {
-      tryBiometric();
+      tryUnlock();
     }, 400);
     return () => clearTimeout(timer);
-  }, [tryBiometric]);
-
-  function handleEnterPasscode() {
-    router.push('/(auth)/pin');
-  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <>
       <StatusBar barStyle="light-content" />
-    <View
-      style={[
-        styles.container,
-        {
-          paddingTop:    insets.top + Spacing[8],
-          paddingBottom: Math.max(insets.bottom, Spacing[6]) + Spacing[4],
-          paddingHorizontal: Layout.screenPadding,
-        },
-      ]}
-    >
-      {/* Logo area */}
-      <Animated.View entering={FadeInDown.delay(100).duration(600)} style={styles.logoArea}>
-        <AkuMonogramSmall />
-        <Text style={styles.wordmark}>Akù</Text>
-      </Animated.View>
+      <View
+        style={[
+          styles.container,
+          {
+            paddingTop:    insets.top + Spacing[8],
+            paddingBottom: Math.max(insets.bottom, Spacing[6]) + Spacing[4],
+            paddingHorizontal: Layout.screenPadding,
+          },
+        ]}
+      >
+        {/* Logo area */}
+        <Animated.View entering={FadeInDown.delay(100).duration(600)} style={styles.logoArea}>
+          <AkuMonogramSmall />
+          <Text style={styles.wordmark}>Akù</Text>
+        </Animated.View>
 
-      {/* Greeting */}
-      <Animated.View entering={FadeInDown.delay(220).duration(500)} style={styles.greeting}>
-        <Text style={styles.greetingText}>
-          Welcome back{userName.length > 0 ? `, ${userName}.` : '.'}
-        </Text>
-        <Text style={styles.greetingSubtitle}>
-          Authenticate to continue.
-        </Text>
-      </Animated.View>
+        {/* Greeting */}
+        <Animated.View entering={FadeInDown.delay(220).duration(500)} style={styles.greeting}>
+          <Text style={styles.greetingText}>
+            Welcome back{userName.length > 0 ? `, ${userName}.` : '.'}
+          </Text>
+          <Text style={styles.greetingSubtitle}>
+            {attempted
+              ? 'Authentication was cancelled. Tap below to try again.'
+              : 'Unlocking with your device security…'}
+          </Text>
+        </Animated.View>
 
-      {/* Bottom auth options */}
-      <Animated.View entering={FadeInUp.delay(350).duration(500)} style={styles.buttons}>
-        {biometric.enabled && (
-          <Button
-            label={biometricLabel}
-            variant="primary"
-            size="lg"
-            fullWidth
-            onPress={tryBiometric}
-          />
-        )}
-
-        <Button
-          label="Enter passcode"
-          variant={biometric.enabled ? 'secondary' : 'primary'}
-          size="lg"
-          fullWidth
-          onPress={handleEnterPasscode}
-        />
-      </Animated.View>
-    </View>
+        {/* Unlock button — shown after a cancelled/failed attempt */}
+        <Animated.View entering={FadeInUp.delay(350).duration(500)} style={styles.buttons}>
+          <Pressable
+            onPress={tryUnlock}
+            accessibilityRole="button"
+            accessibilityLabel="Unlock Akù"
+            style={({ pressed }) => [styles.unlockBtn, { opacity: pressed ? 0.85 : 1 }]}
+          >
+            <Lock size={18} color={Palette.forest} strokeWidth={2} />
+            <Text style={styles.unlockText}>Unlock</Text>
+          </Pressable>
+        </Animated.View>
+      </View>
     </>
   );
 }
@@ -189,5 +160,19 @@ const styles = StyleSheet.create({
   },
   buttons: {
     gap: Spacing[3],
+  },
+  unlockBtn: {
+    flexDirection:   'row',
+    alignItems:      'center',
+    justifyContent:  'center',
+    gap:             8,
+    backgroundColor: Palette.gold,
+    borderRadius:    100,
+    paddingVertical: 16,
+  },
+  unlockText: {
+    fontFamily: FontFamily.sansSemiBold,
+    fontSize:   FontSize.base,
+    color:      Palette.forest,
   },
 });

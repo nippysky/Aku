@@ -1,4 +1,3 @@
-import { useEffect } from 'react';
 import { Tabs } from 'expo-router';
 import { Platform, View, StyleSheet, type ColorValue } from 'react-native';
 import { BlurView } from 'expo-blur';
@@ -7,8 +6,6 @@ import { Home, Receipt, Wallet, Target, User } from 'lucide-react-native';
 import { useTheme } from '../../theme';
 import { Layout } from '../../theme/spacing';
 import { FontFamily, FontSize } from '../../theme/typography';
-import { useAuthStore } from '../../store/auth.store';
-import { useCirclesStore } from '../../store/pools.store';
 
 type TabIconProps = {
   color:   ColorValue;
@@ -33,18 +30,34 @@ function TabIcon({
   );
 }
 
+/**
+ * Floating center action — the Finance tab.
+ * Everything in Akù is ultimately an expense or an income, so this tab is
+ * the visual anchor of the app: a raised, icon-only accent button.
+ */
+function FinanceTabIcon({ focused }: { focused: boolean }) {
+  const { colors, isDark } = useTheme();
+  return (
+    <View
+      style={[
+        styles.financeFab,
+        {
+          backgroundColor: colors.primary,
+          shadowColor:     colors.primary,
+          borderColor:     isDark ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.65)',
+        },
+        focused && styles.financeFabFocused,
+      ]}
+    >
+      <Wallet size={26} color="#F5F2EC" strokeWidth={focused ? 2.2 : 1.9} />
+    </View>
+  );
+}
+
 export default function TabsLayout() {
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
   const isIOS  = Platform.OS === 'ios';
-
-  // Eagerly load circles so the circle picker in AddBillSheet / AddGoalSheet
-  // is always populated regardless of which tab the user visits first.
-  const { user }       = useAuthStore();
-  const { load: loadCircles } = useCirclesStore();
-  useEffect(() => {
-    if (user?.id) loadCircles(user.id);
-  }, [user?.id]);
 
   return (
     <Tabs
@@ -133,10 +146,10 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="expenses"
         options={{
-          title: 'Finance',
-          tabBarIcon: ({ color, focused, size }) => (
-            <TabIcon Icon={Wallet} color={color} focused={focused} size={size} />
-          ),
+          title:       'Finance',
+          // Icon-only floating accent button — no label, ever.
+          tabBarLabel: () => null,
+          tabBarIcon:  ({ focused }) => <FinanceTabIcon focused={focused} />,
         }}
       />
       <Tabs.Screen
@@ -171,5 +184,25 @@ const styles = StyleSheet.create({
   },
   iconWrapActive: {
     // subtle active indicator — optionally add background
+  },
+
+  // ── Floating Finance action button ─────────────────────────────────────
+  financeFab: {
+    width:          58,
+    height:         58,
+    borderRadius:   29,
+    marginTop:      -26,          // raise above the tab bar edge
+    alignItems:     'center',
+    justifyContent: 'center',
+    borderWidth:    2,
+    // soft elevated shadow
+    shadowOffset:   { width: 0, height: 6 },
+    shadowOpacity:  0.32,
+    shadowRadius:   10,
+    elevation:      10,
+  },
+  financeFabFocused: {
+    transform:     [{ scale: 1.06 }],
+    shadowOpacity: 0.45,
   },
 });

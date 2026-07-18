@@ -24,6 +24,8 @@ interface SyncState {
   dek:         Uint8Array | null;
   /** ISO timestamp of the last successful full sync. Stored in SecureStore. */
   lastSyncAt:  string | null;
+  /** ISO timestamp of the last successful push — enables incremental pushes. */
+  lastPushAt:  string | null;
   isSyncing:   boolean;
   syncError:   string | null;
   /**
@@ -44,8 +46,10 @@ interface SyncState {
   clearDek:          () => Promise<void>;
   /** Update last-sync timestamp after a successful sync. */
   setLastSyncAt:     (ts: string) => void;
-  /** Load lastSyncAt from SecureStore on app start. */
+  /** Load lastSyncAt + lastPushAt from SecureStore on app start. */
   loadLastSyncAt:    () => Promise<void>;
+  /** Update last-push timestamp after a successful incremental push. */
+  setLastPushAt:     (ts: string) => void;
   setSyncing:        (v: boolean) => void;
   setSyncError:      (e: string | null) => void;
   /** Increment syncVersion to notify screens that pulled data is ready. */
@@ -53,10 +57,12 @@ interface SyncState {
 }
 
 const LAST_SYNC_KEY = 'aku_last_sync_at';
+const LAST_PUSH_KEY = 'aku_last_push_at';
 
 export const useSyncStore = create<SyncState>()((set, get) => ({
   dek:         null,
   lastSyncAt:  null,
+  lastPushAt:  null,
   isSyncing:   false,
   syncError:   null,
   syncVersion: 0,
@@ -82,8 +88,9 @@ export const useSyncStore = create<SyncState>()((set, get) => ({
     try {
       await SecureStore.deleteItemAsync(DEK_STORE_KEY);
       await SecureStore.deleteItemAsync(LAST_SYNC_KEY);
+      await SecureStore.deleteItemAsync(LAST_PUSH_KEY);
     } catch { /* ignore */ }
-    set({ dek: null, lastSyncAt: null, syncError: null });
+    set({ dek: null, lastSyncAt: null, lastPushAt: null, syncError: null });
   },
 
   setLastSyncAt: (ts: string) => {
@@ -95,7 +102,14 @@ export const useSyncStore = create<SyncState>()((set, get) => ({
     try {
       const ts = await SecureStore.getItemAsync(LAST_SYNC_KEY);
       if (ts) set({ lastSyncAt: ts });
+      const pushTs = await SecureStore.getItemAsync(LAST_PUSH_KEY);
+      if (pushTs) set({ lastPushAt: pushTs });
     } catch { /* ignore */ }
+  },
+
+  setLastPushAt: (ts: string) => {
+    set({ lastPushAt: ts });
+    SecureStore.setItemAsync(LAST_PUSH_KEY, ts).catch(() => {});
   },
 
   setSyncing:      (v) => set({ isSyncing: v }),

@@ -136,9 +136,27 @@ export default function RootLayout() {
   // When the app comes to foreground (user switches from device A to device B,
   // or returns from background) we pull any changes made on other devices.
   // bumpSyncVersion() inside pullAndMerge notifies tab screens to reload silently.
+  // Re-lock after 5+ minutes in the background (device-auth on return).
+  // Quick app switches stay seamless; long absences require an unlock.
+  const backgroundedAtRef = useRef<number | null>(null);
+  const RELOCK_AFTER_MS = 5 * 60 * 1000;
+
   useEffect(() => {
     const sub = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'background') {
+        backgroundedAtRef.current = Date.now();
+      }
       if (nextState === 'active') {
+        // ── Re-lock check ──
+        const away = backgroundedAtRef.current
+          ? Date.now() - backgroundedAtRef.current : 0;
+        backgroundedAtRef.current = null;
+        const { biometric, hasOnboarded, lock } = useAuthStore.getState();
+        if (away >= RELOCK_AFTER_MS && user && hasOnboarded && biometric.enabled) {
+          lock();
+          return; // locked — skip refresh work until unlocked
+        }
+
         // Clear the notification badge
         import('expo-notifications').then(({ setBadgeCountAsync }) => {
           setBadgeCountAsync(0).catch(() => {});
@@ -243,23 +261,8 @@ export default function RootLayout() {
         type:        (data?.type as string) ?? 'general',
         title,
         body:        body ?? '',
-        referenceId: (data?.id as string) ?? (data?.poolId as string) ?? null,
+        referenceId: (data?.id as string) ?? null,
       });
-    };
-
-    // Trigger immediate syncFromServer when pool membership changes arrive.
-    // Handles both foreground (received) and background/quit-state (response tapped).
-    const syncOnCircleEvent = (data: Record<string, unknown> | null | undefined) => {
-      const type = data?.type as string | undefined;
-      if (
-        type === 'pool_member_removed' ||
-        type === 'pool_member_joined'  ||
-        type === 'pool_deleted'
-      ) {
-        import('../store/pools.store').then(({ useCirclesStore }) => {
-          useCirclesStore.getState().syncFromServer(user.id).catch(() => {});
-        });
-      }
     };
 
     // Foreground: app is open when notification arrives
@@ -267,7 +270,6 @@ export default function RootLayout() {
       (notif) => {
         const { title, body, data } = notif.request.content;
         persistNotif(notif.request.identifier, title, body, data as Record<string, unknown>);
-        syncOnCircleEvent(data as Record<string, unknown>);
       },
     );
 
@@ -281,7 +283,6 @@ export default function RootLayout() {
           body,
           data as Record<string, unknown>,
         );
-        syncOnCircleEvent(data as Record<string, unknown>);
       },
     );
 

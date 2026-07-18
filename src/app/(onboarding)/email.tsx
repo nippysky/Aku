@@ -93,7 +93,7 @@ export default function EmailScreen() {
       >
         <OnboardingHeader
           step={2}
-          total={8}
+          total={6}
           onBack={() => router.back()}
           dark={false}
         />
@@ -113,7 +113,7 @@ export default function EmailScreen() {
 
           <Animated.View entering={FadeInDown.delay(200).duration(500)}>
             <Text style={[text.body, { color: colors.textSecondary, marginTop: spacing[3] }]}>
-              Only used to verify your account and reset your passcode. No spam, ever.
+              Only used to verify your account and restore your data on a new device. No spam, ever.
             </Text>
           </Animated.View>
 

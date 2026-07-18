@@ -28,15 +28,11 @@ function resetAllDataStores() {
   const { useExpensesStore } = require('./expenses.store');
   const { useBudgetsStore }  = require('./budgets.store');
   const { useGoalsStore }    = require('./goals.store');
-  const { useCirclesStore }  = require('./pools.store');
-  const { useCircleStore }   = require('./circle.store');
 
   useBillsStore.setState({ bills: [], isLoading: false, error: null });
   useExpensesStore.setState({ expenses: [], allExpenses: [], summary: null, isLoading: false, error: null });
   useBudgetsStore.setState({ budgets: [], isLoading: false, error: null });
   useGoalsStore.setState({ goals: [], contributions: {}, isLoading: false, error: null });
-  useCirclesStore.setState({ circles: [], activeCircle: null, members: [], isLoading: false, error: null });
-  useCircleStore.setState({ settings: null, contributions: [], leaderboard: [], members: [], memberStatuses: [], activeCircleId: null });
 }
 
 // ─── Keys ─────────────────────────────────────────────────────────────────
@@ -79,7 +75,7 @@ interface AuthState {
   markOnboardingComplete:  () => Promise<void>;
   /**
    * Atomically marks onboarding complete AND unlocks in a single Zustand set().
-   * Use in pin-setup.tsx to avoid the nav-guard seeing hasOnboarded:true + isLocked:true
+   * Use in secure.tsx to avoid the nav-guard seeing hasOnboarded:true + isLocked:true
    * as two separate updates — on Android that intermediate state triggers a stray redirect.
    */
   completeOnboardingAndUnlock: () => Promise<void>;
@@ -94,14 +90,15 @@ interface AuthState {
    */
   refreshProfile:          () => Promise<void>;
 
-  // Actions — PIN
-  setupPin:         (pin: string) => Promise<void>;
-  verifyPin:        (pin: string) => Promise<boolean>;
-  resetPin:         () => Promise<void>;
+  // Actions — Device security (biometrics / device PIN / pattern)
+  /** Ensures the DEK exists (Keychain → server → generate). Runs during onboarding. */
+  setupDeviceSecurity:  () => Promise<void>;
+  /** System auth sheet: biometric first, device PIN/pattern fallback.
+   *  Devices with no enrolled lock unlock freely. Returns true on unlock. */
+  unlockWithDeviceAuth: () => Promise<boolean>;
 
   // Actions — Biometric
   setupBiometric:        () => Promise<boolean>;
-  authenticateBiometric: () => Promise<boolean>;
   disableBiometric:      () => Promise<void>;
 
   // Actions — Lock
@@ -175,7 +172,6 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
             email:       profile.email,
             avatarUrl:   profile.avatarUrl,
             avatarData:  null, // loaded from SQLite below
-            householdId: user?.householdId ?? null,
             createdAt:   user?.createdAt ?? new Date().toISOString(),
             updatedAt:   new Date().toISOString(),
           };
@@ -206,8 +202,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
         ? { ...validatedUser, avatarData }
         : null;
 
-      // Upsert to SQLite so circle LEFT JOINs resolve names without band-aids.
-      // This replaces scattered ensureUserInSQLite() calls throughout circle.store.
+      // Upsert to SQLite so queries can resolve the user's name.
       if (userWithAvatar) {
         const db  = getDatabase();
         const now = new Date().toISOString();
@@ -234,7 +229,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
         session,
         biometric,
         hasOnboarded,
-        isLocked:      hasOnboarded && locallyValid,
+        isLocked:      hasOnboarded && locallyValid && biometric.enabled,
         isInitialized: true,
       });
     } catch {
@@ -253,7 +248,6 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       id:          generateUUID(),
       name,
       email,
-      householdId: null,
       avatarUrl:   null,
       avatarData:  null,
       createdAt:   now.toISOString(),
@@ -271,7 +265,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       SecureStore.setItemAsync(KEYS.SESSION, JSON.stringify(session)),
     ]);
 
-    // Upsert to SQLite so circle LEFT JOINs can resolve the user's name
+    // Upsert to SQLite so queries can resolve the user's name
     const upsertDb  = getDatabase();
     const upsertNow = now.toISOString(); // `now` is the Date already declared above
     try {
@@ -329,7 +323,6 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       // Restore avatar from server on new device — written to SQLite below.
       // SecureStore has a size limit so base64 images are never stored there.
       avatarData:  profile.avatarData ?? null,
-      householdId: null,
       createdAt:   now.toISOString(),
       updatedAt:   now.toISOString(),
     };
@@ -430,8 +423,6 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     // STEP 3: Wipe ALL local SQLite tables — order matters (children before parents)
     try {
       const db = getDatabase();
-      await db.delete(schema.circleContributions);
-      await db.delete(schema.circleSettings);
       await db.delete(schema.goalContributions);
       await db.delete(schema.goals);
       await db.delete(schema.budgets);
@@ -441,8 +432,6 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       await db.delete(schema.recurringIncome);
       await db.delete(schema.recurringExpenses);
       await db.delete(schema.notifications);
-      await db.delete(schema.householdMembers);
-      await db.delete(schema.households);
       await db.delete(schema.appState);
       await db.delete(schema.users);
     } catch { /* server already deleted — local wipe is best-effort */ }
@@ -516,7 +505,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       const profile = await getMe();
       const db  = getDatabase();
       const now = new Date().toISOString();
-      // Update SQLite so other queries (e.g. circle member JOIN) see the latest values
+      // Update SQLite so other queries see the latest values
       await db
         .update(schema.users)
         .set({ name: profile.name, avatarData: profile.avatarData ?? null, updatedAt: now })
@@ -548,35 +537,20 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     set({ hasOnboarded: true, isLocked: false });
   },
 
-  // ── Setup PIN ─────────────────────────────────────────────────────────
+  // ── Setup device security ─────────────────────────────────────────────
   //
-  // Option B architecture: PIN is a screen-lock only — it never derives the DEK.
-  // The DEK is a random 32-byte key generated once per account and stored on the
-  // server (encrypted at rest). This means:
-  //   - Forgotten PIN: re-auth via email → fetch same DEK → all data intact.
-  //   - New device: auth → fetch DEK → set PIN → done.
-  //   - New account: PIN setup → no DEK anywhere → generate → upload.
+  // The app lock is the DEVICE's own security (biometrics / PIN / pattern) —
+  // there is no app-specific passcode. The DEK is a random 32-byte key
+  // generated once per account and stored on the server (encrypted at rest):
+  //   - New device: auth via email → fetch DEK → done.
+  //   - New account: no DEK anywhere → generate → upload.
   //
-  setupPin: async (pin: string) => {
+  setupDeviceSecurity: async () => {
     const { user } = get();
-    if (!user) throw new Error('setupPin called without a logged-in user');
+    if (!user) throw new Error('setupDeviceSecurity called without a logged-in user');
 
-    // 1. Hash PIN for local screen-lock verification (SHA-256, never sent to server).
-    //    Domain-separated so an attacker who gets this hash can't reuse it elsewhere.
-    const { digestStringAsync, CryptoDigestAlgorithm } = await import('expo-crypto');
-    const pinHash = await digestStringAsync(
-      CryptoDigestAlgorithm.SHA256,
-      `aku:pin:${user.id}:${pin}`,
-    );
-    try {
-      await SecureStore.setItemAsync(KEYS.PIN_HASH, pinHash);
-    } catch (err) {
-      console.error('[setupPin] Failed to save PIN hash:', err);
-      throw err;
-    }
-
-    // 2. Determine the DEK to use — in priority order:
-    //    a) Already in Keychain (same device — PIN reset or re-setup).
+    // Determine the DEK to use — in priority order:
+    //    a) Already in Keychain (same device).
     //    b) Available on server (returning user on new device).
     //    c) Generate fresh (brand-new account — DEK doesn't exist anywhere yet).
     const syncStore = useSyncStore.getState();
@@ -594,7 +568,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     try {
       dekHex = await fetchDek();
     } catch (err) {
-      console.warn('[setupPin] fetchDek failed (will generate fresh):', err);
+      console.warn('[setupDeviceSecurity] fetchDek failed (will generate fresh):', err);
     }
 
     if (dekHex) {
@@ -602,7 +576,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       try {
         await syncStore.setDek(decodeDEK(dekHex));
       } catch (err) {
-        console.error('[setupPin] Failed to save server DEK to Keychain:', err);
+        console.error('[setupDeviceSecurity] Failed to save server DEK to Keychain:', err);
         throw err;
       }
     } else {
@@ -611,70 +585,64 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       try {
         await syncStore.setDek(newDek);
       } catch (err) {
-        console.error('[setupPin] Failed to save generated DEK to Keychain:', err);
+        console.error('[setupDeviceSecurity] Failed to save generated DEK to Keychain:', err);
         throw err;
       }
       try {
         await uploadDek(encodeDEK(newDek));
       } catch (err) {
-        console.warn('[setupPin] uploadDek failed (non-fatal):', err);
+        console.warn('[setupDeviceSecurity] uploadDek failed (non-fatal):', err);
       }
     }
   },
 
-  // ── Verify PIN ────────────────────────────────────────────────────────
+  // ── Unlock with device auth ───────────────────────────────────────────
   //
-  // PIN verification is now purely a local screen-lock check.
-  // If valid, load the DEK from Keychain (set during setupPin) and sync.
+  // Shows the system sheet: Face ID / Touch ID / fingerprint first, falling
+  // back automatically to the device PIN / pattern / passcode.
+  // Devices with NO enrolled security unlock freely (data is still E2E
+  // encrypted server-side; a device without a lock screen is inherently open).
   //
-  verifyPin: async (pin: string) => {
-    const { user } = get();
-    const stored = await SecureStore.getItemAsync(KEYS.PIN_HASH);
-    if (!stored || !user) return false;
-
-    let isValid: boolean;
-
-    if (stored.startsWith('pin_')) {
-      // ── Legacy format (pre-Option-B): `pin_<btoa(pin)>_<timestamp>` ──
-      // Verify, then migrate the hash format in-place so next unlock uses SHA-256.
-      const parts = stored.split('_');
-      isValid = parts.length >= 2 && parts[1] === btoa(pin);
-      if (isValid) {
-        const { digestStringAsync, CryptoDigestAlgorithm } = await import('expo-crypto');
-        const newHash = await digestStringAsync(
-          CryptoDigestAlgorithm.SHA256,
-          `aku:pin:${user.id}:${pin}`,
-        );
-        void SecureStore.setItemAsync(KEYS.PIN_HASH, newHash).catch(() => {});
-      }
-    } else {
-      // ── New SHA-256 format ──
-      const { digestStringAsync, CryptoDigestAlgorithm } = await import('expo-crypto');
-      const pinHash = await digestStringAsync(
-        CryptoDigestAlgorithm.SHA256,
-        `aku:pin:${user.id}:${pin}`,
-      );
-      isValid = pinHash === stored;
-    }
-
-    if (isValid) {
-      // Load DEK from Keychain (stored there since setupPin). If missing
-      // (edge case: Keychain wiped by OS after app reinstall), the user will
-      // need to re-auth via email to restore it.
+  unlockWithDeviceAuth: async () => {
+    const finishUnlock = () => {
+      set({ isLocked: false });
+      // Load DEK from Keychain, then sync. If missing (Keychain wiped after
+      // reinstall), the user re-auths via email to restore it.
       void useSyncStore.getState().loadDek().then((loaded) => {
         if (loaded) {
           import('../lib/sync/engine').then(({ fullSync }) => fullSync()).catch(() => {});
         }
       });
+    };
+
+    try {
+      const hasHardware = await LocalAuthentication.hasHardwareAsync();
+      const isEnrolled  = hasHardware && (await LocalAuthentication.isEnrolledAsync());
+
+      if (!isEnrolled) {
+        // No device lock set up — open freely (policy: zero friction + nudge in UI)
+        finishUnlock();
+        return true;
+      }
+
+      const result = await LocalAuthentication.authenticateAsync({
+        promptMessage:         'Unlock Akù',
+        cancelLabel:           'Cancel',
+        disableDeviceFallback: false, // biometric → device PIN/pattern fallback
+      });
+
+      if (result.success) {
+        finishUnlock();
+        return true;
+      }
+      return false;
+    } catch {
+      // Hardware/OS error — never brick the app over the lock screen
+      finishUnlock();
+      return true;
     }
-
-    return isValid;
   },
 
-  // ── Reset PIN ─────────────────────────────────────────────────────────
-  resetPin: async () => {
-    await SecureStore.deleteItemAsync(KEYS.PIN_HASH);
-  },
 
   // ── Setup Biometric ───────────────────────────────────────────────────
   setupBiometric: async () => {
@@ -697,30 +665,6 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     await SecureStore.setItemAsync(KEYS.BIOMETRIC, JSON.stringify(config));
     set({ biometric: config });
     return true;
-  },
-
-  // ── Authenticate with Biometric ───────────────────────────────────────
-  authenticateBiometric: async () => {
-    const { biometric } = get();
-    if (!biometric.enabled) return false;
-
-    const result = await LocalAuthentication.authenticateAsync({
-      promptMessage:              'Unlock Akù',
-      fallbackLabel:              'Use passcode',
-      cancelLabel:                'Cancel',
-      disableDeviceFallback:      false,
-    });
-
-    if (result.success) {
-      set({ isLocked: false });
-      // Load DEK from SecureStore (set during PIN setup) then trigger sync.
-      void useSyncStore.getState().loadDek().then((loaded) => {
-        if (loaded) {
-          import('../lib/sync/engine').then(({ fullSync }) => fullSync()).catch(() => {});
-        }
-      });
-    }
-    return result.success;
   },
 
   // ── Disable Biometric ─────────────────────────────────────────────────

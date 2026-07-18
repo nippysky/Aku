@@ -17,16 +17,20 @@
  *     • Over-budget alert  · Budget warning (>80 %)  · Streak celebration
  *     • Weekly spend spike / drop  · Top-category callout  · Goal nudge
  *
- * ── Tier 3 · Smart delivery timing ──────────────────────────────────────────
- *   Runs every hour at :00.
- *   Determines which IANA timezones are currently showing 19:xx (daily) or
- *   Sunday 18:xx (weekly) and notifies only those users.
+ * ── Tier 3 · Hourly engagement engine ───────────────────────────────────────
+ *   Runs every hour at :00. For each user's local timezone:
+ *     • 09:00 → 20:00  — one creative, hour-themed nudge per hour
+ *       (the 19:00 slot delivers the fully personalised Tier 1/2 message)
+ *     • 21:00          — bedtime wrap-up: "hope you logged all your expenses
+ *       and income today" 🌙
+ *     • Sunday 18:00   — weekly summary
  *   DST-safe: Intl.DateTimeFormat tracks DST automatically.
- *   Users with no stored timezone fall back to UTC 19:00 / Sunday 18:00.
+ *   Users with no stored timezone fall back to UTC hours.
  *
  * Deduplication:
  *   notification_log (unique userId + type + sentDate) prevents double-sends
- *   across restarts or concurrent workers.
+ *   across restarts or concurrent workers. Hourly slots use type
+ *   'hourly_<hour>' so each slot fires at most once per user per day.
  *
  * Scale: paginated queries, Expo batches of 100, O(PAGE_SIZE) RAM.
  * Graceful shutdown: SIGTERM/SIGINT drains current batch then exits.
@@ -91,6 +95,7 @@ interface UserRow {
   hasActiveGoals:      boolean | null;
   goalsOnTrack:        number | null;
   totalGoalsCount:     number | null;
+  savingsRatePct:      number | null;
   notifPrefsJson:      string | null;
 }
 
@@ -100,6 +105,12 @@ const PAGE_SIZE      = 500;
 const DORMANT_HOURS  = 7 * 24;
 const LAPSING_HOURS  = 3 * 24;
 const NEW_USER_DAYS  = 3;
+
+// ── Hourly engagement window (user-local time) ───────────────────────────────
+const HOURLY_START = 9;   // first nudge of the day
+const HOURLY_END   = 21;  // bedtime wrap-up message
+const INSIGHT_HOUR = 19;  // the fully personalised Tier 1/2 slot
+const WEEKLY_HOUR  = 18;  // Sunday weekly summary
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -413,6 +424,17 @@ function pickWeeklyMessage(u: UserRow, prefs: NotifPrefs): PushPayload | null {
     return { title, body, channelId: 'digest', data: baseData };
   }
 
+  // Savings-rate milestone recap
+  if (u.savingsRatePct != null && u.savingsRatePct >= 20) {
+    const pct = Math.round(u.savingsRatePct);
+    const pool: Array<{ title: string; body: string }> = [
+      { title: `Saving ${pct}% of your income 🏆`, body: 'You are beating the 20% golden rule this month. See your weekly summary.' },
+      { title: `${pct}% saved this month 💪`,      body: 'Elite discipline. Tap for your weekly review and keep the streak alive.' },
+    ];
+    const { title, body } = pool[rotateIdx(u.userId, pool.length, 55)];
+    return { title, body, channelId: 'digest', data: baseData };
+  }
+
   // Top-category weekly
   if (u.topCategory) {
     const pool: Array<{ title: string; body: string }> = [
@@ -446,15 +468,187 @@ function pickWeeklyMessage(u: UserRow, prefs: NotifPrefs): PushPayload | null {
   return { title, body, channelId: 'digest', data: baseData };
 }
 
+// ─── Hourly engagement engine — creative, hour-themed nudges ─────────────────
+//
+// One nudge per hour from 09:00 to 20:00 local, plus a 21:00 bedtime wrap-up.
+// Each slot has its own themed pool; variants rotate per user per day.
+// A few slots weave in analytical insights (budget health, streaks, top
+// category) so the day feels personal, not robotic.
+// All hourly slots are gated by the dailyDigest preference.
+
+const HOURLY_POOLS: Record<number, Array<{ title: string; body: string }>> = {
+  9: [
+    { title: 'Good morning, money boss ☀️',   body: 'A fresh day, a clean slate. Log your first expense or income as it happens.' },
+    { title: 'Rise and track ☕',              body: 'Bought breakfast? Paid for transport? 10 seconds to log it while it is fresh.' },
+    { title: 'Start the day sharp 📋',         body: 'People who log in the morning track 2× more accurately. Be that person today.' },
+    { title: 'New day, new numbers ☀️',        body: 'Yesterday is history. Today\'s money story starts with your first log.' },
+  ],
+  10: [
+    { title: 'Mid-morning money check 🕙',     body: 'Anything spent since you woke up? Capture it before the day gets busy.' },
+    { title: 'Quick one 👀',                   body: 'That small purchase this morning — logged it yet? Small leaks sink big ships.' },
+    { title: 'Your ledger misses you 📒',      body: 'A 10-second log now saves a 10-minute memory struggle tonight.' },
+  ],
+  11: [
+    { title: 'Almost lunchtime 🕚',            body: 'Before the lunch rush: is your morning spending logged and accounted for?' },
+    { title: 'Snack money counts too 🍩',      body: 'The little buys are the sneaky ones. Log them and stay in control.' },
+    { title: 'Money moves? Log moves 📲',      body: 'Every naira tracked is a naira understood. Quick check-in before noon.' },
+  ],
+  12: [
+    { title: 'Lunch o\'clock 🍛',              body: 'Grabbing lunch? Log it the moment you pay — done before your food arrives.' },
+    { title: 'Midday money minute 🕛',         body: 'Half the day gone. Take one minute to make sure your morning is fully logged.' },
+    { title: 'Fuel up, log up 🍽️',            body: 'Lunch, drinks, that extra side — capture it all while the receipt is warm.' },
+  ],
+  13: [
+    { title: 'Post-lunch check-in ✅',         body: 'Lunch logged? Income landed today? Keep your picture complete.' },
+    { title: 'The 1pm audit 🕐',               body: 'A quick glance at today\'s spending now beats a shock at month-end.' },
+    { title: 'Stay on top of it 💼',           body: 'Money moves fast in the afternoon. Log as you go and nothing escapes.' },
+  ],
+  14: [
+    { title: 'Afternoon pulse 🕑',             body: 'How is today tracking against your budget? One tap to find out.' },
+    { title: 'Budget vibes check 🎯',          body: 'You set budgets for a reason. See how today is shaping up so far.' },
+    { title: 'Keep the streak alive 🔥',       body: 'Consistent logging is the single best money habit. Add anything new.' },
+  ],
+  15: [
+    { title: '3pm — still in control? 🕒',     body: 'Afternoon spending sneaks up quietly. Log anything new since lunch.' },
+    { title: 'Small buys, big picture 🧩',     body: 'Airtime, snacks, transport — the small stuff shapes the month. Log it.' },
+    { title: 'Your money, your rules 👑',      body: 'Owning your finances starts with knowing them. Quick log check.' },
+  ],
+  16: [
+    { title: 'The 4 o\'clock look 👁️',        body: 'Take a 20-second look at today\'s numbers. Awareness is the whole game.' },
+    { title: 'Before the evening rush 🕓',     body: 'Log your afternoon spending now — evenings have a way of getting busy.' },
+    { title: 'Money clarity hour 💡',          body: 'A quick log now means tonight\'s picture is already complete.' },
+  ],
+  17: [
+    { title: 'Heading home? 🚗',               body: 'Transport fare, fuel, that quick stop at the shop — log it on the go.' },
+    { title: 'End-of-workday wrap 🕔',         body: 'Work is winding down. Give your money 30 seconds before the evening starts.' },
+    { title: 'The commute log 📱',             body: 'Perfect time to log the day so far — you will thank yourself at 9pm.' },
+  ],
+  18: [
+    { title: 'Dinner plans? 🍲',               body: 'Whether you are cooking or ordering, log the spend while it is happening.' },
+    { title: 'Evening check-in 🌆',            body: 'The day is winding down. Is everything you spent and earned today logged?' },
+    { title: '6pm money moment 🕕',            body: 'A complete day of logs is a beautiful thing. You are almost there.' },
+  ],
+  // 19:00 is the personalised insight slot — handled by pickDailyMessage()
+  20: [
+    { title: 'The evening review 🌙',          body: 'Scroll back through today. Any expense or income still unlogged? Now is the time.' },
+    { title: 'Wind-down window 🛋️',           body: 'Before you settle in for the night — quick sweep for missed expenses.' },
+    { title: 'Almost bedtime 📖',              body: 'Close out the day\'s money story. A complete log today = clear insights tomorrow.' },
+  ],
+};
+
+const BEDTIME_POOL: Array<{ title: string; body: string }> = [
+  { title: 'Before you sleep 🌙',           body: 'Hope you have logged all your expenses and income for today. Sleep well — your finances are in order.' },
+  { title: 'One last thing 😴',             body: 'Have you logged everything you spent and earned today? 30 seconds now, total clarity tomorrow.' },
+  { title: 'Goodnight, money boss 🌙',      body: 'Last call to log today\'s expenses and income. End the day with a complete picture.' },
+  { title: 'Sleep on a clean ledger 🛏️',   body: 'Before the lights go out — make sure every expense and income made it into Akù today.' },
+];
+
+/** Bedtime wrap-up — the final message of the day. */
+function pickBedtimeMessage(u: UserRow, prefs: NotifPrefs): PushPayload | null {
+  if (!prefs.dailyDigest) return null;
+  const { title, body } = BEDTIME_POOL[rotateIdx(u.userId, BEDTIME_POOL.length, 210)];
+  return {
+    title,
+    body,
+    channelId: 'digest',
+    data: { type: 'bedtime_reminder', screen: 'expenses', action: 'log' },
+  };
+}
+
+/**
+ * Creative hourly nudge with light analytical seasoning:
+ * a few slots surface real insights (budget, streak, top category) when the
+ * data supports it; otherwise the hour-themed creative pool rotates daily.
+ */
+function pickHourlyMessage(u: UserRow, hour: number, prefs: NotifPrefs): PushPayload | null {
+  if (!prefs.dailyDigest) return null;
+
+  const baseData = { type: 'hourly_reminder', screen: 'expenses', action: 'log' };
+
+  // ── Analytical seasoning — specific hours, only when the data is real ──────
+  if (hour === 10 && prefs.budgetAlerts && u.hasOverBudget) {
+    return {
+      title:     'Heads up — a budget is maxed out ⚠️',
+      body:      'You have gone over one of your budgets. Worth a look before you spend more today.',
+      channelId: 'digest',
+      data:      { ...baseData, screen: 'budgets' },
+    };
+  }
+
+  if (hour === 11 && u.spendingStreak != null && u.spendingStreak >= 3) {
+    return {
+      title:     `${u.spendingStreak}-day logging streak 🔥`,
+      body:      'Keep it rolling — log today\'s expenses and make it one more.',
+      channelId: 'digest',
+      data:      baseData,
+    };
+  }
+
+  if (hour === 13 && u.savingsRatePct != null) {
+    if (u.savingsRatePct >= 20) {
+      return {
+        title:     `You're keeping ${Math.round(u.savingsRatePct)}% of your income 🏆`,
+        body:      'That is elite-level saving this month. See the full picture in Analytics.',
+        channelId: 'digest',
+        data:      { ...baseData, screen: 'home' },
+      };
+    }
+    if (u.savingsRatePct < 0) {
+      return {
+        title:     'Spending has passed income this month 📉',
+        body:      'You have spent more than you earned so far. A quick review now can turn the month around.',
+        channelId: 'digest',
+        data:      { ...baseData, screen: 'expenses' },
+      };
+    }
+  }
+
+  if (
+    hour === 14 &&
+    prefs.budgetAlerts &&
+    u.budgetUtilization != null &&
+    u.budgetUtilization >= 0.8
+  ) {
+    const pct = Math.round(u.budgetUtilization * 100);
+    return {
+      title:     `Budget check: ${pct}% used 🟡`,
+      body:      'The afternoon is when budgets quietly slip. See what is left before dinner.',
+      channelId: 'digest',
+      data:      { ...baseData, screen: 'budgets' },
+    };
+  }
+
+  if (hour === 16 && u.topCategory && u.monthlyExpenseCount != null && u.monthlyExpenseCount >= 5) {
+    return {
+      title:     `${u.topCategory} is leading this month 💡`,
+      body:      'It is taking the biggest slice of your spending. Tap to see the breakdown.',
+      channelId: 'digest',
+      data:      baseData,
+    };
+  }
+
+  // ── Creative hour-themed rotation ──────────────────────────────────────────
+  const pool = HOURLY_POOLS[hour];
+  if (!pool || pool.length === 0) return null;
+  const { title, body } = pool[rotateIdx(u.userId, pool.length, hour * 11)];
+  return { title, body, channelId: 'digest', data: baseData };
+}
+
 // ─── Core personalised send ───────────────────────────────────────────────────
+
+type MessagePicker = (u: UserRow, now: Date, prefs: NotifPrefs) => PushPayload | null;
 
 /**
  * Query eligible users (matching timezones, not yet notified today),
  * pick a personalised message per user, group by identical variant,
  * send each variant as one Expo batch, then log to notification_log.
+ *
+ * `notifType` doubles as the dedup key in notification_log — one send per
+ * user per type per calendar day (hourly slots use 'hourly_<hour>').
  */
 async function runPersonalisedJob(
-  notifType:       'daily_reminder' | 'weekly_summary',
+  notifType:       string,
+  picker:          MessagePicker,
   activeTimezones: Set<string>,
   includeNullTz:   boolean,
   now:             Date,
@@ -497,6 +691,7 @@ async function runPersonalisedJob(
         hasActiveGoals:      userInsights.hasActiveGoals,
         goalsOnTrack:        userInsights.goalsOnTrack,
         totalGoalsCount:     userInsights.totalGoalsCount,
+        savingsRatePct:      userInsights.savingsRatePct,
         notifPrefsJson:      userInsights.notifPrefsJson,
       })
       .from(pushTokens)
@@ -557,12 +752,11 @@ async function runPersonalisedJob(
           hasActiveGoals:      row.hasActiveGoals,
           goalsOnTrack:        row.goalsOnTrack,
           totalGoalsCount:     row.totalGoalsCount,
+          savingsRatePct:      row.savingsRatePct,
           notifPrefsJson:      row.notifPrefsJson ?? null,
         };
 
-        const payload = notifType === 'daily_reminder'
-          ? pickDailyMessage(userRow, now, prefs)
-          : pickWeeklyMessage(userRow, prefs);
+        const payload = picker(userRow, now, prefs);
 
         // null = user opted out of this specific message category
         if (!payload) continue;
@@ -610,12 +804,16 @@ async function runPersonalisedJob(
   console.log(`[worker] ${notifType} complete — ${sent} device(s) notified.`);
 }
 
-// ─── Hourly check — Tier 3 smart timing ──────────────────────────────────────
+// ─── Hourly check — Tier 3 engagement engine ─────────────────────────────────
 
 /**
  * Fired at the top of every hour.
- * Determines which timezones are showing 19:xx (daily) or Sunday 18:xx (weekly)
- * and runs the personalised job for those users.
+ * Groups stored timezones by their current local hour, then:
+ *   • local 09:00–20:00 → hour-themed creative nudge
+ *     (19:00 = fully personalised Tier 1/2 daily message)
+ *   • local 21:00       → bedtime wrap-up
+ *   • Sunday 18:00      → weekly summary (in addition to the 18:00 slot)
+ * Users with no stored timezone are treated as UTC.
  */
 async function hourlyCheck(): Promise<void> {
   const now     = new Date();
@@ -623,27 +821,52 @@ async function hourlyCheck(): Promise<void> {
 
   const storedTimezones = await allStoredTimezones();
 
-  // ── Daily reminder: find TZs where local hour = 19 ──────────────────────
-  const dailyTzs = new Set<string>(
-    storedTimezones.filter((tz) => localHourIn(tz, now) === 19),
-  );
-  const includeNullForDaily = utcHour === 19;
-
-  if (dailyTzs.size > 0 || includeNullForDaily) {
-    await runPersonalisedJob('daily_reminder', dailyTzs, includeNullForDaily, now);
+  // Group timezones by their current local hour (DST-safe via Intl)
+  const tzByHour = new Map<number, Set<string>>();
+  for (const tz of storedTimezones) {
+    const h = localHourIn(tz, now);
+    if (h < 0) continue;
+    if (!tzByHour.has(h)) tzByHour.set(h, new Set());
+    tzByHour.get(h)!.add(tz);
   }
 
-  // ── Weekly summary: find TZs where it's Sunday AND local hour = 18 ──────
+  // ── Hourly engagement slots: 09:00 … 21:00 local ─────────────────────────
+  for (let hour = HOURLY_START; hour <= HOURLY_END; hour++) {
+    if (shutdownRequested) return;
+
+    const tzs         = tzByHour.get(hour) ?? new Set<string>();
+    const includeNull = utcHour === hour;
+    if (tzs.size === 0 && !includeNull) continue;
+
+    const slotType =
+      hour === HOURLY_END   ? 'bedtime_reminder' :
+      hour === INSIGHT_HOUR ? 'daily_reminder'   :
+      `hourly_${hour}`;
+
+    const picker: MessagePicker =
+      hour === HOURLY_END   ? (u, _n, prefs) => pickBedtimeMessage(u, prefs) :
+      hour === INSIGHT_HOUR ? pickDailyMessage :
+      (u, _n, prefs) => pickHourlyMessage(u, hour, prefs);
+
+    await runPersonalisedJob(slotType, picker, tzs, includeNull, now);
+  }
+
+  // ── Weekly summary: Sunday, local 18:00 ──────────────────────────────────
   const weeklyTzs = new Set<string>(
-    storedTimezones.filter(
-      (tz) => localWeekdayIn(tz, now) === 'Sun' && localHourIn(tz, now) === 18,
+    [...(tzByHour.get(WEEKLY_HOUR) ?? [])].filter(
+      (tz) => localWeekdayIn(tz, now) === 'Sun',
     ),
   );
-  const isUtcSunday         = now.getUTCDay() === 0;
-  const includeNullForWeekly = isUtcSunday && utcHour === 18;
+  const includeNullForWeekly = now.getUTCDay() === 0 && utcHour === WEEKLY_HOUR;
 
   if (weeklyTzs.size > 0 || includeNullForWeekly) {
-    await runPersonalisedJob('weekly_summary', weeklyTzs, includeNullForWeekly, now);
+    await runPersonalisedJob(
+      'weekly_summary',
+      (u, _n, prefs) => pickWeeklyMessage(u, prefs),
+      weeklyTzs,
+      includeNullForWeekly,
+      now,
+    );
   }
 }
 
@@ -690,7 +913,7 @@ process.on('SIGINT', () => {
 // ─── Start ────────────────────────────────────────────────────────────────────
 
 console.log('[worker] Akù notification worker starting…');
-console.log('[worker] Mode: hourly timezone-aware · Tier 1 (behavioural) + Tier 2 (insights) + Tier 3 (smart timing)');
+console.log('[worker] Mode: hourly engagement engine · 09:00–21:00 local · Tier 1 (behavioural) + Tier 2 (insights) + bedtime wrap-up');
 
 scheduleNextHour();
 

@@ -11,7 +11,7 @@ import { eq, and, lte } from 'drizzle-orm';
 import { getDatabase, schema } from '../lib/database/client';
 import { format, addDays, addWeeks, addMonths, addYears, parseISO } from 'date-fns';
 import { generateUUID } from '../lib/uuid';
-import { triggerPush } from '../lib/sync/trigger';
+import { triggerPush, triggerDelete } from '../lib/sync/trigger';
 import type { ExpenseCategory } from '../types';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -184,7 +184,7 @@ export const useRecurringExpensesStore = create<RecurringExpensesState>()((set, 
     const db = getDatabase();
     await db.delete(schema.recurringExpenses).where(eq(schema.recurringExpenses.id, id));
     set((s) => ({ items: s.items.filter((i) => i.id !== id) }));
-    triggerPush();
+    triggerDelete('recurring_expense', id);
   },
 
   toggleActive: async (id) => {
@@ -238,12 +238,10 @@ export const useRecurringExpensesStore = create<RecurringExpensesState>()((set, 
       await db.insert(schema.expenses).values({
         id:          expenseId,
         userId,
-        householdId: null,
         amount:      item.amount,
         category:    item.category,
         description: item.name,
         date:        item.nextDate,  // log on the due date
-        isShared:    false,
         createdAt:   now,
         updatedAt:   now,
       });

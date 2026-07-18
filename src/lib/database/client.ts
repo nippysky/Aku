@@ -38,7 +38,6 @@ const CREATE_TABLES_SQL = `
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     email TEXT NOT NULL UNIQUE,
-    household_id TEXT,
     avatar_url TEXT,
     avatar_data TEXT,
     pin_hash TEXT,
@@ -47,33 +46,15 @@ const CREATE_TABLES_SQL = `
     updated_at TEXT NOT NULL
   );
 
-  CREATE TABLE IF NOT EXISTS households (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    owner_id TEXT NOT NULL,
-    invite_code TEXT,
-    created_at TEXT NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS household_members (
-    id TEXT PRIMARY KEY,
-    household_id TEXT NOT NULL,
-    user_id TEXT NOT NULL,
-    role TEXT NOT NULL DEFAULT 'member',
-    joined_at TEXT NOT NULL
-  );
-
   CREATE TABLE IF NOT EXISTS bills (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
-    household_id TEXT,
     name TEXT NOT NULL,
     amount INTEGER NOT NULL,
     category TEXT NOT NULL,
     due_date TEXT NOT NULL,
     frequency TEXT NOT NULL,
     notes TEXT,
-    is_shared INTEGER DEFAULT 0,
     is_paid INTEGER DEFAULT 0,
     paid_at TEXT,
     notify_30 INTEGER DEFAULT 0,
@@ -89,12 +70,10 @@ const CREATE_TABLES_SQL = `
   CREATE TABLE IF NOT EXISTS expenses (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
-    household_id TEXT,
     amount INTEGER NOT NULL,
     category TEXT NOT NULL,
     description TEXT,
     date TEXT NOT NULL,
-    is_shared INTEGER DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
@@ -102,11 +81,9 @@ const CREATE_TABLES_SQL = `
   CREATE TABLE IF NOT EXISTS budgets (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
-    household_id TEXT,
     category TEXT NOT NULL,
     amount INTEGER NOT NULL,
     period TEXT NOT NULL,
-    is_shared INTEGER DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
@@ -114,7 +91,6 @@ const CREATE_TABLES_SQL = `
   CREATE TABLE IF NOT EXISTS goals (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
-    household_id TEXT,
     name TEXT NOT NULL,
     target_amount INTEGER NOT NULL,
     saved_amount INTEGER NOT NULL DEFAULT 0,
@@ -122,7 +98,9 @@ const CREATE_TABLES_SQL = `
     notes TEXT,
     emoji TEXT,
     color TEXT,
-    is_shared INTEGER DEFAULT 0,
+    bank_name TEXT,
+    account_name TEXT,
+    account_number TEXT,
     is_completed INTEGER DEFAULT 0,
     completed_at TEXT,
     created_at TEXT NOT NULL,
@@ -149,34 +127,6 @@ const CREATE_TABLES_SQL = `
     is_read INTEGER DEFAULT 0,
     scheduled_at TEXT,
     created_at TEXT NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS circle_settings (
-    id TEXT PRIMARY KEY,
-    emoji TEXT,
-    target_amount INTEGER,
-    description TEXT,
-    frequency TEXT,
-    per_member_amount INTEGER,
-    contribution_type TEXT DEFAULT 'equal',
-    deadline TEXT,
-    account_name TEXT,
-    account_number TEXT,
-    bank_name TEXT,
-    notes TEXT,
-    updated_at TEXT NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS circle_contributions (
-    id TEXT PRIMARY KEY,
-    circle_id TEXT NOT NULL,
-    user_id TEXT NOT NULL,
-    amount INTEGER NOT NULL,
-    note TEXT,
-    status TEXT NOT NULL DEFAULT 'pending',
-    created_at TEXT NOT NULL,
-    verified_at TEXT,
-    verified_by TEXT
   );
 
   CREATE TABLE IF NOT EXISTS app_state (
@@ -232,12 +182,7 @@ const CREATE_TABLES_SQL = `
   CREATE INDEX IF NOT EXISTS idx_recurring_income_user ON recurring_income(user_id);
   CREATE INDEX IF NOT EXISTS idx_recurring_income_next ON recurring_income(next_date);
 
-  CREATE INDEX IF NOT EXISTS idx_circle_contributions_circle ON circle_contributions(circle_id);
-  CREATE INDEX IF NOT EXISTS idx_circle_contributions_user ON circle_contributions(user_id);
-  CREATE INDEX IF NOT EXISTS idx_circle_contributions_status ON circle_contributions(status);
-
   CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
-  CREATE INDEX IF NOT EXISTS idx_users_household ON users(household_id);
   CREATE INDEX IF NOT EXISTS idx_bills_user ON bills(user_id);
   CREATE INDEX IF NOT EXISTS idx_bills_due ON bills(due_date);
   CREATE INDEX IF NOT EXISTS idx_expenses_user ON expenses(user_id);
@@ -253,17 +198,33 @@ const CREATE_TABLES_SQL = `
 // We catch "duplicate column name" errors and continue.
 
 const MIGRATIONS_SQL = [
-  "ALTER TABLE circle_settings ADD COLUMN emoji TEXT",
-  "ALTER TABLE circle_settings ADD COLUMN frequency TEXT",
-  "ALTER TABLE circle_settings ADD COLUMN per_member_amount INTEGER",
-  "ALTER TABLE circle_settings ADD COLUMN contribution_type TEXT DEFAULT 'equal'",
-  "ALTER TABLE circle_settings ADD COLUMN deadline TEXT",
-  "ALTER TABLE households ADD COLUMN invite_code TEXT",
   // avatar_data: base64 profile photo stored locally — no CDN dependency
   "ALTER TABLE users ADD COLUMN avatar_data TEXT",
   // recurring income → goal auto-contribute
   "ALTER TABLE recurring_income ADD COLUMN goal_id TEXT",
   "ALTER TABLE recurring_income ADD COLUMN allocation_pct INTEGER DEFAULT 0",
+  // goal destination account details
+  "ALTER TABLE goals ADD COLUMN bank_name TEXT",
+  "ALTER TABLE goals ADD COLUMN account_name TEXT",
+  "ALTER TABLE goals ADD COLUMN account_number TEXT",
+  // ── Pools/Circles feature removed — clean up on existing installs ──
+  "DROP TABLE IF EXISTS circle_contributions",
+  "DROP TABLE IF EXISTS circle_settings",
+  "DROP TABLE IF EXISTS household_members",
+  "DROP TABLE IF EXISTS households",
+  "DROP INDEX IF EXISTS idx_users_household",
+  "DROP INDEX IF EXISTS idx_bills_household",
+  "DROP INDEX IF EXISTS idx_expenses_household",
+  "DROP INDEX IF EXISTS idx_goals_household",
+  "ALTER TABLE users DROP COLUMN household_id",
+  "ALTER TABLE bills DROP COLUMN household_id",
+  "ALTER TABLE bills DROP COLUMN is_shared",
+  "ALTER TABLE expenses DROP COLUMN household_id",
+  "ALTER TABLE expenses DROP COLUMN is_shared",
+  "ALTER TABLE budgets DROP COLUMN household_id",
+  "ALTER TABLE budgets DROP COLUMN is_shared",
+  "ALTER TABLE goals DROP COLUMN household_id",
+  "ALTER TABLE goals DROP COLUMN is_shared",
 ];
 
 export async function initializeDatabase(): Promise<void> {

@@ -46,7 +46,9 @@ module.exports = {
       'android.permission.VIBRATE',
       'android.permission.POST_NOTIFICATIONS',
       'android.permission.CAMERA',
-      'android.permission.SCHEDULE_EXACT_ALARM',
+      // NOTE: SCHEDULE_EXACT_ALARM deliberately NOT requested — Google Play
+      // restricts it to alarm/calendar apps. Inexact scheduling is fine for
+      // bill reminders and costs nothing in review.
     ],
     predictiveBackGestureEnabled: false,
     // "pan" lets react-native-keyboard-controller own keyboard avoidance.

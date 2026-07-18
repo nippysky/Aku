@@ -53,7 +53,7 @@ const FAQ_DATA: FAQCategory[] = [
     items: [
       {
         q: "What is Aku?",
-        a: "Aku is a personal finance app that helps you track expenses, manage bills, set savings goals, and collaborate with people in your Pool. Everything syncs securely across your devices.",
+        a: "Aku is a personal finance app that helps you track expenses, manage bills, set savings goals, and understand your money. Everything syncs securely across your devices.",
       },
       {
         q: "How do I log my first expense?",
@@ -61,7 +61,7 @@ const FAQ_DATA: FAQCategory[] = [
       },
       {
         q: "Is my data secure?",
-        a: "Yes. All your financial data is encrypted end-to-end using a unique key that only you hold. Even Aku servers cannot read your data. Your key is protected by your 6-digit passcode.",
+        a: "Yes. All your financial data is encrypted end-to-end using a unique key that only you hold. Even Aku servers cannot read your data. Your key is protected by your device security and stored encrypted on our servers.",
       },
       {
         q: "How does sync work?",
@@ -110,46 +110,20 @@ const FAQ_DATA: FAQCategory[] = [
     ],
   },
   {
-    title: "Pools (Shared Finance)",
-    emoji: "👥",
-    items: [
-      {
-        q: "What is a Pool?",
-        a: "A Pool is a shared group of people (family, housemates, colleagues) who contribute money together. You can log contributions, track who has paid, and see the group leaderboard.",
-      },
-      {
-        q: "How do I create a Pool?",
-        a: "Go to the Profile / More tab and tap Create a Pool. Give it a name and emoji, then share the 8-character invite code with people you want to invite.",
-      },
-      {
-        q: "How does someone join my Pool?",
-        a: "Share the Pool's 8-character invite code. They go to More > Join a Pool, enter the code, preview the Pool, then confirm to join. You will get a notification when they join.",
-      },
-      {
-        q: "Can I remove someone from my Pool?",
-        a: "Only the Pool owner (admin) can remove members. Go to the Pool screen, tap Settings, then tap the member's name and choose Remove. They will receive a notification.",
-      },
-      {
-        q: "Who can see Pool contributions?",
-        a: "All members of the Pool can see the contributions leaderboard and the contribution history. Financial data outside the Pool (your personal expenses, income, budgets) is always private.",
-      },
-    ],
-  },
-  {
-    title: "Passcode & Security",
+    title: "Security & App Lock",
     emoji: "🔒",
     items: [
       {
-        q: "What if I forget my passcode?",
-        a: "On the passcode screen tap Forgot passcode. You will receive a verification email — once confirmed you can set a new passcode. Your existing data is preserved because your encryption key is stored securely on the server.",
+        q: "How does Aku lock the app?",
+        a: "Aku uses your device's own security — Face ID, fingerprint, or your phone's PIN/pattern as backup. There is no separate app passcode to create or remember. The app locks on launch and after 5 minutes in the background.",
       },
       {
-        q: "How do I change my passcode?",
-        a: "Go to More > Change Passcode. You will need to enter your current passcode first, then set a new one.",
+        q: "What if my phone has no screen lock?",
+        a: "Aku will still open, and your data remains encrypted end-to-end on our servers. For local protection we recommend adding a screen lock in your device settings — Aku will then lock automatically too.",
       },
       {
-        q: "Can I use Face ID or fingerprint instead?",
-        a: "Yes. Go to More, find the Security section and enable Biometric unlock. Once enabled, you can unlock the app with your face or fingerprint instead of typing your passcode every time.",
+        q: "Can I turn the app lock off?",
+        a: "Yes. Go to More > Security and toggle App Lock off. Your data stays encrypted either way.",
       },
     ],
   },
@@ -159,11 +133,11 @@ const FAQ_DATA: FAQCategory[] = [
     items: [
       {
         q: "What kinds of notifications does Aku send?",
-        a: "Aku sends bill due date reminders, budget threshold alerts, savings goal milestones, Pool activity notifications (new member, contribution logged), and personalised financial insights.",
+        a: "Aku sends bill due date reminders, budget threshold alerts, savings goal milestones, hourly logging nudges through the day, and personalised financial insights.",
       },
       {
         q: "How do I turn off certain notifications?",
-        a: "Go to More > Notification Settings. You can toggle each category on or off independently — bills, budgets, goals, and Pool events each have their own switch.",
+        a: "Go to More > Notification Settings. You can toggle each category on or off independently — bills, budgets, goals, and daily reminders each have their own switch.",
       },
     ],
   },
@@ -191,7 +165,7 @@ const FAQ_DATA: FAQCategory[] = [
       },
       {
         q: "What happens if I sign out?",
-        a: "Signing out removes your session from this device. Your data stays safely on the server. When you sign back in with the same email and set your passcode, everything is restored.",
+        a: "Signing out removes your session from this device. Your data stays safely on the server. When you sign back in with the same email, everything is restored.",
       },
       {
         q: "Can I delete my account?",

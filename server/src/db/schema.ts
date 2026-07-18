@@ -108,46 +108,6 @@ export const pushTokens = pgTable('push_tokens', {
 // Deduplication log for server-sent push notifications.
 // Prevents the worker from re-sending the same type on the same calendar day.
 
-// ─── Pools ───────────────────────────────────────────────────────────────────
-// Lightweight server-side registry for contribution pools.
-// Stores only non-sensitive metadata (name, emoji, invite code) so that
-// cross-device joins work without exposing encrypted financial data.
-// The full pool data (contributions, settings) stays encrypted in sync_records.
-
-export const pools = pgTable('pools', {
-  id:           text('id').primaryKey(),                // matches client SQLite households.id
-  name:         text('name').notNull(),
-  emoji:        text('emoji').notNull().default('💰'),
-  inviteCode:   text('invite_code').notNull().unique(),  // 8-char alphanumeric
-  ownerId:      text('owner_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  /**
-   * JSON blob of non-sensitive settings set by the admin.
-   * Synced to all members on their next syncFromServer() call.
-   * Keys: frequency, targetAmount, perMemberAmount, deadline, description,
-   *       accountName, accountNumber, bankName, notes
-   */
-  settingsJson: text('settings_json'),
-  createdAt:    timestamp('created_at').notNull().defaultNow(),
-}, (t) => [
-  index('idx_pools_owner').on(t.ownerId),
-]);
-
-export const poolMembers = pgTable('pool_members', {
-  id:       text('id').primaryKey(),
-  poolId: text('pool_id').notNull().references(() => pools.id, { onDelete: 'cascade' }),
-  userId:   text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  role:     text('role').notNull().default('member'),  // 'owner' | 'member'
-  joinedAt: timestamp('joined_at').notNull().defaultNow(),
-}, (t) => [
-  unique('uq_pool_member').on(t.poolId, t.userId),
-  index('idx_pool_members_pool').on(t.poolId),
-  index('idx_pool_members_user').on(t.userId),
-]);
-
-// ─── Notification Log ─────────────────────────────────────────────────────────
-// Deduplication log for server-sent push notifications.
-// Prevents the worker from re-sending the same type on the same calendar day.
-
 export const notificationLog = pgTable('notification_log', {
   id:       text('id').primaryKey(),              // UUID v4
   userId:   text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
@@ -194,6 +154,10 @@ export const userInsights = pgTable('user_insights', {
   /** Goals pacing on track (actual saved % ≥ 80% of expected % given deadline). */
   goalsOnTrack:        integer('goals_on_track').notNull().default(0),
   hasActiveGoals:      boolean('has_active_goals').notNull().default(false),
+
+  /** % of this month's income kept: (income − expenses) / income × 100.
+   *  null = no income logged this month. Powers milestone notifications. */
+  savingsRatePct:      real('savings_rate_pct'),
 
   /**
    * JSON blob of client notification preferences, stored as-sent from the device.

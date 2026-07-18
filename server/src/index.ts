@@ -24,7 +24,6 @@ import authRouter          from './routes/auth.js';
 import userRouter          from './routes/user.js';
 import syncRouter          from './routes/sync.js';
 import notificationsRouter from './routes/notifications.js';
-import poolsRouter         from './routes/pools.js';
 
 import {
   globalRateLimit,
@@ -78,7 +77,6 @@ app.route('/api/auth',          authRouter);
 app.route('/api/user',          userRouter);
 app.route('/api/sync',          syncRouter);
 app.route('/api/notifications', notificationsRouter);
-app.route('/api/pools',         poolsRouter);
 
 // ── 404 ───────────────────────────────────────────────────────────────────────
 

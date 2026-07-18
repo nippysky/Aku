@@ -8,7 +8,7 @@ import type {
   ExpenseSummary, ExpenseCategory,
 } from '../types';
 import { useBudgetsStore } from './budgets.store';
-import { triggerPush } from '../lib/sync/trigger';
+import { triggerPush, triggerDelete } from '../lib/sync/trigger';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
@@ -16,12 +16,10 @@ function fromDb(row: typeof schema.expenses.$inferSelect): Expense {
   return {
     id:          row.id,
     userId:      row.userId,
-    householdId: row.householdId ?? null,
     amount:      row.amount,
     category:    row.category as ExpenseCategory,
     description: row.description ?? null,
     date:        row.date,
-    isShared:    Boolean(row.isShared),
     createdAt:   row.createdAt,
     updatedAt:   row.updatedAt,
   };
@@ -144,12 +142,10 @@ export const useExpensesStore = create<ExpensesState>()((set, get) => ({
       await db.insert(schema.expenses).values({
         id,
         userId,
-        householdId: input.householdId,
         amount:      input.amount,
         category:    input.category,
         description: input.description,
         date:        input.date,
-        isShared:    input.isShared,
         createdAt:   now,
         updatedAt:   now,
       });
@@ -214,7 +210,7 @@ export const useExpensesStore = create<ExpensesState>()((set, get) => ({
     const allExpenses = get().allExpenses.filter((e) => e.id !== id);
     const summary = buildSummary(expenses, get().selectedMonth);
     set({ expenses, allExpenses, summary });
-    triggerPush();
+    triggerDelete('expense', id);
   },
 
   setMonth: (month) => {

@@ -5,7 +5,12 @@
  * and the server. All data is encrypted with the user's DEK (from sync.store)
  * before leaving the device. The server stores only ciphertext.
  *
- * Push: reads all local SQLite rows, encrypts, uploads in batches of 200.
+ * Push: INCREMENTAL — only rows updated since the last successful push are
+ *       encrypted and uploaded (batches of 200). A 60-second overlap window
+ *       guards against clock skew and writes racing a push.
+ * Deletes: local deletes are queued as tombstones (app_state.pending_deletes)
+ *       and pushed as isDeleted records so they propagate to other devices
+ *       and never resurrect on a fresh restore.
  * Pull: fetches encrypted deltas (since lastSyncAt), decrypts, upserts locally.
  * Conflict: last-write-wins on clientUpdatedAt. If local is newer, skip.
  * Soft-delete: isDeleted=true → remove the local row.
@@ -40,11 +45,77 @@ interface PulledRecord {
   isDeleted:        boolean;
 }
 
+// ─── Delete tombstones ────────────────────────────────────────────────────────
+// Local deletes are queued here (app_state table) and drained by pushAll as
+// isDeleted tombstones. Without this, deleted items would linger on the server
+// and resurrect on a fresh device restore.
+
+const PENDING_DELETES_KEY = 'pending_deletes';
+
+const SYNC_PREFIX: Record<EntityType, string> = {
+  expense:           'exp',
+  bill:              'bill',
+  goal:              'goal',
+  budget:            'bgt',
+  goal_contribution: 'gc',
+  income:            'inc',
+  recurring_expense: 'rexp',
+  recurring_income:  'rinc',
+};
+
+interface PendingDelete {
+  entityType: EntityType;
+  entityId:   string;
+  deletedAt:  string;
+}
+
+async function readPendingDeletes(db: ReturnType<typeof getDatabase>): Promise<PendingDelete[]> {
+  try {
+    const [row] = await db.select().from(schema.appState)
+      .where(eq(schema.appState.key, PENDING_DELETES_KEY)).limit(1);
+    return row ? (JSON.parse(row.value) as PendingDelete[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+async function writePendingDeletes(
+  db: ReturnType<typeof getDatabase>,
+  queue: PendingDelete[],
+): Promise<void> {
+  const value = JSON.stringify(queue);
+  await db.insert(schema.appState)
+    .values({ key: PENDING_DELETES_KEY, value })
+    .onConflictDoUpdate({ target: schema.appState.key, set: { value } });
+}
+
+/** Queue a deleted entity for tombstone push. Call before/after the local delete. */
+export async function queueDelete(entityType: EntityType, entityId: string): Promise<void> {
+  const db    = getDatabase();
+  const queue = await readPendingDeletes(db);
+  if (!queue.some((q) => q.entityType === entityType && q.entityId === entityId)) {
+    queue.push({ entityType, entityId, deletedAt: new Date().toISOString() });
+    await writePendingDeletes(db, queue);
+  }
+}
+
 // ─── Push ─────────────────────────────────────────────────────────────────────
 
+/** Overlap window re-pushed on every sync to absorb clock skew / races. */
+const PUSH_OVERLAP_MS = 60_000;
+
 export async function pushAll(): Promise<void> {
-  const { dek } = useSyncStore.getState();
+  const { dek, lastPushAt } = useSyncStore.getState();
   if (!dek) return; // no DEK = local-only mode; silently skip
+
+  // Captured BEFORE reading rows — any write racing this push lands after
+  // this timestamp and is safely included in the next push.
+  const pushStartedAt = new Date().toISOString();
+
+  // Incremental cutoff: only rows updated after (lastPushAt − overlap)
+  const cutoff = lastPushAt
+    ? new Date(new Date(lastPushAt).getTime() - PUSH_OVERLAP_MS).toISOString()
+    : null;
 
   const db = getDatabase();
   const records: LocalRecord[] = [];
@@ -85,11 +156,23 @@ export async function pushAll(): Promise<void> {
     records.push({ syncId: `rinc_${r.id}`, entityType: 'recurring_income', entityId: r.id, payload: r, updatedAt: r.updatedAt });
   }
 
-  if (records.length === 0) return;
+  // ── Incremental filter: skip rows already pushed ───────────────────────────
+  const changed = cutoff
+    ? records.filter((r) => r.updatedAt > cutoff)
+    : records;
+
+  // ── Pending delete tombstones ──────────────────────────────────────────────
+  const pendingDeletes = await readPendingDeletes(db);
+
+  if (changed.length === 0 && pendingDeletes.length === 0) {
+    // Nothing new — still advance the cursor so the overlap window moves on.
+    useSyncStore.getState().setLastPushAt(pushStartedAt);
+    return;
+  }
 
   const BATCH = 200;
-  for (let i = 0; i < records.length; i += BATCH) {
-    const batch = records.slice(i, i + BATCH);
+  for (let i = 0; i < changed.length; i += BATCH) {
+    const batch = changed.slice(i, i + BATCH);
     const encrypted = await Promise.all(
       batch.map(async (r) => ({
         id:               r.syncId,
@@ -102,6 +185,26 @@ export async function pushAll(): Promise<void> {
     );
     await syncPush(encrypted);
   }
+
+  // Push tombstones (empty payload + isDeleted per the server contract)
+  if (pendingDeletes.length > 0) {
+    for (let i = 0; i < pendingDeletes.length; i += BATCH) {
+      const batch = pendingDeletes.slice(i, i + BATCH);
+      await syncPush(batch.map((d) => ({
+        id:               `${SYNC_PREFIX[d.entityType]}_${d.entityId}`,
+        entityType:       d.entityType,
+        entityId:         d.entityId,
+        encryptedPayload: '',
+        clientUpdatedAt:  d.deletedAt,
+        isDeleted:        true,
+      })));
+    }
+    // All tombstones accepted — clear the queue
+    await writePendingDeletes(db, []);
+  }
+
+  // Success — advance the incremental cursor
+  useSyncStore.getState().setLastPushAt(pushStartedAt);
 }
 
 // ─── Pull ─────────────────────────────────────────────────────────────────────
@@ -110,8 +213,14 @@ export async function pullAndMerge(since?: string | null): Promise<void> {
   const { dek } = useSyncStore.getState();
   if (!dek) return;
 
-  const { records } = await syncPull(since ?? undefined);
-  if (!records || records.length === 0) return;
+  const { records, pulledAt } = await syncPull(since ?? undefined);
+
+  if (!records || records.length === 0) {
+    // Nothing new — still advance the cursor (server-authoritative timestamp)
+    // so WS-triggered pulls stay cheap instead of re-fetching the same delta.
+    if (pulledAt) useSyncStore.getState().setLastSyncAt(pulledAt);
+    return;
+  }
 
   // Track successful pull for app review prompt (fire-and-forget)
   trackReviewEvent().catch(() => {});
@@ -139,6 +248,10 @@ export async function pullAndMerge(since?: string | null): Promise<void> {
 
     await upsertLocal(db, rec.entityType as EntityType, payload, serverTs, now);
   }
+
+  // Advance the pull cursor with the server's own timestamp (immune to
+  // device clock skew) — every subsequent pull is a true delta.
+  if (pulledAt) useSyncStore.getState().setLastSyncAt(pulledAt);
 
   // Notify screens that new data is available — they watch syncVersion and
   // silently reload their stores without showing skeleton loaders.
@@ -244,6 +357,17 @@ async function computeInsight(): Promise<UserInsightPayload> {
     return actualPct >= expectedPct * 0.8;
   }).length;
 
+  // Savings rate this month: (income − expenses) / income, as a percentage.
+  // Powers milestone-tailored push notifications (celebrate ≥ 20 %, warn < 0).
+  const allIncome       = await db.select().from(schema.income);
+  const thisMonthIncome = allIncome
+    .filter((r) => r.date >= startOfMonth)
+    .reduce((s2, r) => s2 + r.amount, 0);
+  const thisMonthSpend  = thisMonthExp.reduce((s2, e) => s2 + e.amount, 0);
+  const savingsRatePct: number | null = thisMonthIncome > 0
+    ? Math.round(((thisMonthIncome - thisMonthSpend) / thisMonthIncome) * 100)
+    : null;
+
   return {
     budgetUtilization:   maxUtilization,
     hasOverBudget,
@@ -254,6 +378,7 @@ async function computeInsight(): Promise<UserInsightPayload> {
     totalGoalsCount:     activeGoals.length,
     goalsOnTrack,
     hasActiveGoals:      activeGoals.length > 0,
+    savingsRatePct,
   };
 }
 
@@ -267,7 +392,7 @@ export async function fullSync(): Promise<void> {
   try {
     await pushAll();
     await pullAndMerge(store.lastSyncAt);
-    store.setLastSyncAt(new Date().toISOString());
+    // lastSyncAt is advanced inside pullAndMerge using the server timestamp
 
     // Fire-and-forget: report insight signals to server for push personalisation.
     // Non-critical — never blocks sync or surfaces an error to the user.

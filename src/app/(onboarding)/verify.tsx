@@ -93,7 +93,7 @@ export default function VerifyScreen() {
       const name        = OnboardingStorage.getName();
       const storedEmail = OnboardingStorage.getEmail();
       await createLocalUser(name || 'Dev User', storedEmail || 'dev@aku.app');
-      router.push('/(onboarding)/pin-setup');
+      router.push('/(onboarding)/secure' as never);
     } finally {
       setSkipping(false);
     }
@@ -145,9 +145,9 @@ export default function VerifyScreen() {
       if (hasOnboarded) {
         router.replace('/(auth)');
       } else if (res.isNew) {
-        router.replace('/(onboarding)/pin-setup');
+        router.replace('/(onboarding)/secure' as never);
       } else {
-        router.replace('/(onboarding)/pin-setup?returning=1');
+        router.replace('/(onboarding)/secure?returning=1' as never);
       }
     } catch (e: any) {
       setOtpError(e?.message ?? 'Invalid or expired code. Request a new link and try again.');
@@ -175,7 +175,7 @@ export default function VerifyScreen() {
       >
         <OnboardingHeader
           step={3}
-          total={8}
+          total={6}
           onBack={() => router.back()}
           dark={false}
         />

@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Akù — Know your money. A personal finance app by NIPPYSKY</title>
+<meta name="description" content="Akù is a beautifully simple personal finance app. Log expenses and income in seconds, track bills, budgets and savings goals — all end-to-end encrypted and synced across your devices.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@300;500&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/styles.css">
+<style>
+/* ── Landing-specific ── */
+.hero {
+  background: linear-gradient(168deg, var(--forest) 0%, var(--forest-deep) 100%);
+  color: var(--linen);
+  padding: clamp(56px, 9vw, 110px) clamp(20px, 5vw, 56px) 0;
+  overflow: hidden;
+}
+.hero-inner {
+  max-width: 1080px; margin: 0 auto;
+  display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 40px; align-items: center;
+}
+.hero .kicker {
+  color: var(--gold); font-size: 12.5px; letter-spacing: 3px;
+  text-transform: uppercase; font-weight: 600;
+}
+.hero h1 {
+  font-family: var(--serif); font-weight: 300;
+  font-size: clamp(40px, 6.5vw, 68px); line-height: 1.08;
+  letter-spacing: -1.5px; margin: 16px 0 20px;
+}
+.hero h1 em { font-style: italic; color: var(--gold-light); }
+.hero .sub {
+  font-size: clamp(16px, 2vw, 18px); color: rgba(245,242,236,0.75);
+  max-width: 46ch; margin-bottom: 32px;
+}
+.hero .cta-row { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 56px; }
+.store-btn {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--linen); color: var(--forest); text-decoration: none;
+  padding: 13px 22px; border-radius: 100px; font-weight: 700; font-size: 15px;
+}
+.store-btn.ghost {
+  background: transparent; color: var(--linen);
+  border: 1.5px solid rgba(245,242,236,0.35);
+}
+.store-btn small { display: block; font-size: 10.5px; font-weight: 500; opacity: 0.65; line-height: 1.1; }
+.hero-trust { display: flex; gap: 26px; flex-wrap: wrap; padding-bottom: 48px; }
+.hero-trust div { font-size: 13px; color: rgba(245,242,236,0.6); }
+.hero-trust strong { display: block; color: var(--gold-light); font-size: 15px; }
+
+/* ── Phone mockups ── */
+.phones { position: relative; height: 560px; }
+.phone {
+  position: absolute; width: 252px; border-radius: 38px;
+  background: #0C0E0D; padding: 10px;
+  box-shadow: 0 40px 80px rgba(0,0,0,0.45);
+}
+.phone .screen {
+  border-radius: 30px; overflow: hidden; background: var(--linen);
+  height: 500px; display: flex; flex-direction: column;
+  font-size: 11px;
+}
+.phone.back  { right: 150px; top: 40px; transform: rotate(-7deg); opacity: 0.9; }
+.phone.front { right: 0; top: 0; transform: rotate(4deg); z-index: 2; }
+
+/* mock UI bits */
+.m-head { padding: 18px 16px 10px; }
+.m-hello { font-size: 10px; color: #888; }
+.m-name  { font-family: var(--serif); font-size: 17px; color: var(--ink); }
+.m-balance-card {
+  margin: 8px 12px; padding: 14px; border-radius: 16px;
+  background: var(--forest); color: var(--linen);
+}
+.m-balance-label { font-size: 8.5px; letter-spacing: 1.5px; color: var(--gold-light); }
+.m-balance { font-family: var(--serif); font-size: 24px; font-weight: 300; margin-top: 2px; }
+.m-balance-row { display: flex; gap: 14px; margin-top: 10px; font-size: 9px; color: rgba(245,242,236,0.7); }
+.m-balance-row b { display: block; font-size: 11px; color: var(--linen); }
+.m-section { padding: 10px 14px 4px; font-size: 8.5px; letter-spacing: 1.4px; color: #999; }
+.m-row {
+  display: flex; align-items: center; gap: 9px;
+  background: #fff; margin: 0 12px 7px; padding: 9px 10px;
+  border-radius: 12px; border: 1px solid var(--border);
+}
+.m-ico { width: 26px; height: 26px; border-radius: 13px; flex-shrink: 0;
+         display: flex; align-items: center; justify-content: center; font-size: 12px; }
+.m-row .t { flex: 1; }
+.m-row .t b { display: block; font-size: 10.5px; color: var(--ink); font-weight: 600; }
+.m-row .t span { font-size: 8.5px; color: #999; }
+.m-amt { font-weight: 700; font-size: 10.5px; }
+.m-amt.neg { color: var(--ink); }
+.m-amt.pos { color: var(--success); }
+.m-tabbar {
+  margin-top: auto; display: flex; align-items: center; justify-content: space-around;
+  background: #fff; border-top: 1px solid var(--border); padding: 7px 6px 10px;
+}
+.m-tab { font-size: 7.5px; color: #A9ACA9; text-align: center; }
+.m-tab .dot { width: 16px; height: 16px; border-radius: 6px; background: #E8E5DD; margin: 0 auto 3px; }
+.m-fab {
+  width: 40px; height: 40px; border-radius: 20px; background: var(--forest);
+  margin-top: -22px; border: 2.5px solid #fff;
+  box-shadow: 0 6px 14px rgba(22,58,47,0.4);
+  display: flex; align-items: center; justify-content: center; color: var(--gold-light); font-size: 16px;
+}
+/* goal screen (back phone) */
+.m-goal-hero { background: var(--forest); color: var(--linen); padding: 18px 14px; text-align: center; }
+.m-goal-emoji { font-size: 26px; }
+.m-goal-name { font-family: var(--serif); font-size: 15px; margin-top: 4px; }
+.m-goal-amt { font-size: 9.5px; color: var(--gold-light); margin-top: 3px; }
+.m-progress { height: 5px; background: rgba(255,255,255,0.15); border-radius: 3px; margin-top: 10px; }
+.m-progress i { display: block; height: 100%; width: 64%; background: var(--gold); border-radius: 3px; }
+.m-acct-card {
+  margin: 10px 12px; padding: 12px; border-radius: 14px;
+  background: var(--forest); color: var(--linen);
+}
+.m-acct-label { font-size: 7.5px; letter-spacing: 1.5px; color: var(--gold-light); }
+.m-acct-num { font-family: var(--serif); font-size: 15px; letter-spacing: 2px; margin-top: 4px; }
+.m-acct-name { font-size: 8.5px; color: rgba(245,242,236,0.7); margin-top: 2px; }
+
+/* ── Feature sections ── */
+.features { max-width: 1080px; margin: 0 auto; padding: clamp(64px, 9vw, 110px) clamp(20px, 5vw, 56px); }
+.features .kicker { color: var(--forest-mut); font-size: 12.5px; letter-spacing: 3px; text-transform: uppercase; font-weight: 700; }
+.features h2 {
+  font-family: var(--serif); font-weight: 300;
+  font-size: clamp(30px, 4.5vw, 44px); letter-spacing: -1px;
+  margin: 12px 0 14px; color: var(--forest);
+}
+.features .lead { color: var(--ink-soft); max-width: 60ch; margin-bottom: 44px; font-size: 17px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 18px; }
+.feat {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 20px; padding: 26px;
+}
+.feat .fi {
+  width: 44px; height: 44px; border-radius: 14px;
+  background: rgba(22,58,47,0.08); display: flex; align-items: center; justify-content: center;
+  font-size: 20px; margin-bottom: 14px;
+}
+.feat h3 { font-size: 17px; margin-bottom: 6px; color: var(--forest); }
+.feat p { font-size: 14.5px; color: var(--ink-soft); }
+
+/* ── Security band ── */
+.security {
+  background: var(--forest); color: var(--linen);
+  padding: clamp(64px, 8vw, 96px) clamp(20px, 5vw, 56px);
+}
+.security .inner { max-width: 1080px; margin: 0 auto; text-align: center; }
+.security h2 {
+  font-family: var(--serif); font-weight: 300;
+  font-size: clamp(28px, 4vw, 40px); letter-spacing: -0.5px; margin-bottom: 12px;
+}
+.security .lead { color: rgba(245,242,236,0.7); max-width: 62ch; margin: 0 auto 40px; }
+.sec-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; text-align: left; }
+.sec-item { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.09); border-radius: 18px; padding: 22px; }
+.sec-item h3 { color: var(--gold-light); font-size: 15.5px; margin-bottom: 6px; }
+.sec-item p { font-size: 13.5px; color: rgba(245,242,236,0.7); }
+
+/* ── Final CTA ── */
+.final { text-align: center; padding: clamp(64px, 9vw, 110px) 24px; }
+.final h2 {
+  font-family: var(--serif); font-weight: 300;
+  font-size: clamp(30px, 5vw, 48px); color: var(--forest); letter-spacing: -1px; margin-bottom: 12px;
+}
+.final p { color: var(--ink-soft); margin-bottom: 28px; }
+.final .store-btn { background: var(--forest); color: var(--linen); display: inline-flex; margin: 0 6px 10px; }
+
+@media (max-width: 860px) {
+  .hero-inner { grid-template-columns: 1fr; }
+  .phones { height: 470px; margin-top: 8px; }
+  .phone { width: 220px; }
+  .phone .screen { height: 440px; }
+  .phone.back { right: auto; left: 8%; }
+  .phone.front { right: 8%; }
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <a class="logo" href="/">Ak<span>ù</span></a>
+  <div class="links">
+    <a href="#features">Features</a>
+    <a href="#security">Security</a>
+    <a href="/privacy">Privacy</a>
+    <a class="cta" href="#download">Get the app</a>
+  </div>
+</nav>
+
+<!-- ── Hero ── -->
+<header class="hero">
+  <div class="hero-inner">
+    <div>
+      <div class="kicker">Personal finance · by NIPPYSKY</div>
+      <h1>Know your money. <em>Own</em> your money.</h1>
+      <p class="sub">Akù makes tracking money feel effortless — log expenses and income in seconds, stay ahead of bills, and watch your savings goals come alive. Private by design, synced everywhere.</p>
+      <div class="cta-row" id="download">
+        <a class="store-btn" href="#" aria-disabled="true"> <small>Coming soon to the</small>App Store</a>
+        <a class="store-btn ghost" href="#" aria-disabled="true"> <small>Coming soon to</small>Google Play</a>
+      </div>
+      <div class="hero-trust">
+        <div><strong>E2E encrypted</strong>Your data, unreadable to anyone else</div>
+        <div><strong>Real-time sync</strong>iPhone + Android, always in step</div>
+        <div><strong>No bank access</strong>You log it. You control it.</div>
+      </div>
+    </div>
+
+    <!-- CSS phone mockups -->
+    <div class="phones" aria-hidden="true">
+      <div class="phone back">
+        <div class="screen">
+          <div class="m-goal-hero">
+            <div class="m-goal-emoji">✈️</div>
+            <div class="m-goal-name">Trip to Lisbon</div>
+            <div class="m-goal-amt">₦512,000 of ₦800,000 saved</div>
+            <div class="m-progress"><i></i></div>
+          </div>
+          <div class="m-acct-card">
+            <div class="m-acct-label">SAVINGS DESTINATION</div>
+            <div class="m-acct-num">0123 456 789</div>
+            <div class="m-acct-name">PiggyVest · Chukwudubem N.</div>
+          </div>
+          <div class="m-section">SAVINGS HISTORY</div>
+          <div class="m-row"><div class="m-ico" style="background:#E9F4EE">💰</div><div class="t"><b>Contribution</b><span>12 Jul</span></div><div class="m-amt pos">+₦60,000</div></div>
+          <div class="m-row"><div class="m-ico" style="background:#E9F4EE">💰</div><div class="t"><b>Contribution</b><span>28 Jun</span></div><div class="m-amt pos">+₦45,000</div></div>
+        </div>
+      </div>
+      <div class="phone front">
+        <div class="screen">
+          <div class="m-head">
+            <div class="m-hello">Good evening,</div>
+            <div class="m-name">Chukwudubem</div>
+          </div>
+          <div class="m-balance-card">
+            <div class="m-balance-label">JULY · NET</div>
+            <div class="m-balance">+₦184,500</div>
+            <div class="m-balance-row">
+              <div>Earned<b>₦450,000</b></div>
+              <div>Spent<b>₦265,500</b></div>
+            </div>
+          </div>
+          <div class="m-section">TODAY</div>
+          <div class="m-row"><div class="m-ico" style="background:#FDEEE7">🍛</div><div class="t"><b>Lunch — Mama's Kitchen</b><span>Food · 1:24 PM</span></div><div class="m-amt neg">−₦3,500</div></div>
+          <div class="m-row"><div class="m-ico" style="background:#EAF1FB">🚗</div><div class="t"><b>Ride to work</b><span>Transport · 8:05 AM</span></div><div class="m-amt neg">−₦2,200</div></div>
+          <div class="m-row"><div class="m-ico" style="background:#E9F4EE">💼</div><div class="t"><b>Freelance payment</b><span>Income · 7:40 AM</span></div><div class="m-amt pos">+₦120,000</div></div>
+          <div class="m-tabbar">
+            <div class="m-tab"><div class="dot"></div>Home</div>
+            <div class="m-tab"><div class="dot"></div>Bills</div>
+            <div class="m-fab">⌂</div>
+            <div class="m-tab"><div class="dot"></div>Goals</div>
+            <div class="m-tab"><div class="dot"></div>More</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- ── Features ── -->
+<section class="features" id="features">
+  <div class="kicker">Everything is income or expense</div>
+  <h2>Radically simple money tracking</h2>
+  <p class="lead">No bank connections, no jargon, no clutter. Akù is built around one honest idea: money comes in, money goes out — and you deserve to see it clearly.</p>
+  <div class="grid">
+    <div class="feat"><div class="fi">⚡</div><h3>Log in seconds</h3><p>A floating action button puts expense and income logging one tap away, from anywhere in the app.</p></div>
+    <div class="feat"><div class="fi">📅</div><h3>Bills that remind you</h3><p>Due-date reminders at 14, 7, 3 and 1 day out. Bills count as expenses the moment they're due — no double bookkeeping.</p></div>
+    <div class="feat"><div class="fi">🎯</div><h3>Goals with a destination</h3><p>Attach the actual account you're saving into — bank, PiggyVest, anywhere — and track pace, projections and history per goal.</p></div>
+    <div class="feat"><div class="fi">📊</div><h3>Analytics that teach</h3><p>Cash-flow charts, category donuts and your savings rate over 1–12 months. See the mathematics behind your money.</p></div>
+    <div class="feat"><div class="fi">🔁</div><h3>Recurring on autopilot</h3><p>Salaries, rent, subscriptions — logged automatically on schedule, with optional auto-contribution to goals.</p></div>
+    <div class="feat"><div class="fi">🔔</div><h3>Nudges that fit your day</h3><p>Smart, personal reminders from morning to bedtime — budget alerts, streaks, milestones, and a goodnight check-in.</p></div>
+  </div>
+</section>
+
+<!-- ── Security ── -->
+<section class="security" id="security">
+  <div class="inner">
+    <h2>Private by design</h2>
+    <p class="lead">Akù never connects to your bank and never sees your balances. What you log is encrypted on your device before it ever leaves it.</p>
+    <div class="sec-grid">
+      <div class="sec-item"><h3>End-to-end encryption</h3><p>AES-256-GCM with a key only your devices hold. Our servers store ciphertext they cannot read.</p></div>
+      <div class="sec-item"><h3>Device-level lock</h3><p>Face ID, fingerprint, or your phone's PIN protect the app. Nothing extra to remember.</p></div>
+      <div class="sec-item"><h3>Real-time sync</h3><p>Log on your iPhone, watch it appear on your Android. Encrypted deltas, instantly delivered.</p></div>
+      <div class="sec-item"><h3>Your data, your call</h3><p>Export everything as a PDF statement, or delete your account and every record in one tap.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Final CTA ── -->
+<section class="final">
+  <h2>Start understanding your money.</h2>
+  <p>Free. Private. Beautifully simple.</p>
+  <a class="store-btn" href="#"> <small>Coming soon to the</small>App Store</a>
+  <a class="store-btn" href="#"> <small>Coming soon to</small>Google Play</a>
+</section>
+
+<footer>
+  <div class="foot-grid">
+    <div>
+      <div class="foot-brand">Ak<span>ù</span></div>
+      <div class="foot-tag">A venture by <a href="https://nippysky.com">NIPPYSKY</a></div>
+    </div>
+    <div class="foot-links">
+      <a href="/privacy">Privacy Policy</a>
+      <a href="/terms">Terms of Service</a>
+      <a href="/delete-account">Delete your account</a>
+    </div>
+    <div class="foot-links">
+      <a href="mailto:contact@nippysky.com">contact@nippysky.com</a>
+      <a href="https://nippysky.com">nippysky.com</a>
+    </div>
+  </div>
+  <div class="foot-bottom">
+    <div>© 2026 NIPPYSKY. All rights reserved.</div>
+    <div>Akù by <a href="https://nippysky.com">NIPPYSKY</a></div>
+  </div>
+</footer>
+
+</body>
+</html>

@@ -119,53 +119,6 @@ function IllustrationGoals() {
   );
 }
 
-/** Slide 3: Save together — overlapping avatars + circle ring */
-function IllustrationCircle() {
-  const avatars: { cx: number; cy: number; initials: string; color: string }[] = [
-    { cx: 88,  cy: 100, initials: 'AO', color: 'rgba(212,175,55,0.80)' },
-    { cx: 118, cy: 82,  initials: 'KT', color: 'rgba(255,255,255,0.20)' },
-    { cx: 148, cy: 100, initials: 'BM', color: 'rgba(212,175,55,0.45)' },
-    { cx: 128, cy: 125, initials: 'SC', color: 'rgba(255,255,255,0.14)' },
-    { cx: 98,  cy: 125, initials: 'RP', color: 'rgba(212,175,55,0.30)' },
-  ];
-  return (
-    <Svg width={220} height={200} viewBox="0 0 220 200" fill="none">
-      {/* Outer dashed orbit */}
-      <Circle cx={118} cy={104} r={80}
-        stroke="rgba(255,255,255,0.08)" strokeWidth={1.5}
-        strokeDasharray="5 6" fill="none" />
-      {/* Avatars */}
-      {avatars.map((a, i) => (
-        <React.Fragment key={i}>
-          <Circle cx={a.cx} cy={a.cy} r={26}
-            fill={a.color} stroke="rgba(255,255,255,0.18)" strokeWidth={1.5} />
-          {/* initials text — approximate with rect bars since SVG text needs font */}
-          <Rect x={a.cx - 8} y={a.cy - 4} width={16} height={5} rx={2.5}
-            fill="rgba(255,255,255,0.55)" />
-          <Rect x={a.cx - 5} y={a.cy + 4} width={10} height={4} rx={2}
-            fill="rgba(255,255,255,0.35)" />
-        </React.Fragment>
-      ))}
-      {/* Connecting lines between avatars */}
-      {avatars.map((a, i) => {
-        const next = avatars[(i + 1) % avatars.length];
-        return (
-          <Line key={`l${i}`}
-            x1={a.cx} y1={a.cy} x2={next.cx} y2={next.cy}
-            stroke="rgba(255,255,255,0.07)" strokeWidth={1.2} />
-        );
-      })}
-      {/* Total chip at top */}
-      <Rect x={78} y={28} width={80} height={26} rx={13}
-        fill="rgba(212,175,55,0.15)" stroke={C.gold} strokeWidth={1} />
-      <Rect x={90} y={37} width={40} height={7} rx={3.5} fill={C.gold} opacity={0.7} />
-      {/* Accent */}
-      <Circle cx={30}  cy={50}  r={3} fill={C.gold} opacity={0.35} />
-      <Circle cx={196} cy={170} r={3} fill={C.gold} opacity={0.30} />
-    </Svg>
-  );
-}
-
 /** Slide 4: Private by design — shield + lock */
 function IllustrationPrivacy() {
   return (
@@ -230,12 +183,6 @@ const SLIDES: Slide[] = [
     Illustration: IllustrationGoals,
     headline:     'Build goals that stick',
     body:         'Set a target, track your progress, and watch your savings grow — one contribution at a time.',
-  },
-  {
-    key:          'circle',
-    Illustration: IllustrationCircle,
-    headline:     'Save better together',
-    body:         'Create a Pool with family or friends. Contribute together and hit shared goals faster.',
   },
   {
     key:          'private',

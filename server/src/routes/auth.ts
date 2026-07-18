@@ -218,6 +218,45 @@ router.post('/magic-link/verify-otp', async (c) => {
     return c.json({ error: 'email and otp are required' }, 400);
   }
 
+  // ── App-store review demo account ─────────────────────────────────────────
+  // Reviewers can't receive magic-link emails, so a fixed demo credential is
+  // allowed when BOTH env vars are set (e.g. DEMO_EMAIL=demo@nippysky.com,
+  // DEMO_OTP=<code you put in the review notes>). No-op in normal operation.
+  const demoEmail = process.env.DEMO_EMAIL?.trim().toLowerCase();
+  const demoOtp   = process.env.DEMO_OTP?.trim();
+  if (demoEmail && demoOtp && email === demoEmail && otp === demoOtp) {
+    let [demoUser] = await db.select().from(users).where(eq(users.email, demoEmail)).limit(1);
+    if (!demoUser) {
+      const newId = generateId();
+      await db.insert(users).values({ id: newId, name: 'Demo Reviewer', email: demoEmail });
+      [demoUser] = await db.select().from(users).where(eq(users.id, newId)).limit(1);
+    }
+    const demoSessionId = generateId();
+    const demoJwt = await signJWT({
+      sub:       demoUser!.id,
+      email:     demoUser!.email,
+      name:      demoUser!.name,
+      sessionId: demoSessionId,
+    });
+    await db.insert(sessions).values({
+      id:        demoSessionId,
+      userId:    demoUser!.id,
+      tokenHash: hashToken(demoJwt),
+      expiresAt: getSessionExpiry(),
+    });
+    return c.json({
+      jwt:   demoJwt,
+      isNew: false,
+      user: {
+        id:         demoUser!.id,
+        name:       demoUser!.name,
+        email:      demoUser!.email,
+        avatarUrl:  demoUser!.avatarUrl,
+        avatarData: demoUser!.avatarData ?? null,
+      },
+    });
+  }
+
   // Find the most-recent unused, non-expired token for this email + OTP
   const [record] = await db
     .select()

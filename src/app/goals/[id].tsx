@@ -7,6 +7,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
+  Dimensions,
   FlatList,
   Platform,
   Pressable,
@@ -14,6 +15,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import Svg, { Line as SvgLine, Polyline as SvgPolyline } from 'react-native-svg';
 import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -25,7 +27,8 @@ import Animated, {
   withTiming,
   Easing,
 } from 'react-native-reanimated';
-import { ArrowLeft, Calendar, Pencil, Plus, Trash2 } from 'lucide-react-native';
+import { ArrowLeft, Calendar, Copy, Landmark, Pencil, Plus, Trash2 } from 'lucide-react-native';
+import * as Clipboard from 'expo-clipboard';
 import { format, parseISO } from 'date-fns';
 import { useTheme } from '../../theme';
 import { Button } from '../../components/ui/Button';
@@ -369,6 +372,237 @@ function DeleteConfirmSheet({ visible, title, message, onConfirm, onCancel }: {
   );
 }
 
+// ─── Goal insights — the mathematics of this goal ────────────────────────────
+// Saving pace, records, projections and a progress sparkline. Data-rich by
+// design: every contribution becomes a story about momentum.
+
+const SPARK_H = 72;
+
+function GoalInsights({
+  goal,
+  contribs,
+  fmtCompact,
+}: {
+  goal: {
+    targetAmount: number;
+    savedAmount:  number;
+    targetDate:   string | null;
+    isCompleted:  boolean;
+    createdAt:    string;
+  };
+  contribs:   GoalContribution[];
+  fmtCompact: (n: number) => string;
+}) {
+  const { colors, text, font, fontSize, radius } = useTheme();
+
+  const sparkW = Dimensions.get('window').width - 64;
+
+  if (contribs.length === 0) return null;
+
+  // ── Core maths ─────────────────────────────────────────────────────────────
+  const sorted   = [...contribs].sort((a, b) => a.date.localeCompare(b.date));
+  const total    = sorted.reduce((s, c) => s + c.amount, 0);
+  const avg      = Math.round(total / sorted.length);
+  const biggest  = Math.max(...sorted.map((c) => c.amount));
+
+  const firstDate  = new Date(sorted[0]!.date);
+  const daysSaving = Math.max(1, Math.round((Date.now() - firstDate.getTime()) / 86_400_000));
+  const monthsSaving = Math.max(daysSaving / 30.44, 1 / 30.44);
+  const monthlyPace  = Math.round(total / Math.max(monthsSaving, 0.25));
+
+  // Projection: at the current pace, when does this goal complete?
+  const remaining = Math.max(goal.targetAmount - goal.savedAmount, 0);
+  let projection: string | null = null;
+  let paceStatus: 'ahead' | 'behind' | null = null;
+  if (!goal.isCompleted && monthlyPace > 0 && remaining > 0) {
+    const monthsLeft = remaining / monthlyPace;
+    const projected  = new Date(Date.now() + monthsLeft * 30.44 * 86_400_000);
+    projection = format(projected, 'MMM yyyy');
+    if (goal.targetDate) {
+      paceStatus = projected.getTime() <= new Date(goal.targetDate).getTime()
+        ? 'ahead' : 'behind';
+    }
+  }
+
+  // ── Sparkline: running total vs target ─────────────────────────────────────
+  const t0 = firstDate.getTime();
+  const t1 = Math.max(Date.now(), new Date(sorted[sorted.length - 1]!.date).getTime());
+  const span = Math.max(t1 - t0, 1);
+  let run = 0;
+  const pts = sorted.map((c) => {
+    run += c.amount;
+    const x = ((new Date(c.date).getTime() - t0) / span) * (sparkW - 8) + 4;
+    const y = SPARK_H - 6 - (Math.min(run / Math.max(goal.targetAmount, 1), 1)) * (SPARK_H - 12);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  const points = [`4,${SPARK_H - 6}`, ...pts].join(' ');
+
+  const stats: { label: string; value: string; hint?: string }[] = [
+    { label: 'Monthly pace',  value: fmtCompact(monthlyPace),
+      hint: `${daysSaving} day${daysSaving === 1 ? '' : 's'} saving` },
+    { label: 'Average save',  value: fmtCompact(avg),
+      hint: `${sorted.length} contribution${sorted.length === 1 ? '' : 's'}` },
+    { label: 'Biggest save',  value: fmtCompact(biggest) },
+    {
+      label: 'Projected finish',
+      value: goal.isCompleted ? 'Done 🎉' : projection ?? '—',
+      hint:  paceStatus === 'ahead' ? 'Ahead of target ✅'
+           : paceStatus === 'behind' ? 'Behind target — push harder'
+           : undefined,
+    },
+  ];
+
+  return (
+    <View
+      style={[
+        styles.insightsCard,
+        { backgroundColor: colors.backgroundSecondary, borderRadius: radius.lg },
+      ]}
+    >
+      <Text style={[text.caption, { color: colors.textTertiary, letterSpacing: 1.2, fontFamily: font.sansSemiBold }]}>
+        GOAL INSIGHTS
+      </Text>
+
+      {/* Progress sparkline */}
+      <View style={styles.sparkWrap}>
+        <Svg width={sparkW} height={SPARK_H}>
+          {/* Target line */}
+          <SvgLine
+            x1={0} y1={6} x2={sparkW} y2={6}
+            stroke={colors.borderLight}
+            strokeWidth={1}
+            strokeDasharray="4 4"
+          />
+          {/* Baseline */}
+          <SvgLine
+            x1={0} y1={SPARK_H - 6} x2={sparkW} y2={SPARK_H - 6}
+            stroke={colors.borderLight}
+            strokeWidth={1}
+          />
+          <SvgPolyline
+            points={points}
+            fill="none"
+            stroke={Palette.gold}
+            strokeWidth={2.5}
+            strokeLinejoin="round"
+            strokeLinecap="round"
+          />
+        </Svg>
+        <View style={styles.sparkLabels}>
+          <Text style={[text.caption, { color: colors.textTertiary, fontSize: 9 }]}>
+            {format(firstDate, 'd MMM yy')}
+          </Text>
+          <Text style={[text.caption, { color: colors.textTertiary, fontSize: 9 }]}>
+            Target: {fmtCompact(goal.targetAmount)}
+          </Text>
+        </View>
+      </View>
+
+      {/* Stats grid */}
+      <View style={styles.insightsGrid}>
+        {stats.map((st) => (
+          <View key={st.label} style={styles.insightsCell}>
+            <Text style={[text.caption, { color: colors.textTertiary }]} numberOfLines={1}>
+              {st.label}
+            </Text>
+            <Text
+              style={[{ fontFamily: font.sansSemiBold, fontSize: fontSize.md, color: colors.text, marginTop: 2 }]}
+              numberOfLines={1}
+            >
+              {st.value}
+            </Text>
+            {st.hint ? (
+              <Text style={[text.caption, { color: colors.textTertiary, fontSize: 10, marginTop: 1 }]} numberOfLines={1}>
+                {st.hint}
+              </Text>
+            ) : null}
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+// ─── Destination account card ────────────────────────────────────────────────
+// Rich bank-card style panel showing where this goal's money is saved.
+
+function DestinationAccountCard({
+  bankName,
+  accountName,
+  accountNumber,
+  onCopy,
+}: {
+  bankName:      string | null;
+  accountName:   string | null;
+  accountNumber: string | null;
+  onCopy:        (value: string) => void;
+}) {
+  const { text, font, fontSize, radius } = useTheme();
+
+  return (
+    <View
+      style={[
+        styles.acctCard,
+        { backgroundColor: Palette.forest, borderRadius: radius.lg },
+      ]}
+    >
+      {/* Decorative gold orbs */}
+      <View style={[styles.acctOrb, styles.acctOrbLarge, { backgroundColor: Palette.gold + '14' }]} />
+      <View style={[styles.acctOrb, styles.acctOrbSmall, { backgroundColor: Palette.gold + '10' }]} />
+
+      <View style={styles.acctHeaderRow}>
+        <View style={styles.acctHeaderLeft}>
+          <Landmark size={14} color={Palette.goldLight} strokeWidth={1.8} />
+          <Text style={[text.caption, { color: Palette.goldLight, letterSpacing: 1.4, fontFamily: font.sansSemiBold }]}>
+            SAVINGS DESTINATION
+          </Text>
+        </View>
+      </View>
+
+      {bankName ? (
+        <Text style={[{ fontFamily: font.sansSemiBold, fontSize: fontSize.md, color: '#F5F2EC', marginTop: 12 }]}>
+          {bankName}
+        </Text>
+      ) : null}
+
+      {accountNumber ? (
+        <Pressable
+          onPress={() => onCopy(accountNumber)}
+          style={styles.acctNumberRow}
+          accessibilityRole="button"
+          accessibilityLabel="Copy account number"
+        >
+          <Text
+            style={[
+              {
+                fontFamily:    font.displayLight,
+                fontSize:      fontSize['2xl'],
+                color:         '#FFFFFF',
+                letterSpacing: 2.5,
+              },
+            ]}
+          >
+            {accountNumber}
+          </Text>
+          <View style={[styles.acctCopyBtn, { backgroundColor: 'rgba(255,255,255,0.12)' }]}>
+            <Copy size={15} color={Palette.goldLight} strokeWidth={1.8} />
+          </View>
+        </Pressable>
+      ) : null}
+
+      {accountName ? (
+        <Text style={[text.bodySm, { color: 'rgba(245,242,236,0.75)', marginTop: accountNumber ? 2 : 10 }]}>
+          {accountName}
+        </Text>
+      ) : null}
+
+      <Text style={[text.caption, { color: 'rgba(245,242,236,0.45)', marginTop: 14 }]}>
+        Send every contribution here — then log it below to keep your progress honest.
+      </Text>
+    </View>
+  );
+}
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function GoalDetailScreen() {
@@ -457,6 +691,15 @@ export default function GoalDetailScreen() {
     [goal, goalContribs, removeContribution, showToast, fmt],
   );
 
+  const handleCopyAccount = useCallback(async (value: string) => {
+    try {
+      await Clipboard.setStringAsync(value);
+      showToast('success', 'Account number copied');
+    } catch {
+      showToast('error', 'Could not copy');
+    }
+  }, [showToast]);
+
   const handleDeleteGoal = useCallback(async () => {
     if (!goal) return;
     router.back();
@@ -531,6 +774,25 @@ export default function GoalDetailScreen() {
             <Animated.View entering={FadeInDown.delay(80).duration(240)}>
               <StatsStrip items={statsItems} />
             </Animated.View>
+
+            {/* Goal insights */}
+            {goalContribs.length > 0 && (
+              <Animated.View entering={FadeInDown.delay(100).duration(240)}>
+                <GoalInsights goal={goal} contribs={goalContribs} fmtCompact={fmtCompact} />
+              </Animated.View>
+            )}
+
+            {/* Destination account */}
+            {(goal.bankName || goal.accountName || goal.accountNumber) && (
+              <Animated.View entering={FadeInDown.delay(110).duration(240)}>
+                <DestinationAccountCard
+                  bankName={goal.bankName}
+                  accountName={goal.accountName}
+                  accountNumber={goal.accountNumber}
+                  onCopy={handleCopyAccount}
+                />
+              </Animated.View>
+            )}
 
             {/* Add savings */}
             {!goal.isCompleted && (
@@ -764,4 +1026,74 @@ const styles = StyleSheet.create({
   deleteSheet:   { width: '100%', padding: 28 },
   deleteActions: { flexDirection: 'row', gap: 12, marginTop: 28 },
   deleteBtn:     { height: 52, alignItems: 'center', justifyContent: 'center' },
+
+  // Destination account card
+  acctCard: {
+    padding:      20,
+    marginTop:    16,
+    overflow:     'hidden',
+  },
+  acctOrb: {
+    position:     'absolute',
+    borderRadius: 999,
+  },
+  acctOrbLarge: {
+    width:  180,
+    height: 180,
+    right:  -60,
+    top:    -70,
+  },
+  acctOrbSmall: {
+    width:  90,
+    height: 90,
+    left:   -30,
+    bottom: -40,
+  },
+  acctHeaderRow: {
+    flexDirection:  'row',
+    alignItems:     'center',
+    justifyContent: 'space-between',
+  },
+  acctHeaderLeft: {
+    flexDirection: 'row',
+    alignItems:    'center',
+    gap:           6,
+  },
+  acctNumberRow: {
+    flexDirection: 'row',
+    alignItems:    'center',
+    gap:           10,
+    marginTop:     6,
+  },
+  acctCopyBtn: {
+    width:          30,
+    height:         30,
+    borderRadius:   15,
+    alignItems:     'center',
+    justifyContent: 'center',
+  },
+
+  // Goal insights
+  insightsCard: {
+    padding:   18,
+    marginTop: 16,
+  },
+  sparkWrap: {
+    marginTop: 14,
+  },
+  sparkLabels: {
+    flexDirection:  'row',
+    justifyContent: 'space-between',
+    marginTop:      2,
+  },
+  insightsGrid: {
+    flexDirection: 'row',
+    flexWrap:      'wrap',
+    marginTop:     14,
+    rowGap:        14,
+  },
+  insightsCell: {
+    width: '50%',
+    paddingRight: 8,
+  },
 });

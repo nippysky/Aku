@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { eq, and, gte, lte } from 'drizzle-orm';
 import { getDatabase, schema } from '../lib/database/client';
-import { triggerPush } from '../lib/sync/trigger';
+import { triggerPush, triggerDelete } from '../lib/sync/trigger';
 import {
   format,
   startOfWeek, endOfWeek,
@@ -53,11 +53,9 @@ function fromDb(row: typeof schema.budgets.$inferSelect): Budget {
   return {
     id:          row.id,
     userId:      row.userId,
-    householdId: row.householdId ?? null,
     category:    row.category as ExpenseCategory,
     amount:      row.amount,
     period:      row.period as Budget['period'],
-    isShared:    Boolean(row.isShared),
     createdAt:   row.createdAt,
     updatedAt:   row.updatedAt,
   };
@@ -162,11 +160,9 @@ export const useBudgetsStore = create<BudgetsState>()((set, get) => ({
     await db.insert(schema.budgets).values({
       id,
       userId,
-      householdId: input.householdId,
       category:    input.category,
       amount:      input.amount,
       period:      input.period,
-      isShared:    input.isShared,
       createdAt:   now,
       updatedAt:   now,
     });
@@ -210,7 +206,7 @@ export const useBudgetsStore = create<BudgetsState>()((set, get) => ({
     const db = getDatabase();
     await db.delete(schema.budgets).where(eq(schema.budgets.id, id));
     set((s) => ({ budgets: s.budgets.filter((b) => b.id !== id) }));
-    triggerPush();
+    triggerDelete('budget', id);
   },
 
   refreshCategory: async (userId, category) => {

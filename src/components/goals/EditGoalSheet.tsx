@@ -12,7 +12,7 @@ import Animated, {
   withSpring,
 } from 'react-native-reanimated';
 import { useForm, Controller } from 'react-hook-form';
-import { Calendar } from 'lucide-react-native';
+import { Calendar, Landmark } from 'lucide-react-native';
 import { format, parseISO } from 'date-fns';
 import { useTheme } from '../../theme';
 import { SheetModal } from '../ui/SheetModal';
@@ -34,12 +34,16 @@ interface EditGoalSheetProps {
 }
 
 interface FormData {
-  name:       string;
-  amount:     number;
-  emoji:      string;
-  hasDate:    boolean;
-  targetDate: string;
-  notes:      string;
+  name:          string;
+  amount:        number;
+  emoji:         string;
+  hasDate:       boolean;
+  targetDate:    string;
+  notes:         string;
+  hasAccount:    boolean;
+  bankName:      string;
+  accountName:   string;
+  accountNumber: string;
 }
 
 const EMOJI_OPTIONS = ['✈️', '🏠', '🚗', '💍', '📚', '🎯', '💰', '🌴'];
@@ -116,28 +120,37 @@ export function EditGoalSheet({ goal, onClose, onSuccess }: EditGoalSheetProps) 
     formState: { errors, isSubmitting },
   } = useForm<FormData>({
     defaultValues: {
-      name:       '',
-      amount:     0,
-      emoji:      '🎯',
-      hasDate:    false,
-      targetDate: todayString(),
-      notes:      '',
+      name:          '',
+      amount:        0,
+      emoji:         '🎯',
+      hasDate:       false,
+      targetDate:    todayString(),
+      notes:         '',
+      hasAccount:    false,
+      bankName:      '',
+      accountName:   '',
+      accountNumber: '',
     },
   });
 
   const hasDate    = watch('hasDate');
   const targetDate = watch('targetDate');
+  const hasAccount = watch('hasAccount');
 
   // Pre-fill form when goal changes
   useEffect(() => {
     if (goal) {
       reset({
-        name:       goal.name,
-        amount:     goal.targetAmount,
-        emoji:      goal.emoji ?? '🎯',
-        hasDate:    Boolean(goal.targetDate),
-        targetDate: goal.targetDate ?? todayString(),
-        notes:      goal.notes ?? '',
+        name:          goal.name,
+        amount:        goal.targetAmount,
+        emoji:         goal.emoji ?? '🎯',
+        hasDate:       Boolean(goal.targetDate),
+        targetDate:    goal.targetDate ?? todayString(),
+        notes:         goal.notes ?? '',
+        hasAccount:    Boolean(goal.bankName || goal.accountName || goal.accountNumber),
+        bankName:      goal.bankName ?? '',
+        accountName:   goal.accountName ?? '',
+        accountNumber: goal.accountNumber ?? '',
       });
     }
   }, [goal, reset]);
@@ -160,8 +173,9 @@ export function EditGoalSheet({ goal, onClose, onSuccess }: EditGoalSheetProps) 
         notes:        data.notes.trim() || null,
         emoji:        data.emoji || null,
         color:        goal.color,
-        householdId:  null,
-        isShared:     false,
+        bankName:      data.hasAccount ? data.bankName.trim()      || null : null,
+        accountName:   data.hasAccount ? data.accountName.trim()   || null : null,
+        accountNumber: data.hasAccount ? data.accountNumber.trim() || null : null,
       });
       showToast('success', 'Goal updated!');
       handleClose();
@@ -322,6 +336,91 @@ export function EditGoalSheet({ goal, onClose, onSuccess }: EditGoalSheetProps) 
           )}
         />
 
+
+        {/* Destination account (optional) */}
+        <View style={styles.field}>
+          <View style={styles.dateToggleRow}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Landmark size={15} color={colors.textSecondary} strokeWidth={1.8} />
+              <Text style={[text.label, { color: colors.textSecondary }]}>
+                Where will you save this money?
+              </Text>
+            </View>
+            <Controller
+              control={control}
+              name="hasAccount"
+              render={({ field }) => (
+                <Pressable
+                  onPress={() => field.onChange(!field.value)}
+                  style={[
+                    styles.toggleChip,
+                    {
+                      backgroundColor: field.value ? colors.primary : colors.backgroundSecondary,
+                      borderColor:     field.value ? colors.primary : colors.border,
+                      borderRadius:    radius.full,
+                    },
+                  ]}
+                  accessibilityRole="switch"
+                  accessibilityState={{ checked: field.value }}
+                >
+                  <Text
+                    style={[
+                      text.buttonLabelSm,
+                      { color: field.value ? colors.textOnForest : colors.textSecondary },
+                    ]}
+                  >
+                    {field.value ? 'Added' : 'Add account'}
+                  </Text>
+                </Pressable>
+              )}
+            />
+          </View>
+
+          {hasAccount && (
+            <View style={{ gap: 12 }}>
+              <Controller
+                control={control}
+                name="bankName"
+                render={({ field }) => (
+                  <Input
+                    label="Bank / platform"
+                    placeholder="e.g. GTBank, PiggyVest, Kuda…"
+                    value={field.value}
+                    onChangeText={field.onChange}
+                    asBottomSheetInput
+                  />
+                )}
+              />
+              <Controller
+                control={control}
+                name="accountName"
+                render={({ field }) => (
+                  <Input
+                    label="Account name"
+                    placeholder="e.g. Chukwudubem N."
+                    value={field.value}
+                    onChangeText={field.onChange}
+                    asBottomSheetInput
+                  />
+                )}
+              />
+              <Controller
+                control={control}
+                name="accountNumber"
+                render={({ field }) => (
+                  <Input
+                    label="Account number"
+                    placeholder="e.g. 0123456789"
+                    value={field.value}
+                    onChangeText={field.onChange}
+                    keyboardType="number-pad"
+                    asBottomSheetInput
+                  />
+                )}
+              />
+            </View>
+          )}
+        </View>
 
         {/* Submit */}
         <View style={styles.submit}>

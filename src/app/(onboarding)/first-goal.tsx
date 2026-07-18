@@ -75,8 +75,9 @@ export default function FirstGoalScreen() {
           notes:        null,
           emoji:        selectedEmoji,
           color:        null,
-          householdId:  null,
-          isShared:     false,
+          bankName:      null,
+          accountName:   null,
+          accountNumber: null,
         },
         user.id,
       );
@@ -106,8 +107,8 @@ export default function FirstGoalScreen() {
     >
       <View style={styles.container}>
         <OnboardingHeader
-          step={8}
-          total={8}
+          step={6}
+          total={6}
           onBack={() => router.back()}
           dark={false}
         />

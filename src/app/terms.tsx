@@ -96,7 +96,6 @@ export default function TermsScreen() {
           <Li>Set and monitor budgets per spending category</Li>
           <Li>Create savings goals and log contributions</Li>
           <Li>Set up recurring income and expense reminders</Li>
-          <Li>Share expenses with other users via Pools</Li>
           <Li>Receive personalised financial insights and push notifications</Li>
           <View style={{ height: 6 }} />
           <P>
@@ -114,7 +113,6 @@ export default function TermsScreen() {
         <Section title="5. Acceptable Use">
           <P>You agree not to use Akù to:</P>
           <Li>Enter false, misleading, or fraudulent financial data</Li>
-          <Li>Harass, threaten, or harm other users through Pool features</Li>
           <Li>Attempt to reverse-engineer, decompile, or tamper with the app</Li>
           <Li>Circumvent security measures such as PIN lock or encryption</Li>
           <Li>Use automated means to access or scrape the app or its API</Li>
@@ -123,17 +121,7 @@ export default function TermsScreen() {
           <P>Violation of these rules may result in immediate account suspension and, where required by law, reporting to the appropriate authorities.</P>
         </Section>
 
-        <Section title="6. Pools (Shared Expenses)">
-          <P>Pools allow you to share expenses with other Akù users. When you join a Pool:</P>
-          <Li>Expenses you mark as shared are visible to all Pool members</Li>
-          <Li>Your display name is visible to other Pool members</Li>
-          <Li>The Pool creator can remove members at any time</Li>
-          <Li>Any member can leave a Pool at any time</Li>
-          <View style={{ height: 6 }} />
-          <P>Akù is not a debt-collection service. We do not enforce any financial obligation between Pool members. Dispute resolution between users is the responsibility of the users themselves.</P>
-        </Section>
-
-        <Section title="7. Push Notifications">
+        <Section title="6. Push Notifications">
           <P>
             With your permission, Akù sends push notifications including budget alerts, goal milestones, spending insights, and bill reminders. You can control which notifications you receive in Settings → Notifications, and you can revoke permission entirely through your device's system settings.
           </P>
@@ -142,20 +130,20 @@ export default function TermsScreen() {
           </P>
         </Section>
 
-        <Section title="8. Intellectual Property">
+        <Section title="7. Intellectual Property">
           <P>
             Akù, the NIPPYSKY name and logo, and all app content, design, code, and features are the intellectual property of NIPPYSKY. You may not copy, distribute, modify, or create derivative works without our express written permission.
           </P>
           <P>Your financial data belongs to you. We claim no ownership over the information you enter into Akù. You can export and delete your data at any time.</P>
         </Section>
 
-        <Section title="9. Privacy">
+        <Section title="8. Privacy">
           <P>
             Your use of Akù is also governed by our Privacy Policy, which is incorporated into these Terms by reference. By using Akù, you consent to the data practices described in that policy.
           </P>
         </Section>
 
-        <Section title="10. Disclaimer of Warranties">
+        <Section title="9. Disclaimer of Warranties">
           <P>
             Akù is provided "as is" and "as available" without warranty of any kind, express or implied. We do not warrant that the app will be uninterrupted, error-free, or free from viruses or other harmful components.
           </P>
@@ -164,7 +152,7 @@ export default function TermsScreen() {
           </P>
         </Section>
 
-        <Section title="11. Limitation of Liability">
+        <Section title="10. Limitation of Liability">
           <P>
             To the fullest extent permitted by law, NIPPYSKY shall not be liable for any indirect, incidental, special, consequential, or punitive damages, including loss of data, profits, or goodwill, arising out of or in connection with your use of Akù.
           </P>
@@ -173,13 +161,13 @@ export default function TermsScreen() {
           </P>
         </Section>
 
-        <Section title="12. Indemnification">
+        <Section title="11. Indemnification">
           <P>
             You agree to indemnify and hold harmless NIPPYSKY and its officers, directors, employees, and agents from any claims, damages, losses, or expenses (including legal fees) arising out of your violation of these Terms or your use of Akù.
           </P>
         </Section>
 
-        <Section title="13. Termination">
+        <Section title="12. Termination">
           <P>
             You may stop using Akù and delete your account at any time in Settings → Account → Delete Account. Upon deletion, your data will be permanently removed within 30 days.
           </P>
@@ -188,19 +176,19 @@ export default function TermsScreen() {
           </P>
         </Section>
 
-        <Section title="14. Changes to These Terms">
+        <Section title="13. Changes to These Terms">
           <P>
             We may update these Terms from time to time. When we make material changes, we will notify you via the app or by email at least 7 days before the changes take effect. Continued use of Akù after the effective date constitutes acceptance of the updated Terms.
           </P>
         </Section>
 
-        <Section title="15. Governing Law">
+        <Section title="14. Governing Law">
           <P>
             These Terms are governed by the laws of the Federal Republic of Nigeria. Any disputes arising under these Terms shall be subject to the exclusive jurisdiction of the courts of Nigeria.
           </P>
         </Section>
 
-        <Section title="16. Contact Us">
+        <Section title="15. Contact Us">
           <P>Questions about these Terms? Get in touch.</P>
           <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, marginTop: 8 }]}>
             <Text style={[text.bodySm, { fontFamily: font.sansSemiBold, color: colors.text, marginBottom: 4 }]}>NIPPYSKY</Text>

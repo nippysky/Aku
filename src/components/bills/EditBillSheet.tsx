@@ -153,8 +153,6 @@ export function EditBillSheet({ bill, onClose, onSuccess }: EditBillSheetProps) 
         dueDate:     data.dueDate,
         frequency:   data.frequency,
         notes:       data.notes ?? null,
-        isShared:    false,
-        householdId: null,
         notify30:    bill.notify30,
         notify14:    data.notify14,
         notify7:     data.notify7,

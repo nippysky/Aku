@@ -79,13 +79,12 @@ export default function PrivacyScreen() {
           <P>We collect only what is necessary to provide and improve Akù:</P>
           <P bold>Account data</P>
           <Li>Email address — used to authenticate your account via magic link</Li>
-          <Li>Display name (optional) — shown on your profile and in Pools</Li>
+          <Li>Display name (optional) — shown on your profile</Li>
           <P bold>Financial data you enter</P>
           <Li>Expense and income entries (amount, category, description, date)</Li>
           <Li>Budget limits per category</Li>
           <Li>Savings goals (name, target amount, contributions)</Li>
           <Li>Recurring expenses and income templates</Li>
-          <Li>Pool memberships and shared expense splits</Li>
           <P bold>Device and usage data</P>
           <Li>Expo push token — for delivering push notifications (stored server-side, linked to your account)</Li>
           <Li>Device platform (iOS or Android) — to send the correct notification format</Li>
@@ -104,14 +103,13 @@ export default function PrivacyScreen() {
             Our servers store only ciphertext. Even NIPPYSKY employees cannot read your financial entries. Decryption happens exclusively on your device using your DEK.
           </P>
           <P>
-            Your account email and display name are stored in plaintext because they are needed for authentication and inter-user features (e.g., inviting someone to a Pool by email).
+            Your account email and display name are stored in plaintext because they are needed for authentication and account management.
           </P>
         </Section>
 
         <Section title="4. How We Use Your Data">
           <Li>To authenticate you and maintain your session</Li>
           <Li>To sync your encrypted data across your devices</Li>
-          <Li>To power shared expenses in Pools (only shared entries are visible to other Pool members)</Li>
           <Li>To send push notifications based on your in-app preferences (you can turn off all notifications in Settings)</Li>
           <Li>To improve the app — using anonymised, aggregated analytics only</Li>
           <View style={{ height: 6 }} />
@@ -120,7 +118,6 @@ export default function PrivacyScreen() {
 
         <Section title="5. Data Sharing">
           <P>Your data is shared only in the following circumstances:</P>
-          <Li>Pool members — when you create or join a Pool, expenses you mark as shared are visible to other members of that Pool. Non-shared expenses are never shared.</Li>
           <Li>Infrastructure providers — we use cloud hosting providers to run our servers. Your encrypted data is stored on their infrastructure. These providers are contractually prohibited from accessing or processing your data beyond what is necessary to provide the hosting service.</Li>
           <Li>Legal requirements — we may disclose data if required by Nigerian law, a court order, or to protect the safety of users.</Li>
         </Section>

@@ -106,8 +106,6 @@ export default function FirstBillScreen() {
           dueDate,
           frequency,
           notes:       null,
-          householdId: null,
-          isShared:    false,
           notify30:    false,
           notify14:    true,
           notify7:     true,
@@ -145,8 +143,8 @@ export default function FirstBillScreen() {
         style={styles.container}
       >
         <OnboardingHeader
-          step={6}
-          total={8}
+          step={4}
+          total={6}
           onBack={() => router.back()}
           dark={false}
         />

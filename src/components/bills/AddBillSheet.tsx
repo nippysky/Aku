@@ -144,8 +144,6 @@ export function AddBillSheet({ isOpen, onClose, onSuccess }: AddBillSheetProps) 
         dueDate:     data.dueDate,
         frequency:   data.frequency,
         notes:       data.notes ?? null,
-        isShared:    false,
-        householdId: null,
         notify30:    false,
         notify14:    data.notify14,
         notify7:     data.notify7,

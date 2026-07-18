@@ -75,8 +75,6 @@ export default function FirstBudgetScreen() {
           category,
           amount,
           period,
-          householdId: null,
-          isShared:    false,
         },
         user.id,
       );
@@ -106,8 +104,8 @@ export default function FirstBudgetScreen() {
     >
       <View style={styles.container}>
         <OnboardingHeader
-          step={7}
-          total={8}
+          step={5}
+          total={6}
           onBack={() => router.back()}
           dark={false}
         />

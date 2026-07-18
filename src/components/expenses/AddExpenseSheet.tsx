@@ -132,8 +132,6 @@ export function AddExpenseSheet({ isOpen, onClose, onSuccess }: AddExpenseSheetP
             category:    data.category,
             description: data.description.trim() || null,
             date:        data.date,
-            isShared:    false,
-            householdId: null,
           },
           user.id,
         );

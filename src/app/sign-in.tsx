@@ -114,9 +114,9 @@ export default function SignInScreen() {
         // Mirror auth-callback.tsx routing:
         // sign-in screen is only reachable when hasOnboarded = false (new device / reinstall)
         if (isNew) {
-          router.replace('/(onboarding)/pin-setup');
+          router.replace('/(onboarding)/secure' as never);
         } else {
-          router.replace('/(onboarding)/pin-setup?returning=1');
+          router.replace('/(onboarding)/secure?returning=1' as never);
         }
       } catch (err) {
         setOtpError(err instanceof Error ? err.message : 'Invalid code. Please try again.');

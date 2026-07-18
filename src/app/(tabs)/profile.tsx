@@ -30,14 +30,10 @@ import {
   Download,
   Trash2,
   FileText,
-  Lock,
   MessageSquare,
   Check,
   Camera,
   ExternalLink,
-  Users,
-  Plus,
-  LogIn,
   Repeat,
   HelpCircle,
 } from 'lucide-react-native';
@@ -45,7 +41,6 @@ import { BottomSheetModal, BottomSheetView, BottomSheetBackdrop } from '@gorhom/
 import type { BottomSheetBackdropProps } from '@gorhom/bottom-sheet';
 import { useTheme } from '../../theme';
 import { useAuthStore } from '../../store/auth.store';
-import { useCirclesStore } from '../../store/pools.store';
 import { useUIStore } from '../../store/ui.store';
 import { useBillsStore } from '../../store/bills.store';
 import { useExpensesStore } from '../../store/expenses.store';
@@ -57,7 +52,6 @@ import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Divider } from '../../components/ui/Divider';
 import { AkuDatePicker } from '../../components/ui/AkuDatePicker';
-import { CreateCircleSheet } from '../../components/circles/CreateCircleSheet';
 import { formatAmount } from '../../lib/format';
 import type { ThemeMode } from '../../store/ui.store';
 
@@ -226,7 +220,6 @@ export default function ProfileScreen() {
   const router = useRouter();
 
   const { user, updateUser, saveAvatarData, biometric, setupBiometric, disableBiometric, signOut, deleteAccount } = useAuthStore();
-  const { circles, activeCircle, load: loadCircles } = useCirclesStore();
   const { showToast, currency, themeMode, setThemeMode } = useUIStore();
   const { bills }    = useBillsStore();
   const { expenses } = useExpensesStore();
@@ -298,16 +291,13 @@ export default function ProfileScreen() {
     return { from: rangeFrom || null, to: rangeTo || today };
   }, [rangePreset, rangeFrom, rangeTo]);
 
-  // ── Load circles + income on mount (ensures fresh data after app restart) ─────
+  // ── Load income on mount (ensures fresh data after app restart) ─────
   useEffect(() => {
     if (user?.id) {
-      loadCircles(user.id);
       loadAllInc(user.id);
     }
   }, [user?.id]);
 
-  // ── Create Circle sheet ───────────────────────────────────────────────
-  const [showCreateCircle, setShowCreateCircle] = useState(false);
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
 
   // ── Biometric toggle ──────────────────────────────────────────────────
@@ -315,7 +305,7 @@ export default function ProfileScreen() {
     if (value) {
       const success = await setupBiometric();
       if (!success) {
-        showToast('error', 'Biometric authentication not available on this device');
+        showToast('error', 'Set up a screen lock in your device settings first');
       }
     } else {
       await disableBiometric();
@@ -344,7 +334,7 @@ export default function ProfileScreen() {
   const handleDeleteAccount = useCallback(() => {
     Alert.alert(
       'Delete Account',
-      'This will permanently delete your Akù account and everything in it — expenses, bills, goals, budgets, income, and pools. This cannot be undone.',
+      'This will permanently delete your Akù account and everything in it — expenses, bills, goals, budgets, and income. This cannot be undone.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -671,8 +661,8 @@ export default function ProfileScreen() {
     <div class="pband-val">${rangeLabel}</div>
   </div>
   <div class="pband-block" style="text-align:right">
-    <div class="pband-label">Pool</div>
-    <div class="pband-val">${activeCircle?.name ?? '—'}</div>
+    <div class="pband-label">Account</div>
+    <div class="pband-val">Personal</div>
   </div>
 </div>
 
@@ -808,7 +798,7 @@ export default function ProfileScreen() {
     } catch {
       showToast('error', 'Failed to generate PDF');
     }
-  }, [user, activeCircle, currency, bills, expenses, incomeRecords, budgets, goals, showToast]);
+  }, [user, currency, bills, expenses, incomeRecords, budgets, goals, showToast]);
 
   // ── Feedback ──────────────────────────────────────────────────────────
   const handleFeedback = useCallback(() => {
@@ -872,113 +862,12 @@ export default function ProfileScreen() {
         </View>
 
 
-        {/* ── Circles section ── */}
-        <SectionHeader label="My Pools" />
-
-        {circles.length > 0 ? (
-          <>
-            {circles.map((circle) => (
-              <SettingsGroup key={circle.id}>
-                <SettingsRow
-                  icon={Users}
-                  label={circle.name}
-                  onPress={() => router.push(`/pool/${circle.id}` as never)}
-                  isFirst
-                  isLast
-                  rightElement={
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                      {circle.ownerId === user?.id && (
-                        <View style={[styles.ownerBadge, { backgroundColor: colors.primary + '18' }]}>
-                          <Text style={[{ fontFamily: font.sansSemiBold, fontSize: 10, color: colors.primary, letterSpacing: 0.4 }]}>
-                            OWNER
-                          </Text>
-                        </View>
-                      )}
-                      <ChevronRight size={16} color={colors.textTertiary} strokeWidth={1.8} />
-                    </View>
-                  }
-                />
-              </SettingsGroup>
-            ))}
-            <View style={styles.circleActions}>
-              <Pressable
-                style={({ pressed }) => [
-                  styles.circleActionBtn,
-                  { backgroundColor: colors.primary + '15', borderColor: colors.primary + '40', opacity: pressed ? 0.75 : 1 },
-                ]}
-                onPress={() => setShowCreateCircle(true)}
-              >
-                <Plus size={15} color={colors.primary} strokeWidth={2.2} />
-                <Text style={[text.caption, { color: colors.primary, fontFamily: font.sansSemiBold }]}>New Pool</Text>
-              </Pressable>
-              <Pressable
-                style={({ pressed }) => [
-                  styles.circleActionBtn,
-                  { backgroundColor: colors.backgroundSecondary, borderColor: colors.border, opacity: pressed ? 0.75 : 1 },
-                ]}
-                onPress={() => router.push('/pool/join' as never)}
-              >
-                <LogIn size={15} color={colors.primary} strokeWidth={2} />
-                <Text style={[text.caption, { color: colors.primary, fontFamily: font.sansMedium }]}>Join Pool</Text>
-              </Pressable>
-            </View>
-          </>
-        ) : (
-          <Card style={styles.circlesEmptyCard}>
-            {/* Icon badge */}
-            <View style={[styles.circlesEmptyBadge, { backgroundColor: colors.primary + '18', borderColor: colors.primary + '30' }]}>
-              <Users size={28} color={colors.primary} strokeWidth={1.5} />
-            </View>
-
-            <Text style={[text.bodyMedium, { color: colors.text, fontFamily: font.sansSemiBold, textAlign: 'center' }]}>
-              No Pools yet
-            </Text>
-            <Text style={[text.caption, { color: colors.textSecondary, textAlign: 'center', lineHeight: 19 }]}>
-              Save together, track together.{'\n'}Create one or join with an invite code.
-            </Text>
-
-            {/* Primary CTA — solid fill */}
-            <Pressable
-              style={({ pressed }) => [
-                styles.circlesEmptyPrimary,
-                { backgroundColor: colors.primary, opacity: pressed ? 0.82 : 1 },
-              ]}
-              onPress={() => setShowCreateCircle(true)}
-            >
-              <Plus size={17} color="#F5F2EC" strokeWidth={2.2} />
-              <Text style={[text.bodySm, { color: '#F5F2EC', fontFamily: font.sansSemiBold }]}>
-                Create a Pool
-              </Text>
-            </Pressable>
-
-            {/* Secondary CTA — outlined */}
-            <Pressable
-              style={({ pressed }) => [
-                styles.circlesEmptySecondary,
-                { borderColor: colors.primary + '50', opacity: pressed ? 0.7 : 1 },
-              ]}
-              onPress={() => router.push('/pool/join' as never)}
-            >
-              <LogIn size={17} color={colors.primary} strokeWidth={2} />
-              <Text style={[text.bodySm, { color: colors.primary, fontFamily: font.sansMedium }]}>
-                Join a Pool
-              </Text>
-            </Pressable>
-          </Card>
-        )}
-
         {/* ── Security ── */}
         <SectionHeader label="Security" />
         <SettingsGroup>
           <SettingsRow
-            icon={Lock}
-            label="Change Passcode"
-            onPress={() => router.push('/change-passcode' as never)}
-            isFirst
-          />
-          <SettingsRow
             icon={Fingerprint}
-            label="Face ID / Touch ID"
+            label="App Lock"
             rightElement={
               <Switch
                 value={biometric.enabled}
@@ -987,9 +876,14 @@ export default function ProfileScreen() {
                 thumbColor={colors.card}
               />
             }
+            isFirst
             isLast
           />
         </SettingsGroup>
+        <Text style={[text.caption, { color: colors.textTertiary, marginTop: -16, marginBottom: 24, marginLeft: 4, lineHeight: 17 }]}>
+          Locks Akù with your device security — Face ID, fingerprint, or your
+          phone's PIN. Nothing extra to remember.
+        </Text>
 
         {/* ── Notifications ── */}
         <SectionHeader label="Notifications" />
@@ -1108,6 +1002,21 @@ export default function ProfileScreen() {
               Sign Out
             </Text>
           </Pressable>
+        </View>
+
+        {/* ── Brand footer ── */}
+        <View style={styles.brandFooter}>
+          <Text style={[text.caption, { color: colors.textTertiary, textAlign: 'center' }]}>
+            Akù by <Text style={{ fontFamily: font.sansSemiBold, color: colors.textSecondary }}>NIPPYSKY</Text>
+          </Text>
+          <Pressable onPress={() => Linking.openURL('https://nippysky.com').catch(() => {})}>
+            <Text style={[text.caption, { color: colors.primary, textAlign: 'center' }]}>
+              nippysky.com
+            </Text>
+          </Pressable>
+          <Text style={[text.caption, { color: colors.textTertiary, textAlign: 'center', fontSize: 10 }]}>
+            Support: contact@nippysky.com · v1.0.0
+          </Text>
         </View>
       </ScrollView>
 
@@ -1406,12 +1315,6 @@ export default function ProfileScreen() {
         maxDate={new Date().toISOString().split('T')[0]!}
       />
 
-      {/* ── Create Circle sheet ── */}
-      <CreateCircleSheet
-        isOpen={showCreateCircle}
-        onClose={() => setShowCreateCircle(false)}
-        onSuccess={() => { if (user?.id) loadCircles(user.id); }}
-      />
     </View>
   );
 }
@@ -1457,64 +1360,6 @@ const styles = StyleSheet.create({
     padding:      16,
     marginBottom: 24,
   },
-  // ── My Pools empty state ────────────────────────────────────────────────
-  circlesEmptyCard: {
-    paddingVertical:   28,
-    paddingHorizontal: 20,
-    gap: 8,
-  },
-  circlesEmptyBadge: {
-    width:          64,
-    height:         64,
-    borderRadius:   32,
-    borderWidth:    1.5,
-    alignItems:     'center',
-    justifyContent: 'center',
-    alignSelf:      'center',
-    marginBottom:   4,
-  },
-  circlesEmptyPrimary: {
-    flexDirection:  'row',
-    alignItems:     'center',
-    justifyContent: 'center',
-    gap:            8,
-    paddingVertical: 15,
-    borderRadius:   100,
-    marginTop:      8,
-    marginBottom:   6,
-  },
-  circlesEmptySecondary: {
-    flexDirection:  'row',
-    alignItems:     'center',
-    justifyContent: 'center',
-    gap:            8,
-    paddingVertical: 14,
-    borderRadius:   100,
-    borderWidth:    1.5,
-  },
-
-  // ── Has-circles action row ─────────────────────────────────────────────────
-  circleActions: {
-    flexDirection:  'row',
-    gap:            10,
-    marginTop:      10,
-  },
-  circleActionBtn: {
-    flexDirection:   'row',
-    alignItems:      'center',
-    justifyContent:  'center',
-    gap:             6,
-    paddingVertical: 9,
-    paddingHorizontal: 16,
-    borderRadius:    100,
-    borderWidth:     1,
-  },
-  ownerBadge: {
-    paddingHorizontal: 6,
-    paddingVertical:   2,
-    borderRadius:      4,
-    marginRight:       4,
-  },
   sectionHeader: {
     marginTop:    20,
     marginBottom: 8,
@@ -1554,5 +1399,12 @@ const styles = StyleSheet.create({
     borderWidth:    1.5,
     alignItems:     'center',
     justifyContent: 'center',
+  },
+
+  brandFooter: {
+    alignItems: 'center',
+    gap:        4,
+    marginTop:  8,
+    marginBottom: 12,
   },
 });

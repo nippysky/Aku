@@ -11,6 +11,11 @@
 
 import { useSyncStore } from '../../store/sync.store';
 
+type EntityType =
+  | 'expense' | 'bill' | 'goal' | 'budget'
+  | 'goal_contribution' | 'income'
+  | 'recurring_expense' | 'recurring_income';
+
 let timer: ReturnType<typeof setTimeout> | null = null;
 
 export function triggerPush(): void {
@@ -21,4 +26,16 @@ export function triggerPush(): void {
     if (!dek) return; // local-only mode — nothing to push
     import('./engine').then(({ pushAll }) => pushAll().catch(() => {}));
   }, 400);
+}
+
+/**
+ * triggerDelete — queue a delete tombstone, then schedule a push.
+ * Ensures deletions propagate to the server and other devices instead of
+ * silently disappearing only on this device.
+ */
+export function triggerDelete(entityType: EntityType, entityId: string): void {
+  import('./engine')
+    .then(({ queueDelete }) => queueDelete(entityType, entityId))
+    .catch(() => {})
+    .finally(() => triggerPush());
 }

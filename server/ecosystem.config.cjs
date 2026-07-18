@@ -9,7 +9,7 @@
  *
  * Processes:
  *   aku-api           — Hono HTTP API server
- *   aku-notif-worker  — Background notification scheduler (daily 19:00 UTC + weekly Sunday 18:00 UTC)
+ *   aku-notif-worker  — Background notification scheduler (hourly 09:00–21:00 local per user + weekly Sunday 18:00)
  */
 
 module.exports = {

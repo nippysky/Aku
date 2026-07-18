@@ -89,8 +89,6 @@ export function AddBudgetSheet({ isOpen, onClose, onSuccess }: AddBudgetSheetPro
           category:    data.category,
           amount:      data.amount,
           period:      data.period,
-          isShared:    false,
-          householdId: null,
         },
         user.id,
       );

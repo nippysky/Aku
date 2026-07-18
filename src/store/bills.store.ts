@@ -8,7 +8,7 @@ import {
 import { generateUUID } from '../lib/uuid';
 import { notificationService } from '../lib/notifications';
 import { useUIStore } from './ui.store';
-import { triggerPush } from '../lib/sync/trigger';
+import { triggerPush, triggerDelete } from '../lib/sync/trigger';
 import type { Bill, BillCreateInput, BillUpdateInput, BillStatus, BillFrequency } from '../types';
 
 // ─── Recurring due-date helper ────────────────────────────────────────────────
@@ -46,14 +46,12 @@ function fromDb(row: typeof schema.bills.$inferSelect): Bill {
   return {
     id:          row.id,
     userId:      row.userId,
-    householdId: row.householdId ?? null,
     name:        row.name,
     amount:      row.amount,
     category:    row.category as Bill['category'],
     dueDate:     row.dueDate,
     frequency:   row.frequency as Bill['frequency'],
     notes:       row.notes ?? null,
-    isShared:    Boolean(row.isShared),
     isPaid:      Boolean(row.isPaid),
     paidAt:      row.paidAt ?? null,
     status:      'upcoming',
@@ -132,14 +130,12 @@ export const useBillsStore = create<BillsState>()((set, get) => ({
       await db.insert(schema.bills).values({
         id,
         userId,
-        householdId: input.householdId,
         name:        input.name,
         amount:      input.amount,
         category:    input.category,
         dueDate:     input.dueDate,
         frequency:   input.frequency,
         notes:       input.notes,
-        isShared:    input.isShared,
         isPaid:      false,
         notify30:    input.notify30,
         notify14:    input.notify14,
@@ -285,7 +281,7 @@ export const useBillsStore = create<BillsState>()((set, get) => ({
     notificationService.cancelBillReminders(id).catch(() => {});
     const bills = get().bills.filter((b) => b.id !== id);
     _setBills(set, bills);
-    triggerPush();
+    triggerDelete('bill', id);
   },
 
   clearError: () => set({ error: null }),

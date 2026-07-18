@@ -4,7 +4,7 @@ import { getDatabase, schema } from '../lib/database/client';
 import { differenceInMonths, parseISO } from 'date-fns';
 import { generateUUID } from '../lib/uuid';
 import { notificationService } from '../lib/notifications';
-import { triggerPush } from '../lib/sync/trigger';
+import { triggerPush, triggerDelete } from '../lib/sync/trigger';
 import type {
   Goal, GoalWithProgress, GoalContribution,
   GoalCreateInput, GoalUpdateInput, ContributionCreateInput,
@@ -31,7 +31,6 @@ function fromDb(row: typeof schema.goals.$inferSelect): Goal {
   return {
     id:           row.id,
     userId:       row.userId,
-    householdId:  row.householdId ?? null,
     name:         row.name,
     targetAmount: row.targetAmount,
     savedAmount:  row.savedAmount ?? 0,
@@ -39,7 +38,9 @@ function fromDb(row: typeof schema.goals.$inferSelect): Goal {
     notes:        row.notes ?? null,
     emoji:        row.emoji ?? null,
     color:        row.color ?? null,
-    isShared:     Boolean(row.isShared),
+    bankName:      row.bankName ?? null,
+    accountName:   row.accountName ?? null,
+    accountNumber: row.accountNumber ?? null,
     isCompleted:  Boolean(row.isCompleted),
     completedAt:  row.completedAt ?? null,
     createdAt:    row.createdAt,
@@ -138,7 +139,6 @@ export const useGoalsStore = create<GoalsState>()((set, get) => ({
       await db.insert(schema.goals).values({
         id,
         userId,
-        householdId:  input.householdId,
         name:         input.name,
         targetAmount: input.targetAmount,
         savedAmount:  0,
@@ -146,7 +146,9 @@ export const useGoalsStore = create<GoalsState>()((set, get) => ({
         notes:        input.notes,
         emoji:        input.emoji,
         color:        input.color,
-        isShared:     input.isShared,
+        bankName:      input.bankName,
+        accountName:   input.accountName,
+        accountNumber: input.accountNumber,
         isCompleted:  false,
         createdAt:    now,
         updatedAt:    now,
@@ -193,9 +195,24 @@ export const useGoalsStore = create<GoalsState>()((set, get) => ({
 
   remove: async (id) => {
     const db = getDatabase();
+    // Tombstone + delete the goal's contributions first (no orphans locally
+    // or on the server)
+    const contribRows = await db
+      .select({ id: schema.goalContributions.id })
+      .from(schema.goalContributions)
+      .where(eq(schema.goalContributions.goalId, id));
+    await db.delete(schema.goalContributions)
+      .where(eq(schema.goalContributions.goalId, id));
+    for (const c of contribRows) triggerDelete('goal_contribution', c.id);
+
     await db.delete(schema.goals).where(eq(schema.goals.id, id));
-    set((s) => ({ goals: s.goals.filter((g) => g.id !== id) }));
-    triggerPush();
+    set((s) => ({
+      goals:         s.goals.filter((g) => g.id !== id),
+      contributions: Object.fromEntries(
+        Object.entries(s.contributions).filter(([gid]) => gid !== id),
+      ),
+    }));
+    triggerDelete('goal', id);
   },
 
   addContribution: async (input, userId) => {
@@ -291,7 +308,7 @@ export const useGoalsStore = create<GoalsState>()((set, get) => ({
         [goalId]: (s.contributions[goalId] ?? []).filter((c) => c.id !== contributionId),
       },
     }));
-    triggerPush();
+    triggerDelete('goal_contribution', contributionId);
   },
 
   clearError: () => set({ error: null }),

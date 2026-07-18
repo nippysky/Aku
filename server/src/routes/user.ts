@@ -175,7 +175,7 @@ router.post('/dek', async (c) => {
 // ─── DELETE /api/user/me ──────────────────────────────────────────────────────
 // Permanently deletes the user's account and ALL associated data.
 // PostgreSQL ON DELETE CASCADE handles: sessions, sync_records, push_tokens,
-// pools (owned), pool_members, notification_log, user_insights.
+// notification_log, user_insights.
 // magic_tokens is keyed by email (not userId), so we delete it manually first.
 
 router.delete('/me', async (c) => {

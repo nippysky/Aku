@@ -11,7 +11,7 @@ import { eq, and, lte } from 'drizzle-orm';
 import { getDatabase, schema } from '../lib/database/client';
 import { format, addDays, addWeeks, addMonths, addYears, parseISO } from 'date-fns';
 import { generateUUID } from '../lib/uuid';
-import { triggerPush } from '../lib/sync/trigger';
+import { triggerPush, triggerDelete } from '../lib/sync/trigger';
 import type { IncomeCategory } from '../types';
 import type { RecurringFrequency } from './recurring-expenses.store';
 
@@ -182,7 +182,7 @@ export const useRecurringIncomeStore = create<RecurringIncomeState>()((set, get)
     const db = getDatabase();
     await db.delete(schema.recurringIncome).where(eq(schema.recurringIncome.id, id));
     set((s) => ({ items: s.items.filter((i) => i.id !== id) }));
-    triggerPush();
+    triggerDelete('recurring_income', id);
   },
 
   toggleActive: async (id) => {

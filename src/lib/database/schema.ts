@@ -10,7 +10,6 @@ export const users = sqliteTable('users', {
   id:          text('id').primaryKey(),
   name:        text('name').notNull(),
   email:       text('email').notNull().unique(),
-  householdId: text('household_id'),
   avatarUrl:   text('avatar_url'),
   /** Base64 data URI for profile photo — stored locally, never hits a CDN. */
   avatarData:  text('avatar_data'),
@@ -20,28 +19,6 @@ export const users = sqliteTable('users', {
   updatedAt:   text('updated_at').notNull(),
 }, (t) => [
   index('idx_users_email').on(t.email),
-  index('idx_users_household').on(t.householdId),
-]);
-
-// ─── Households ───────────────────────────────────────────────────────────
-
-export const households = sqliteTable('households', {
-  id:         text('id').primaryKey(),
-  name:       text('name').notNull(),
-  ownerId:    text('owner_id').notNull(),
-  inviteCode: text('invite_code'),   // 8-char alphanumeric, unique per circle
-  createdAt:  text('created_at').notNull(),
-});
-
-export const householdMembers = sqliteTable('household_members', {
-  id:          text('id').primaryKey(),
-  householdId: text('household_id').notNull(),
-  userId:      text('user_id').notNull(),
-  role:        text('role', { enum: ['owner', 'member'] }).notNull().default('member'),
-  joinedAt:    text('joined_at').notNull(),
-}, (t) => [
-  index('idx_members_household').on(t.householdId),
-  index('idx_members_user').on(t.userId),
 ]);
 
 // ─── Bills ────────────────────────────────────────────────────────────────
@@ -49,14 +26,12 @@ export const householdMembers = sqliteTable('household_members', {
 export const bills = sqliteTable('bills', {
   id:          text('id').primaryKey(),
   userId:      text('user_id').notNull(),
-  householdId: text('household_id'),
   name:        text('name').notNull(),
   amount:      int('amount').notNull(),       // in kobo
   category:    text('category').notNull(),
   dueDate:     text('due_date').notNull(),    // 'YYYY-MM-DD'
   frequency:   text('frequency').notNull(),
   notes:       text('notes'),
-  isShared:    int('is_shared', { mode: 'boolean' }).default(false),
   isPaid:      int('is_paid', { mode: 'boolean' }).default(false),
   paidAt:      text('paid_at'),
   // notification toggles
@@ -71,7 +46,6 @@ export const bills = sqliteTable('bills', {
 }, (t) => [
   index('idx_bills_user').on(t.userId),
   index('idx_bills_due').on(t.dueDate),
-  index('idx_bills_household').on(t.householdId),
 ]);
 
 // ─── Expenses ─────────────────────────────────────────────────────────────
@@ -79,19 +53,16 @@ export const bills = sqliteTable('bills', {
 export const expenses = sqliteTable('expenses', {
   id:          text('id').primaryKey(),
   userId:      text('user_id').notNull(),
-  householdId: text('household_id'),
   amount:      int('amount').notNull(),       // in kobo
   category:    text('category').notNull(),
   description: text('description'),
   date:        text('date').notNull(),        // 'YYYY-MM-DD'
-  isShared:    int('is_shared', { mode: 'boolean' }).default(false),
   createdAt:   text('created_at').notNull(),
   updatedAt:   text('updated_at').notNull(),
 }, (t) => [
   index('idx_expenses_user').on(t.userId),
   index('idx_expenses_date').on(t.date),
   index('idx_expenses_category').on(t.category),
-  index('idx_expenses_household').on(t.householdId),
 ]);
 
 // ─── Income ───────────────────────────────────────────────────────────────
@@ -116,11 +87,9 @@ export const income = sqliteTable('income', {
 export const budgets = sqliteTable('budgets', {
   id:          text('id').primaryKey(),
   userId:      text('user_id').notNull(),
-  householdId: text('household_id'),
   category:    text('category').notNull(),
   amount:      int('amount').notNull(),       // in kobo
   period:      text('period', { enum: ['weekly', 'monthly', 'yearly'] }).notNull(),
-  isShared:    int('is_shared', { mode: 'boolean' }).default(false),
   createdAt:   text('created_at').notNull(),
   updatedAt:   text('updated_at').notNull(),
 }, (t) => [
@@ -133,7 +102,6 @@ export const budgets = sqliteTable('budgets', {
 export const goals = sqliteTable('goals', {
   id:           text('id').primaryKey(),
   userId:       text('user_id').notNull(),
-  householdId:  text('household_id'),
   name:         text('name').notNull(),
   targetAmount: int('target_amount').notNull(),   // in kobo
   savedAmount:  int('saved_amount').notNull().default(0),
@@ -141,14 +109,16 @@ export const goals = sqliteTable('goals', {
   notes:        text('notes'),
   emoji:        text('emoji'),
   color:        text('color'),
-  isShared:     int('is_shared', { mode: 'boolean' }).default(false),
+  // Optional destination account for this goal's savings
+  bankName:      text('bank_name'),
+  accountName:   text('account_name'),
+  accountNumber: text('account_number'),
   isCompleted:  int('is_completed', { mode: 'boolean' }).default(false),
   completedAt:  text('completed_at'),
   createdAt:    text('created_at').notNull(),
   updatedAt:    text('updated_at').notNull(),
 }, (t) => [
   index('idx_goals_user').on(t.userId),
-  index('idx_goals_household').on(t.householdId),
 ]);
 
 export const goalContributions = sqliteTable('goal_contributions', {
@@ -184,44 +154,6 @@ export const notifications = sqliteTable('notifications', {
   index('idx_notifications_user_created').on(t.userId, t.createdAt),
   // Fast lookup by referenceId (e.g. "all notifications for bill X")
   index('idx_notifications_reference').on(t.referenceId),
-]);
-
-// ─── Circle Settings ──────────────────────────────────────────────────────
-// One-to-one extension of households for contribution-circle features.
-
-export const circleSettings = sqliteTable('circle_settings', {
-  id:               text('id').primaryKey(),         // = householdId
-  emoji:            text('emoji'),                   // circle emoji icon
-  targetAmount:     int('target_amount'),             // kobo; null = no target / open-ended
-  description:      text('description'),             // purpose / reason for the circle
-  frequency:        text('frequency'),               // 'weekly'|'biweekly'|'monthly'|'quarterly'|'yearly'|'one-time'
-  perMemberAmount:  int('per_member_amount'),         // kobo; null = auto (target/memberCount)
-  contributionType: text('contribution_type'),        // 'equal' | 'custom'
-  deadline:         text('deadline'),                 // ISO date; optional
-  accountName:      text('account_name'),             // optional payment details
-  accountNumber:    text('account_number'),
-  bankName:         text('bank_name'),
-  notes:            text('notes'),
-  updatedAt:        text('updated_at').notNull(),
-});
-
-// ─── Circle Contributions ─────────────────────────────────────────────────
-
-export const circleContributions = sqliteTable('circle_contributions', {
-  id:         text('id').primaryKey(),
-  circleId:   text('circle_id').notNull(),
-  userId:     text('user_id').notNull(),
-  amount:     int('amount').notNull(),             // in kobo
-  note:       text('note'),
-  status:     text('status', { enum: ['pending', 'verified'] })
-                .notNull().default('pending'),
-  createdAt:  text('created_at').notNull(),
-  verifiedAt: text('verified_at'),
-  verifiedBy: text('verified_by'),
-}, (t) => [
-  index('idx_circle_contributions_circle').on(t.circleId),
-  index('idx_circle_contributions_user').on(t.userId),
-  index('idx_circle_contributions_status').on(t.status),
 ]);
 
 // ─── App State (persisted UI preferences) ────────────────────────────────
@@ -280,8 +212,6 @@ export const recurringIncome = sqliteTable('recurring_income', {
 
 export const schema = {
   users,
-  households,
-  householdMembers,
   bills,
   expenses,
   income,
@@ -289,9 +219,7 @@ export const schema = {
   goals,
   goalContributions,
   notifications,
-  circleSettings,
   recurringExpenses,
   recurringIncome,
-  circleContributions,
   appState,
 };

@@ -113,16 +113,9 @@ class WsClient {
           import('./engine').then(({ pullAndMerge }) => {
             pullAndMerge(lastSyncAt).catch(() => {});
           });
-          // Profile + circles are outside sync_records — fetch separately
+          // Profile is outside sync_records — fetch separately
           import('../../store/auth.store').then(({ useAuthStore }) => {
-            const store  = useAuthStore.getState();
-            const userId = store.user?.id;
-            store.refreshProfile().catch(() => {});
-            if (userId) {
-              import('../../store/pools.store').then(({ useCirclesStore }) => {
-                useCirclesStore.getState().syncFromServer(userId).catch(() => {});
-              });
-            }
+            useAuthStore.getState().refreshProfile().catch(() => {});
           });
         }
       };
@@ -138,16 +131,8 @@ class WsClient {
               pullAndMerge(lastSyncAt).catch(() => {});
             });
             import('../../store/auth.store').then(({ useAuthStore }) => {
-              const store = useAuthStore.getState();
-              const userId = store.user?.id;
               // Refresh profile (name + avatar) from server
-              store.refreshProfile().catch(() => {});
-              // Circles are outside sync_records — fetch separately
-              if (userId) {
-                import('../../store/pools.store').then(({ useCirclesStore }) => {
-                  useCirclesStore.getState().syncFromServer(userId).catch(() => {});
-                });
-              }
+              useAuthStore.getState().refreshProfile().catch(() => {});
             });
           }
           // 'pong' is implicit proof-of-life — no action needed
