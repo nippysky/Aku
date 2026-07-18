@@ -224,14 +224,32 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
         }
       }
 
+      const willBeLocked = hasOnboarded && locallyValid && biometric.enabled;
+
       set({
         user:          userWithAvatar,
         session,
         biometric,
         hasOnboarded,
-        isLocked:      hasOnboarded && locallyValid && biometric.enabled,
+        isLocked:      willBeLocked,
         isInitialized: true,
       });
+
+      // ── Warm the sync layer ────────────────────────────────────────────
+      // Load persisted push/pull cursors BEFORE any sync can run, so the
+      // first sync of the session is a true delta, not a full re-push/pull.
+      await useSyncStore.getState().loadLastSyncAt();
+
+      // If the app starts UNLOCKED (App Lock off, or no enrolled device
+      // security), no unlock flow will ever run — so load the DEK and kick
+      // off sync here. Locked starts load the DEK in unlockWithDeviceAuth().
+      if (!willBeLocked && hasOnboarded && userWithAvatar) {
+        void useSyncStore.getState().loadDek().then((loaded) => {
+          if (loaded) {
+            import('../lib/sync/engine').then(({ fullSync }) => fullSync()).catch(() => {});
+          }
+        });
+      }
     } catch {
       set({ isInitialized: true, isLocked: false });
     } finally {

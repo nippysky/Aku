@@ -80,13 +80,12 @@ export default function SecureScreen() {
           await setupBiometric(); // flips the app lock on
         }
 
-        // 3. Unlock + finish
-        await completeOnboardingAndUnlock();
-
         if (cancelled) return;
 
         if (isReturning) {
-          // Returning user — restore their data before entering
+          // Returning user — mark onboarding done + unlock, restore data, enter.
+          // (Atomic set: avoids the nav guard seeing hasOnboarded:true+isLocked:true)
+          await completeOnboardingAndUnlock();
           setPhase('syncing');
           try {
             const { fullSync } = await import('../../lib/sync/engine');
@@ -94,6 +93,9 @@ export default function SecureScreen() {
           } catch { /* non-fatal — partial data still usable */ }
           router.replace('/(tabs)');
         } else {
+          // New user — DON'T mark onboarding complete yet; the guard would
+          // bounce them to tabs and skip first-bill/budget/goal. The final
+          // onboarding screen (first-goal) calls markOnboardingComplete().
           setPhase('ready');
         }
       } catch (err) {

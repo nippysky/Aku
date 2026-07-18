@@ -37,15 +37,14 @@ export default function FirstGoalScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
 
-  const { user, unlock, markOnboardingComplete } = useAuthStore();
+  const { user, completeOnboardingAndUnlock } = useAuthStore();
   const { add: addGoal } = useGoalsStore();
 
   async function finishOnboarding() {
-    // markOnboardingComplete MUST come before unlock().
-    // unlock() triggers the nav guard; if hasOnboarded is still false the
-    // guard sends the user back to /(onboarding). Write the flag first.
-    await markOnboardingComplete();
-    unlock();
+    // Atomic: sets hasOnboarded:true + isLocked:false in ONE set() call.
+    // Two separate calls let the nav guard see the intermediate state
+    // (onboarded but still locked) and flash the lock screen.
+    await completeOnboardingAndUnlock();
     OnboardingStorage.clear();
     router.replace('/(tabs)');
   }
