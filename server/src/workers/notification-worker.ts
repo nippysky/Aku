@@ -415,7 +415,7 @@ function pickWeeklyMessage(u: UserRow, prefs: NotifPrefs): PushPayload | null {
   // Weekly summary is part of the daily digest pref
   if (!prefs.dailyDigest) return null;
 
-  const baseData = { type: 'weekly_summary', screen: 'home' };
+  const baseData = { type: 'weekly_summary', screen: 'analytics' };
 
   // Spending spike
   if (u.weeklyChangePct != null && u.weeklyChangePct >= 25) {
@@ -596,7 +596,7 @@ function pickHourlyMessage(u: UserRow, hour: number, prefs: NotifPrefs): PushPay
         title:     `You're keeping ${Math.round(u.savingsRatePct)}% of your income 🏆`,
         body:      'That is elite-level saving this month. See the full picture in Analytics.',
         channelId: 'digest',
-        data:      { ...baseData, screen: 'home' },
+        data:      { ...baseData, screen: 'analytics' },
       };
     }
     if (u.savingsRatePct < 0) {

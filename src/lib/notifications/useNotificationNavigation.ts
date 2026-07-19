@@ -12,14 +12,23 @@
  *  goal_milestone   → /goals/[id]          (goal detail)
  *  daily_digest     → /(tabs)/expenses     (log today's spending)
  *  daily_reminder   → /(tabs)/expenses     (server push → log spending)
- *  weekly_summary   → /(tabs)/index        (home — financial overview)
+ *  weekly_summary   → /analytics           (financial overview)
  *  hourly_reminder  → /(tabs)/expenses     (log expenses / income)
  *  bedtime_reminder → /(tabs)/expenses     (final log check before sleep)
- *  default          → /(tabs)/index        (home)
+ *  default          → /(tabs)             (home)
+ *
+ * Safety: every href below is validated against the app's real route table.
+ * `/(tabs)/index` is NOT a valid href — Expo Router collapses an index route
+ * to its group's own path (`/(tabs)`), so anything that used to push
+ * `/(tabs)/index` landed on "Unmatched Route" (iOS) / a frozen splash-colored
+ * screen (Android). Any resolution failure below falls back to `/(tabs)`.
  */
 import { useEffect, useRef } from 'react';
 import { useRouter } from 'expo-router';
 import * as Notifications from 'expo-notifications';
+import { useAuthStore } from '../../store/auth.store';
+
+const HOME_HREF = '/(tabs)';
 
 // ─── Notification data payload (shared with server worker) ────────────────────
 
@@ -61,9 +70,14 @@ export function useNotificationNavigation(): void {
     const last = Notifications.getLastNotificationResponse();
     if (last?.notification.request.content.data) {
       const data = last.notification.request.content.data as NotificationData;
-      // Delay: the router and nav stack aren't mounted yet at this point.
-      // We need to wait for: fonts + auth init + tab stack settle.
-      setTimeout(() => navigate(router, data, true), 800);
+      // The router/nav stack + the root layout's auth redirect aren't settled
+      // yet at this point. Wait for auth init (fonts + DB + session resolve)
+      // rather than guessing a fixed delay, then give the auth-guard's
+      // router.replace() a short buffer to land before we push on top of it.
+      // Fails open after a bounded wait so we never hang forever.
+      waitUntilAuthReady().then(() => {
+        setTimeout(() => navigate(router, data, true), 400);
+      });
     }
 
     return () => {
@@ -73,7 +87,47 @@ export function useNotificationNavigation(): void {
   }, [router]);
 }
 
+// ─── Readiness gate ─────────────────────────────────────────────────────────
+
+/**
+ * Waits for auth init (fonts + DB + session resolution) to complete before
+ * the cold-start deep link fires, so it never races the root layout's own
+ * router.replace() redirect. Fails open after MAX_WAIT_MS so a stuck init
+ * never permanently swallows the notification tap.
+ */
+function waitUntilAuthReady(): Promise<void> {
+  const POLL_MS    = 150;
+  const MAX_WAIT_MS = 4000;
+
+  return new Promise((resolve) => {
+    const start = Date.now();
+    const check = () => {
+      const { isInitialized } = useAuthStore.getState();
+      if (isInitialized || Date.now() - start >= MAX_WAIT_MS) {
+        resolve();
+        return;
+      }
+      setTimeout(check, POLL_MS);
+    };
+    check();
+  });
+}
+
 // ─── Navigation resolver ──────────────────────────────────────────────────────
+
+/** Pushes a href, and if that somehow throws, always falls back to home. */
+function safePush(router: ReturnType<typeof useRouter>, href: string): void {
+  try {
+    router.push(href as never);
+  } catch {
+    try {
+      router.push(HOME_HREF as never);
+    } catch {
+      // Nothing more we can safely do — avoid crashing the app over a
+      // notification tap.
+    }
+  }
+}
 
 function navigate(
   router: ReturnType<typeof useRouter>,
@@ -84,18 +138,21 @@ function navigate(
   // stack mount before we try to push a modal/detail screen on top.
   const entityDelay = isColdStart ? 400 : 0;
 
-  const resolved = resolveRoute(data);
-
-  if (!resolved) return;
+  let resolved: ResolvedRoute;
+  try {
+    resolved = resolveRoute(data) ?? { href: HOME_HREF, type: 'tab' };
+  } catch {
+    resolved = { href: HOME_HREF, type: 'tab' };
+  }
 
   if (resolved.type === 'tab') {
     // Navigate to a tab — safe to do immediately (tabs always exist)
-    router.push(resolved.href as never);
+    safePush(router, resolved.href);
     return;
   }
 
   // Navigate to a detail screen — needs the stack to be ready
-  setTimeout(() => router.push(resolved.href as never), entityDelay);
+  setTimeout(() => safePush(router, resolved.href), entityDelay);
 }
 
 interface ResolvedRoute {
@@ -143,8 +200,11 @@ function resolveRoute(data: NotificationData): ResolvedRoute | null {
       case 'notifications':
         return { href: '/notifications', type: 'detail' };
 
+      case 'analytics':
+        return { href: '/analytics', type: 'detail' };
+
       case 'home':
-        return { href: '/(tabs)/index', type: 'tab' };
+        return { href: HOME_HREF, type: 'tab' };
 
       // Unknown screen value — fall through to type-based routing below
     }
@@ -177,12 +237,14 @@ function resolveRoute(data: NotificationData): ResolvedRoute | null {
       return { href: '/(tabs)/expenses', type: 'tab' };
 
     // Server push: weekly summary
-    // Open the home dashboard which shows the weekly financial overview
+    // Open Analytics, which shows the weekly/monthly financial overview
+    // (matches the in-app notification history's own mapping — see
+    // src/app/notifications.tsx's getHistoryHref).
     case 'weekly_summary':
-      return { href: '/(tabs)/index', type: 'tab' };
+      return { href: '/analytics', type: 'detail' };
 
   }
 
   // ── Default: home ────────────────────────────────────────────────────────
-  return { href: '/(tabs)/index', type: 'tab' };
+  return { href: HOME_HREF, type: 'tab' };
 }
