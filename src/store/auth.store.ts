@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import * as SecureStore from 'expo-secure-store';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { eq } from 'drizzle-orm';
 import { generateUUID } from '../lib/uuid';
@@ -42,6 +43,40 @@ const KEYS = {
   USER:      'aku_user',
   ONBOARDED: 'aku_onboarded',  // persists across restarts
 } as const;
+
+// ─── First-launch sentinel ────────────────────────────────────────────────
+// iOS Keychain (backing SecureStore) survives app deletion — the app sandbox
+// (including this file) does not. If this file is missing on a cold start,
+// it means either (a) truly first-ever launch, or (b) the app was deleted and
+// reinstalled, leaving a stale session in the Keychain. Either way, any
+// SecureStore auth data at that point is untrustworthy and must be purged so
+// "delete the app" behaves like a real sign-out, not a silent auto-login.
+const FIRST_LAUNCH_SENTINEL = `${FileSystem.documentDirectory ?? ''}.aku_installed`;
+
+async function purgeStaleKeychainSessionIfReinstalled(): Promise<void> {
+  try {
+    const info = await FileSystem.getInfoAsync(FIRST_LAUNCH_SENTINEL);
+    if (info.exists) return;
+
+    // No sentinel — sandbox is fresh. Wipe anything the Keychain held over
+    // from a previous install before we ever read it below.
+    await Promise.all([
+      SecureStore.deleteItemAsync(KEYS.SESSION),
+      SecureStore.deleteItemAsync(KEYS.USER),
+      SecureStore.deleteItemAsync(KEYS.PIN_HASH),
+      SecureStore.deleteItemAsync(KEYS.BIOMETRIC),
+      SecureStore.deleteItemAsync(KEYS.ONBOARDED),
+    ]);
+    try {
+      await useSyncStore.getState().clearDek();
+    } catch { /* non-fatal — DEK store may not be ready yet */ }
+
+    await FileSystem.writeAsStringAsync(FIRST_LAUNCH_SENTINEL, String(Date.now()));
+  } catch {
+    // FileSystem unavailable for some reason — fail open (keep existing
+    // behavior) rather than block app startup.
+  }
+}
 
 // ─── State ────────────────────────────────────────────────────────────────
 
@@ -124,6 +159,10 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
   initialize: async () => {
     try {
       set({ isLoading: true });
+
+      // Must run BEFORE any SecureStore reads below — purges a stale
+      // Keychain session left over from a previous install.
+      await purgeStaleKeychainSessionIfReinstalled();
 
       const [sessionJson, userJson, biometricJson, onboardedStr] = await Promise.all([
         SecureStore.getItemAsync(KEYS.SESSION),
