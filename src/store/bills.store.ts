@@ -142,6 +142,61 @@ async function logBillPaymentExpense(bill: Bill): Promise<string> {
   return expenseId;
 }
 
+/**
+ * Logs one auto-pay bill into the expense ledger and advances its due date
+ * (or marks it permanently paid if one-time/custom). Shared by processAutoPay()
+ * — the batch catch-up that runs on unlock/foreground — and by add()/update(),
+ * which call this immediately so a bill that's created (or toggled autoPay=on)
+ * already due today doesn't have to wait for the next unlock cycle to log.
+ *
+ * Returns null if the bill isn't eligible (not autoPay, already paid, not yet
+ * due) or if the ledger write failed (safe to retry on the next pass).
+ */
+async function autoPayLogBill(
+  bill: Bill,
+): Promise<{ bill: Bill; summary: { name: string; amount: number } } | null> {
+  const today = format(new Date(), 'yyyy-MM-dd');
+  if (!bill.autoPay || bill.isPaid || bill.dueDate > today) return null;
+
+  const db = getDatabase();
+  let paymentExpenseId: string | null = null;
+  try {
+    paymentExpenseId = await logBillPaymentExpense(bill);
+  } catch {
+    return null; // ledger write failed — retry next time, don't advance
+  }
+
+  const now = new Date().toISOString();
+
+  // Advance past today, catching up multiple missed periods in one go.
+  let nextDue: string | null = bill.dueDate;
+  do {
+    nextDue = advanceDueDate(nextDue, bill.frequency);
+  } while (nextDue && nextDue <= today);
+
+  let updated: Bill;
+  if (nextDue) {
+    await db
+      .update(schema.bills)
+      .set({ isPaid: false, paidAt: null, dueDate: nextDue, lastPaymentExpenseId: null, updatedAt: now })
+      .where(eq(schema.bills.id, bill.id));
+    updated = { ...bill, isPaid: false, paidAt: null, dueDate: nextDue, lastPaymentExpenseId: null, updatedAt: now };
+  } else {
+    // One-time / custom auto-pay bill — logged once, done.
+    await db
+      .update(schema.bills)
+      .set({ isPaid: true, paidAt: now, lastPaymentExpenseId: paymentExpenseId, updatedAt: now })
+      .where(eq(schema.bills.id, bill.id));
+    updated = { ...bill, isPaid: true, paidAt: now, lastPaymentExpenseId: paymentExpenseId, updatedAt: now };
+  }
+  updated.status = computeStatus(updated);
+
+  // Confirm to the user it happened — fires immediately, no future scheduling.
+  notificationService.scheduleAutoPayConfirmation(bill, useUIStore.getState().currency.symbol).catch(() => {});
+
+  return { bill: updated, summary: { name: bill.name, amount: bill.amount } };
+}
+
 // Prevents processAutoPay from running concurrently (e.g. rapid unlock events).
 const autoPayProcessingGuard = new Map<string, boolean>();
 
@@ -220,12 +275,19 @@ export const useBillsStore = create<BillsState>()((set, get) => ({
         notificationService.scheduleBillReminders(newBill, useUIStore.getState().currency.symbol).catch(() => {});
       }
 
-      const bills = [...get().bills, newBill].sort((a, b) =>
+      // If this new bill is auto-pay and already due (created with a due date
+      // of today or earlier), log it immediately rather than waiting for the
+      // next unlock/foreground catch-up cycle.
+      let finalBill = newBill;
+      const autoResult = await autoPayLogBill(newBill);
+      if (autoResult) finalBill = autoResult.bill;
+
+      const bills = [...get().bills, finalBill].sort((a, b) =>
         a.dueDate.localeCompare(b.dueDate)
       );
       _setBills(set, bills);
       triggerPush();
-      return newBill;
+      return finalBill;
     } catch (e: any) {
       set({ error: e?.message ?? 'Failed to add bill' });
       throw e;
@@ -246,6 +308,8 @@ export const useBillsStore = create<BillsState>()((set, get) => ({
         .set({ ...rest, updatedAt: now })
         .where(eq(schema.bills.id, id));
 
+      let updatedBill: Bill | null = null;
+
       const bills = get().bills.map((b) => {
         if (b.id !== id) return b;
         const updated = { ...b, ...rest, updatedAt: now, status: computeStatus({ ...b, ...rest }) };
@@ -256,10 +320,23 @@ export const useBillsStore = create<BillsState>()((set, get) => ({
         } else {
           notificationService.scheduleBillReminders(updated, useUIStore.getState().currency.symbol).catch(() => {});
         }
+        updatedBill = updated;
         return updated;
       });
       _setBills(set, bills);
       triggerPush();
+
+      // If this update just turned auto-pay on (or it was already on) for a
+      // bill that's already due, log it immediately — don't make the user
+      // wait for the next unlock/foreground cycle to see it happen.
+      if (updatedBill) {
+        const autoResult = await autoPayLogBill(updatedBill);
+        if (autoResult) {
+          const refreshed = get().bills.map((b) => (b.id === id ? autoResult.bill : b));
+          _setBills(set, refreshed);
+          triggerPush();
+        }
+      }
     } catch (e: any) {
       set({ error: e?.message ?? 'Failed to update bill' });
     } finally {
@@ -377,7 +454,6 @@ export const useBillsStore = create<BillsState>()((set, get) => ({
     if (autoPayProcessingGuard.get(userId)) return [];
     autoPayProcessingGuard.set(userId, true);
 
-    const db      = getDatabase();
     const today   = format(new Date(), 'yyyy-MM-dd');
     const logged: { name: string; amount: number }[] = [];
 
@@ -385,40 +461,12 @@ export const useBillsStore = create<BillsState>()((set, get) => ({
       const due = get().bills.filter((b) => b.autoPay && !b.isPaid && b.dueDate <= today);
 
       for (const bill of due) {
-        let paymentExpenseId: string | null = null;
-        try {
-          paymentExpenseId = await logBillPaymentExpense(bill);
-        } catch {
-          continue; // ledger write failed — retry next time, don't advance
-        }
-
-        const now = new Date().toISOString();
-
-        // Advance past today, catching up multiple missed periods in one go
-        // (mirrors the old recurring-expenses behaviour — one expense logged,
-        // due date fast-forwarded to the next real cycle).
-        let nextDue: string | null = bill.dueDate;
-        do {
-          nextDue = advanceDueDate(nextDue, bill.frequency);
-        } while (nextDue && nextDue <= today);
-
-        if (nextDue) {
-          await db
-            .update(schema.bills)
-            .set({ isPaid: false, paidAt: null, dueDate: nextDue, lastPaymentExpenseId: null, updatedAt: now })
-            .where(eq(schema.bills.id, bill.id));
-        } else {
-          // One-time / custom auto-pay bill — logged once, done.
-          await db
-            .update(schema.bills)
-            .set({ isPaid: true, paidAt: now, lastPaymentExpenseId: paymentExpenseId, updatedAt: now })
-            .where(eq(schema.bills.id, bill.id));
-        }
-
-        logged.push({ name: bill.name, amount: bill.amount });
+        const result = await autoPayLogBill(bill);
+        if (result) logged.push(result.summary);
       }
 
       if (logged.length > 0) {
+        const db = getDatabase();
         const rows = await db
           .select()
           .from(schema.bills)

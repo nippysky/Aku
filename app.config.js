@@ -19,6 +19,12 @@ module.exports = {
     googleServicesFile: './GoogleService-Info.plist',
     supportsTablet: false,
     infoPlist: {
+      // Akù only uses standard, publicly-available encryption (AES-256-GCM for
+      // on-device data protection, TLS in transit) — not a custom/proprietary
+      // cryptographic implementation. This qualifies for App Store Connect's
+      // export-compliance exemption, so setting this to `false` skips the
+      // "Does your app use encryption?" prompt on every future submission.
+      ITSAppUsesNonExemptEncryption: false,
       NSFaceIDUsageDescription:
         'Akù uses Face ID to keep your financial data secure and unlock the app instantly.',
       NSCameraUsageDescription:

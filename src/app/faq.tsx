@@ -75,7 +75,7 @@ const FAQ_DATA: FAQCategory[] = [
     items: [
       {
         q: "What is the difference between expenses and bills?",
-        a: "Expenses are one-off purchases (coffee, groceries, fuel). Bills are anything with a due date and a status — pending, paid, or overdue — whether it repeats (Netflix, rent, electricity) or not.",
+        a: "Expenses are one-off purchases (coffee, groceries, fuel). Bills are anything with a due date and a status — upcoming, due today, paid, or overdue — whether it repeats (Netflix, rent, electricity) or not.",
       },
       {
         q: "Can I track income in Aku?",
@@ -83,7 +83,7 @@ const FAQ_DATA: FAQCategory[] = [
       },
       {
         q: "What is Auto-pay on a bill?",
-        a: "Turn on Auto-pay for any bill (Netflix, gym, subscriptions) and it logs itself as an expense the moment it's due — no reminders, nothing to confirm. Turn it off and it behaves like a normal bill: reminders before it's due, and you tap Mark Paid yourself.",
+        a: "Turn on Auto-pay for any bill (Netflix, gym, subscriptions) and it logs itself as an expense the moment it's due — no reminders needed. You'll get a notification confirming it the instant it logs. Turn it off and it behaves like a normal bill: reminders before it's due, and you tap Mark Paid yourself.",
       },
       {
         q: "What happened to Recurring Expenses?",
@@ -91,7 +91,7 @@ const FAQ_DATA: FAQCategory[] = [
       },
       {
         q: "What is Recurring Income?",
-        a: "For money that arrives automatically — salary, rent income, dividends. When adding income, turn on Repeats instead of using a separate screen — pick a frequency and Aku logs it for you on schedule. Your recurring items show up right there in the Income tab, where you can pause, resume, or remove them.",
+        a: "For money that arrives automatically — salary, rent income, dividends. When adding income, turn on Repeats instead of using a separate screen — pick a frequency and Aku logs it for you on schedule, with a notification confirming each time. Your recurring items show up right there in the Income tab, where you can pause, resume, or remove them.",
       },
       {
         q: "How do I edit or delete an expense?",
@@ -147,7 +147,7 @@ const FAQ_DATA: FAQCategory[] = [
     items: [
       {
         q: "How do I download a financial statement?",
-        a: "Go to More > Download Statement. Choose a date range (this month, last 3 months, all time, or custom), then tap Generate Statement. A premium PDF will be created and shared via your device's share sheet.",
+        a: "Go to More > Download Statement. Choose a date range (all time, this month, last 3 or 6 months, this year, or a custom range), then tap Generate Statement. A premium PDF will be created and shared via your device's share sheet.",
       },
       {
         q: "What does the statement include?",

@@ -47,7 +47,7 @@
         "appleId": "nsinfo247@gmail.com"
       },
       "android": {
-        "serviceAccountKeyPath": "./google-services.json",
+        "serviceAccountKeyPath": "./google-play-service-account.json",
         "track": "internal"
       }
     }

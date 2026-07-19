@@ -10,6 +10,7 @@
 import React, { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Linking,
   Pressable,
   StyleSheet,
   Text,
@@ -371,6 +372,23 @@ export default function SignInScreen() {
           loading={isLoading}
           onPress={handleSubmit(onSubmit)}
         />
+        <Text style={[text.caption, { color: colors.textTertiary, textAlign: 'center', marginTop: 12 }]}>
+          By continuing, you agree to Akù's{' '}
+          <Text
+            style={{ color: colors.primary }}
+            onPress={() => Linking.openURL('https://aku.nippysky.com/terms').catch(() => {})}
+          >
+            Terms
+          </Text>{' '}
+          and{' '}
+          <Text
+            style={{ color: colors.primary }}
+            onPress={() => Linking.openURL('https://aku.nippysky.com/privacy').catch(() => {})}
+          >
+            Privacy Policy
+          </Text>
+          .
+        </Text>
       </Animated.View>
     </View>
   );

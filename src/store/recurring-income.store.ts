@@ -12,6 +12,8 @@ import { getDatabase, schema } from '../lib/database/client';
 import { format, addDays, addWeeks, addMonths, addYears, parseISO } from 'date-fns';
 import { generateUUID } from '../lib/uuid';
 import { triggerPush, triggerDelete } from '../lib/sync/trigger';
+import { notificationService } from '../lib/notifications';
+import { useUIStore } from './ui.store';
 import type { IncomeCategory } from '../types';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -83,6 +85,87 @@ function fromDb(row: typeof schema.recurringIncome.$inferSelect): RecurringIncom
     createdAt:     row.createdAt,
     updatedAt:     row.updatedAt,
   };
+}
+
+/**
+ * Logs one overdue recurring income item as a real income entry and advances
+ * its nextDate. Shared by processOverdue() — the batch catch-up that runs on
+ * unlock/foreground — and by add()/toggleActive(), which call this
+ * immediately so an item created (or reactivated) with a nextDate of today
+ * or earlier doesn't have to wait for the next unlock cycle to log.
+ *
+ * Returns null if the item isn't eligible (inactive, not yet due).
+ */
+async function logOverdueRecurringIncome(
+  item: RecurringIncome,
+): Promise<{ item: RecurringIncome; summary: { name: string; amount: number } } | null> {
+  const today = format(new Date(), 'yyyy-MM-dd');
+  if (!item.isActive || item.nextDate > today) return null;
+
+  const db = getDatabase();
+  const now = new Date().toISOString();
+
+  // Log it as an income entry on its nextDate
+  const incomeId = generateUUID();
+  await db.insert(schema.income).values({
+    id:          incomeId,
+    userId:      item.userId,
+    amount:      item.amount,
+    category:    item.category,
+    description: item.name,
+    date:        item.nextDate,
+    createdAt:   now,
+    updatedAt:   now,
+  });
+
+  // Auto-contribute to a goal if configured (legacy rows only — new items
+  // can't set this from the UI anymore, see the "keep it simple" removal).
+  if (item.goalId && item.allocationPct > 0) {
+    const contribAmount = Math.round(item.amount * item.allocationPct / 100);
+    if (contribAmount > 0) {
+      const contribId = generateUUID();
+      await db.insert(schema.goalContributions).values({
+        id:        contribId,
+        goalId:    item.goalId,
+        userId:    item.userId,
+        amount:    contribAmount,
+        note:      `Auto from ${item.name}`,
+        date:      item.nextDate,
+        createdAt: now,
+      });
+      const [goal] = await db
+        .select({ savedAmount: schema.goals.savedAmount })
+        .from(schema.goals)
+        .where(eq(schema.goals.id, item.goalId))
+        .limit(1);
+      if (goal) {
+        await db
+          .update(schema.goals)
+          .set({ savedAmount: goal.savedAmount + contribAmount, updatedAt: now })
+          .where(eq(schema.goals.id, item.goalId));
+      }
+    }
+  }
+
+  // Advance nextDate past today, catching up multiple missed periods in one go.
+  let next = item.nextDate;
+  while (next <= today) {
+    next = advanceDate(next, item.frequency);
+  }
+
+  await db
+    .update(schema.recurringIncome)
+    .set({ nextDate: next, updatedAt: now })
+    .where(eq(schema.recurringIncome.id, item.id));
+
+  const updated: RecurringIncome = { ...item, nextDate: next, updatedAt: now };
+
+  // Confirm to the user it happened — fires immediately, no future scheduling.
+  notificationService
+    .scheduleIncomeAutoLogConfirmation(item, useUIStore.getState().currency.symbol)
+    .catch(() => {});
+
+  return { item: updated, summary: { name: item.name, amount: item.amount } };
 }
 
 // ─── Concurrency guard ────────────────────────────────────────────────────────
@@ -166,9 +249,15 @@ export const useRecurringIncomeStore = create<RecurringIncomeState>()((set, get)
       updatedAt:     now,
     };
 
-    set((s) => ({ items: [...s.items, newItem].sort((a, b) => a.name.localeCompare(b.name)) }));
+    // If this new item's first nextDate is already today or earlier, log it
+    // immediately rather than waiting for the next unlock/foreground cycle.
+    let finalItem = newItem;
+    const autoResult = await logOverdueRecurringIncome(newItem);
+    if (autoResult) finalItem = autoResult.item;
+
+    set((s) => ({ items: [...s.items, finalItem].sort((a, b) => a.name.localeCompare(b.name)) }));
     triggerPush();
-    return newItem;
+    return finalItem;
   },
 
   update: async (id, input) => {
@@ -205,12 +294,24 @@ export const useRecurringIncomeStore = create<RecurringIncomeState>()((set, get)
       .set({ isActive: newActive, updatedAt: now })
       .where(eq(schema.recurringIncome.id, id));
 
+    let updatedItem: RecurringIncome = { ...item, isActive: newActive, updatedAt: now };
+
     set((s) => ({
-      items: s.items.map((i) =>
-        i.id === id ? { ...i, isActive: newActive, updatedAt: now } : i
-      ),
+      items: s.items.map((i) => (i.id === id ? updatedItem : i)),
     }));
     triggerPush();
+
+    // Resuming an item whose nextDate is already today or earlier logs it
+    // immediately — don't make the user wait for the next unlock cycle.
+    if (newActive) {
+      const autoResult = await logOverdueRecurringIncome(updatedItem);
+      if (autoResult) {
+        set((s) => ({
+          items: s.items.map((i) => (i.id === id ? autoResult.item : i)),
+        }));
+        triggerPush();
+      }
+    }
   },
 
   processOverdue: async (userId) => {
@@ -218,93 +319,38 @@ export const useRecurringIncomeStore = create<RecurringIncomeState>()((set, get)
     if (processingGuard.get(userId)) return [];
     processingGuard.set(userId, true);
 
-    const db      = getDatabase();
     const today   = format(new Date(), 'yyyy-MM-dd');
     const logged: { name: string; amount: number }[] = [];
 
     try {
-    const overdue = await db
-      .select()
-      .from(schema.recurringIncome)
-      .where(
-        and(
-          eq(schema.recurringIncome.userId,   userId),
-          eq(schema.recurringIncome.isActive, true),
-          lte(schema.recurringIncome.nextDate, today),
-        )
-      );
-
-    for (const row of overdue) {
-      const item = fromDb(row);
-
-      // Log it as an income entry on its nextDate
-      const incomeId = generateUUID();
-      const now      = new Date().toISOString();
-      await db.insert(schema.income).values({
-        id:          incomeId,
-        userId,
-        amount:      item.amount,
-        category:    item.category,
-        description: item.name,
-        date:        item.nextDate,
-        createdAt:   now,
-        updatedAt:   now,
-      });
-
-      // Auto-contribute to a goal if configured
-      if (item.goalId && item.allocationPct > 0) {
-        const contribAmount = Math.round(item.amount * item.allocationPct / 100);
-        if (contribAmount > 0) {
-          const contribId = generateUUID();
-          await db.insert(schema.goalContributions).values({
-            id:        contribId,
-            goalId:    item.goalId,
-            userId,
-            amount:    contribAmount,
-            note:      `Auto from ${item.name}`,
-            date:      item.nextDate,
-            createdAt: now,
-          });
-          // Update goal's savedAmount
-          const [goal] = await db
-            .select({ savedAmount: schema.goals.savedAmount })
-            .from(schema.goals)
-            .where(eq(schema.goals.id, item.goalId))
-            .limit(1);
-          if (goal) {
-            await db
-              .update(schema.goals)
-              .set({ savedAmount: goal.savedAmount + contribAmount, updatedAt: now })
-              .where(eq(schema.goals.id, item.goalId));
-          }
-        }
-      }
-
-      // Advance nextDate past today
-      let next = item.nextDate;
-      while (next <= today) {
-        next = advanceDate(next, item.frequency);
-      }
-
-      await db
-        .update(schema.recurringIncome)
-        .set({ nextDate: next, updatedAt: now })
-        .where(eq(schema.recurringIncome.id, item.id));
-
-      logged.push({ name: item.name, amount: item.amount });
-    }
-
-    if (logged.length > 0) {
-      const rows = await db
+      const db = getDatabase();
+      const overdue = await db
         .select()
         .from(schema.recurringIncome)
-        .where(eq(schema.recurringIncome.userId, userId))
-        .orderBy(schema.recurringIncome.name);
-      set({ items: rows.map(fromDb) });
-      triggerPush();
-    }
+        .where(
+          and(
+            eq(schema.recurringIncome.userId,   userId),
+            eq(schema.recurringIncome.isActive, true),
+            lte(schema.recurringIncome.nextDate, today),
+          )
+        );
 
-    return logged;
+      for (const row of overdue) {
+        const result = await logOverdueRecurringIncome(fromDb(row));
+        if (result) logged.push(result.summary);
+      }
+
+      if (logged.length > 0) {
+        const rows = await db
+          .select()
+          .from(schema.recurringIncome)
+          .where(eq(schema.recurringIncome.userId, userId))
+          .orderBy(schema.recurringIncome.name);
+        set({ items: rows.map(fromDb) });
+        triggerPush();
+      }
+
+      return logged;
     } finally {
       processingGuard.delete(userId);
     }

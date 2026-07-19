@@ -163,6 +163,66 @@ class NotificationService {
     }
   }
 
+  /**
+   * Confirms an auto-pay bill was just logged automatically. Fires immediately
+   * (no future scheduling) — the moment the app finishes writing the expense.
+   * Respects the same "billReminders" preference as due-date reminders.
+   */
+  async scheduleAutoPayConfirmation(bill: Bill, currencySymbol = '₦'): Promise<void> {
+    if (!getNotifPrefs().billReminders) return;
+
+    const amountFormatted = formatAmount(bill.amount, currencySymbol);
+
+    await Notifications.scheduleNotificationAsync({
+      identifier: `bill_autopay_${bill.id}_${Date.now()}`,
+      content: {
+        title: 'Auto-paid ✅',
+        body:  `${bill.name} — ${amountFormatted} logged automatically.`,
+        sound: true,
+        badge: 1,
+        data: {
+          screen: 'bill',
+          id:     bill.id,
+          type:   'bill_autopay',
+        },
+        ...(Platform.OS === 'android' ? { channelId: 'bills' } : {}),
+      },
+      trigger: null, // Fire immediately
+    });
+  }
+
+  /**
+   * Confirms a recurring income item was just auto-logged (mirrors
+   * scheduleAutoPayConfirmation for bills). Fires immediately, respects the
+   * same "billReminders" preference — there's no separate income-alerts
+   * toggle, this rides the same "financial reminders" bucket to keep
+   * notification settings simple.
+   */
+  async scheduleIncomeAutoLogConfirmation(
+    item: { id: string; name: string; amount: number },
+    currencySymbol = '₦',
+  ): Promise<void> {
+    if (!getNotifPrefs().billReminders) return;
+
+    const amountFormatted = formatAmount(item.amount, currencySymbol);
+
+    await Notifications.scheduleNotificationAsync({
+      identifier: `income_autolog_${item.id}_${Date.now()}`,
+      content: {
+        title: 'Income logged ✅',
+        body:  `${item.name} — ${amountFormatted} added automatically.`,
+        sound: true,
+        badge: 1,
+        data: {
+          screen: 'income',
+          type:   'income_autolog',
+        },
+        ...(Platform.OS === 'android' ? { channelId: 'bills' } : {}),
+      },
+      trigger: null, // Fire immediately
+    });
+  }
+
   async cancelBillReminders(billId: string): Promise<void> {
     const scheduled = await Notifications.getAllScheduledNotificationsAsync();
 

@@ -838,7 +838,15 @@ export default function ExpensesScreen() {
             onChangeText={setSearchQuery}
             placeholder={segment === 'expenses' ? 'Search expenses…' : 'Search income…'}
             placeholderTextColor={colors.textTertiary}
-            style={[styles.searchText, { color: colors.text, fontFamily: font.sansRegular, fontSize: fontSize.sm }]}
+            style={[
+              styles.searchText,
+              {
+                color:      colors.text,
+                fontFamily: font.sansRegular,
+                fontSize:   fontSize.sm,
+                lineHeight: fontSize.sm * 1.3,
+              },
+            ]}
             returnKeyType="search"
             clearButtonMode="never"
           />
@@ -1038,8 +1046,15 @@ const styles = StyleSheet.create({
   searchInput: {
     flexDirection: 'row', alignItems: 'center',
     paddingHorizontal: 12, paddingVertical: 9, gap: 8,
+    height: 38,
   },
-  searchText: { flex: 1 },
+  searchText: {
+    flex:               1,
+    height:             '100%',
+    paddingVertical:    0,
+    includeFontPadding: false,
+    textAlignVertical:  'center',
+  },
 
   // Month chips
   monthScrollWrap: { borderBottomWidth: 1, flexShrink: 0, overflow: 'visible' },
