@@ -12,7 +12,7 @@
 import { useSyncStore } from '../../store/sync.store';
 
 type EntityType =
-  | 'expense' | 'bill' | 'goal' | 'budget'
+  | 'expense' | 'bill' | 'goal'
   | 'goal_contribution' | 'income'
   | 'recurring_expense' | 'recurring_income';
 

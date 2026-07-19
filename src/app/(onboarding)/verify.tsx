@@ -72,11 +72,10 @@ export default function VerifyScreen() {
   const params = useLocalSearchParams<{ email: string }>();
   const email  = params.email ?? OnboardingStorage.getEmail() ?? '';
 
-  const { createLocalUser, signIn, handleAuthCallback, hasOnboarded } = useAuthStore();
+  const { signIn, handleAuthCallback, hasOnboarded } = useAuthStore();
 
   const [resent, setResent]       = useState(false);
   const [resending, setResending] = useState(false);
-  const [skipping, setSkipping]   = useState(false);
 
   // OTP toggle state
   const [showOtp, setShowOtp]     = useState(false);
@@ -84,20 +83,6 @@ export default function VerifyScreen() {
   const [otpError, setOtpError]   = useState('');
   const [verifying, setVerifying] = useState(false);
   const otpInputRef               = useRef<TextInput>(null);
-
-  // DEV-only: bypass email verification so you can test the app locally.
-  const handleDevSkip = useCallback(async () => {
-    if (!__DEV__ || skipping) return;
-    setSkipping(true);
-    try {
-      const name        = OnboardingStorage.getName();
-      const storedEmail = OnboardingStorage.getEmail();
-      await createLocalUser(name || 'Dev User', storedEmail || 'dev@aku.app');
-      router.push('/(onboarding)/secure' as never);
-    } finally {
-      setSkipping(false);
-    }
-  }, [skipping, createLocalUser, router]);
 
   const handleResend = useCallback(async () => {
     if (resending) return;
@@ -174,7 +159,7 @@ export default function VerifyScreen() {
         bottomOffset={20}
       >
         <OnboardingHeader
-          step={3}
+          step={4}
           total={6}
           onBack={() => router.back()}
           dark={false}
@@ -326,20 +311,6 @@ export default function VerifyScreen() {
             </Pressable>
           </>
         )}
-
-        {/* DEV-only skip */}
-        {__DEV__ && (
-          <Pressable
-            onPress={handleDevSkip}
-            accessibilityRole="button"
-            disabled={skipping}
-            style={[styles.devSkipBtn, { borderColor: Palette.gold, opacity: skipping ? 0.6 : 1 }]}
-          >
-            <Text style={[text.bodySm, { color: Palette.gold, fontFamily: 'PlusJakartaSans_500Medium' }]}>
-              {skipping ? 'Creating account…' : '⚡ Skip (Dev only)'}
-            </Text>
-          </Pressable>
-        )}
       </Animated.View>
     </View>
   );
@@ -379,12 +350,5 @@ const styles = StyleSheet.create({
   },
   backLink: {
     paddingVertical: 4,
-  },
-  devSkipBtn: {
-    paddingVertical:   10,
-    paddingHorizontal: 20,
-    borderRadius:      10,
-    borderWidth:       1.5,
-    alignItems:        'center',
   },
 });

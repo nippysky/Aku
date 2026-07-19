@@ -73,13 +73,6 @@ class NotificationService {
       showBadge: true,
     });
 
-    await Notifications.setNotificationChannelAsync('budgets', {
-      name: 'Budget Alerts',
-      importance: Notifications.AndroidImportance.HIGH,
-      enableVibrate: true,
-      showBadge: true,
-    });
-
     await Notifications.setNotificationChannelAsync('goals', {
       name: 'Goal Milestones',
       importance: Notifications.AndroidImportance.DEFAULT,
@@ -180,31 +173,6 @@ class NotificationService {
     await Promise.all(
       cancelIds.map((id) => Notifications.cancelScheduledNotificationAsync(id))
     );
-  }
-
-  // ── Budget Alerts ────────────────────────────────────────────────────────
-
-  async scheduleBudgetAlert(
-    category: string,
-    percent: number,
-    budgetId: string,
-  ): Promise<void> {
-    if (!getNotifPrefs().budgetAlerts) return;
-    await Notifications.scheduleNotificationAsync({
-      identifier: `budget_alert_${budgetId}_${percent}`,
-      content: {
-        title: 'Budget Alert 🔔',
-        body:  `You've used ${percent}% of your ${category} budget`,
-        sound: true,
-        badge: 1,
-        data: {
-          screen: 'budgets',
-          type:   'budget_alert',
-        },
-        ...(Platform.OS === 'android' ? { channelId: 'budgets' } : {}),
-      },
-      trigger: null, // Fire immediately
-    });
   }
 
   // ── Goal Milestones ──────────────────────────────────────────────────────

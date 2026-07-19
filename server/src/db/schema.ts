@@ -25,6 +25,14 @@ export const users = pgTable('users', {
    * any device. The server never stores or returns the plaintext DEK.
    */
   encryptedDek: text('encrypted_dek'),
+  /**
+   * User's preferred currency — set on registration (or later in More > Currency).
+   * Persisted server-side so it survives logout/reinstall/new-device sign-in.
+   * code = ISO-ish code ('NGN','USD',...), symbol = display symbol ('₦','$',...).
+   * null = never set (client falls back to its local default, NGN).
+   */
+  preferredCurrencyCode:   text('preferred_currency_code'),
+  preferredCurrencySymbol: text('preferred_currency_symbol'),
   createdAt:    timestamp('created_at').notNull().defaultNow(),
   updatedAt:    timestamp('updated_at').notNull().defaultNow(),
 });
@@ -73,7 +81,7 @@ export const sessions = pgTable('sessions', {
 export const syncRecords = pgTable('sync_records', {
   id:              text('id').primaryKey(),       // client-generated UUID
   userId:          text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  entityType:      text('entity_type').notNull(), // 'expense'|'bill'|'goal'|'budget'|'goal_contribution'
+  entityType:      text('entity_type').notNull(), // 'expense'|'bill'|'goal'|'goal_contribution'
   entityId:        text('entity_id').notNull(),   // the entity's own UUID
   encryptedPayload: text('encrypted_payload').notNull(), // base64(iv||ciphertext||tag)
   clientUpdatedAt: timestamp('client_updated_at', { withTimezone: true }).notNull(),
@@ -126,18 +134,11 @@ export const notificationLog = pgTable('notification_log', {
 // Lightweight financial signals reported by the app after each sync.
 // The server never sees plaintext financial data — only aggregated percentages
 // and counts computed locally on the device. Used by the notification worker
-// to craft personalised push messages (budget alerts, streaks, weekly digest).
+// to craft personalised push messages (streaks, weekly digest).
 // One row per user, upserted on each sync.
 
 export const userInsights = pgTable('user_insights', {
   userId:              text('user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),
-
-  // ── Budget health ──────────────────────────────────────────────────────────
-  /** Highest budget utilisation ratio across all active budgets (0.0 – 2.0+).
-   *  null = no budgets configured yet. */
-  budgetUtilization:   real('budget_utilization'),
-  /** True if any budget has utilization ≥ 1.0 (fully spent / over). */
-  hasOverBudget:       boolean('has_over_budget').notNull().default(false),
 
   // ── Spending behaviour ─────────────────────────────────────────────────────
   /** Consecutive days with at least one expense logged (0 = none today). */
@@ -161,11 +162,20 @@ export const userInsights = pgTable('user_insights', {
 
   /**
    * JSON blob of client notification preferences, stored as-sent from the device.
-   * Shape: { billReminders: boolean, budgetAlerts: boolean, goalMilestones: boolean, dailyDigest: boolean }
+   * Shape: { billReminders: boolean, goalMilestones: boolean, dailyDigest: boolean }
    * The notification worker reads this before sending Tier 1/2 push messages.
    * null = preferences never synced (treat all as enabled / default).
    */
   notifPrefsJson:      text('notif_prefs_json'),
+
+  // ── Yesterday recap ────────────────────────────────────────────────────────
+  // The ONE exception to "no raw amounts leave the device": the user explicitly
+  // wants a "here's what you spent yesterday" push as the first notification of
+  // the day, which requires the actual total so the server can compose the
+  // message while the app is closed. Reported once per sync, in the smallest
+  // currency unit (kobo/cents). 0 + count=0 means no expenses were logged.
+  yesterdayExpenseTotal: integer('yesterday_expense_total').notNull().default(0),
+  yesterdayExpenseCount: integer('yesterday_expense_count').notNull().default(0),
 
   updatedAt:           timestamp('updated_at').notNull().defaultNow(),
 });

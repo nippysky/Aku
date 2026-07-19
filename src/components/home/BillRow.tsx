@@ -12,6 +12,7 @@ import Animated, {
   withSpring,
 } from 'react-native-reanimated';
 import { format, parseISO } from 'date-fns';
+import { RefreshCw as AutoPayIcon } from 'lucide-react-native';
 import { useTheme } from '../../theme';
 import { StatusBadge } from '../ui/StatusBadge';
 import { BILL_CATEGORIES } from '../../types';
@@ -129,7 +130,14 @@ export function BillRow({ bill, onPress, onLongPress, showStatus = true, style }
           {fmt(bill.amount)}
         </Text>
         {showStatus && (
-          <StatusBadge status={bill.status} style={styles.badge} />
+          bill.autoPay && bill.status !== 'paid' ? (
+            <View style={[styles.autoPayBadge, { backgroundColor: colors.primary + '18', borderRadius: radius.full }]}>
+              <AutoPayIcon size={11} color={colors.primary} strokeWidth={2} />
+              <Text style={[text.caption, { color: colors.primary, fontSize: 11 }]}>Auto-pay</Text>
+            </View>
+          ) : (
+            <StatusBadge status={bill.status} style={styles.badge} />
+          )
         )}
       </View>
     </AnimatedPressable>
@@ -164,5 +172,13 @@ const styles = StyleSheet.create({
   },
   badge: {
     alignSelf: 'flex-end',
+  },
+  autoPayBadge: {
+    flexDirection:     'row',
+    alignItems:        'center',
+    gap:               4,
+    alignSelf:         'flex-end',
+    paddingHorizontal: 8,
+    paddingVertical:   4,
   },
 });

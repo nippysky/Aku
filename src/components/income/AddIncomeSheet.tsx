@@ -2,6 +2,7 @@ import React, { useCallback, useState } from 'react';
 import {
   Pressable,
   StyleSheet,
+  Switch,
   Text,
   View,
 } from 'react-native';
@@ -19,9 +20,16 @@ import { AmountInput } from '../ui/AmountInput';
 import { Button } from '../ui/Button';
 import { AkuDatePicker } from '../ui/AkuDatePicker';
 import { useIncomeStore } from '../../store/income.store';
+import {
+  useRecurringIncomeStore,
+  RECURRING_FREQ_LABELS,
+  type RecurringFrequency,
+} from '../../store/recurring-income.store';
 import { useAuthStore } from '../../store/auth.store';
 import { useUIStore } from '../../store/ui.store';
 import { INCOME_CATEGORIES, type IncomeCategory } from '../../types';
+
+const FREQUENCIES: RecurringFrequency[] = ['daily', 'weekly', 'biweekly', 'monthly', 'yearly'];
 
 // ─── Icon map ─────────────────────────────────────────────────────────────────
 
@@ -46,6 +54,8 @@ interface FormData {
   description: string;
   category:    IncomeCategory;
   date:        string;
+  repeats:       boolean;
+  frequency:     RecurringFrequency;
 }
 
 function todayString(): string {
@@ -75,7 +85,8 @@ const CATEGORIES = Object.keys(INCOME_CATEGORIES) as IncomeCategory[];
 export function AddIncomeSheet({ isOpen, onClose, onSuccess }: AddIncomeSheetProps) {
   const { colors, text, font, fontSize, radius } = useTheme();
 
-  const { add }       = useIncomeStore();
+  const { add }              = useIncomeStore();
+  const { add: addRecurring } = useRecurringIncomeStore();
   const { user }      = useAuthStore();
   const { showToast } = useUIStore();
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -94,10 +105,13 @@ export function AddIncomeSheet({ isOpen, onClose, onSuccess }: AddIncomeSheetPro
       description: '',
       category:    'salary',
       date:        todayString(),
+      repeats:       false,
+      frequency:     'monthly',
     },
   });
 
-  const date = watch('date');
+  const date    = watch('date');
+  const repeats = watch('repeats');
 
   const handleClose = useCallback(() => {
     reset();
@@ -112,24 +126,40 @@ export function AddIncomeSheet({ isOpen, onClose, onSuccess }: AddIncomeSheetPro
         return;
       }
       try {
-        await add(
-          {
-            amount:      data.amount,
-            category:    data.category,
-            description: data.description.trim() || null,
-            date:        data.date,
-          },
-          user.id,
-        );
-        showToast('success', 'Income recorded');
+        if (data.repeats) {
+          // Recurring income is a template, not an immediate ledger entry —
+          // it auto-logs itself into Income on schedule (see recurring-income.store).
+          await addRecurring(
+            {
+              name:      data.description.trim() || INCOME_CATEGORIES[data.category].label,
+              amount:    data.amount,
+              category:  data.category,
+              frequency: data.frequency,
+              nextDate:  data.date,
+            },
+            user.id,
+          );
+          showToast('success', 'Recurring income set up');
+        } else {
+          await add(
+            {
+              amount:      data.amount,
+              category:    data.category,
+              description: data.description.trim() || null,
+              date:        data.date,
+            },
+            user.id,
+          );
+          showToast('success', 'Income recorded');
+        }
         reset();
         handleClose();
         onSuccess?.();
       } catch {
-        showToast('error', 'Failed to record income');
+        showToast('error', data.repeats ? 'Could not save recurring income' : 'Failed to record income');
       }
     },
-    [user, add, showToast, reset, handleClose, onSuccess, setError],
+    [user, add, addRecurring, showToast, reset, handleClose, onSuccess, setError],
   );
 
   return (
@@ -168,8 +198,8 @@ export function AddIncomeSheet({ isOpen, onClose, onSuccess }: AddIncomeSheetPro
           name="description"
           render={({ field }) => (
             <Input
-              label="Description"
-              placeholder="Source or note"
+              label={repeats ? 'Name' : 'Description'}
+              placeholder={repeats ? 'e.g. Monthly Salary, Rent Income' : 'Source or note'}
               value={field.value}
               onChangeText={field.onChange}
               error={errors.description?.message}
@@ -237,7 +267,7 @@ export function AddIncomeSheet({ isOpen, onClose, onSuccess }: AddIncomeSheetPro
         {/* Date */}
         <View style={styles.field}>
           <Text style={[text.label, { color: colors.textSecondary, marginBottom: 6 }]}>
-            Date
+            {repeats ? 'First occurrence' : 'Date'}
           </Text>
           <Pressable
             onPress={() => setShowDatePicker(true)}
@@ -259,10 +289,69 @@ export function AddIncomeSheet({ isOpen, onClose, onSuccess }: AddIncomeSheetPro
           </Pressable>
         </View>
 
+        {/* Repeats */}
+        <Controller
+          control={control}
+          name="repeats"
+          render={({ field }) => (
+            <View style={[styles.repeatsRow, { backgroundColor: colors.backgroundSecondary, borderRadius: radius.md }]}>
+              <View style={{ flex: 1 }}>
+                <Text style={[text.bodyMedium, { color: colors.text }]}>Repeats</Text>
+                <Text style={[text.caption, { color: colors.textTertiary, marginTop: 2 }]}>
+                  Auto-log this income on a schedule — salary, rent, dividends.
+                </Text>
+              </View>
+              <Switch
+                value={field.value}
+                onValueChange={field.onChange}
+                trackColor={{ false: colors.border, true: colors.success }}
+                thumbColor="#fff"
+              />
+            </View>
+          )}
+        />
+
+        {repeats && (
+          <>
+            {/* Frequency */}
+            <Text style={[text.label, { color: colors.textSecondary, marginBottom: 8 }]}>
+              Frequency
+            </Text>
+            <Controller
+              control={control}
+              name="frequency"
+              render={({ field }) => (
+                <View style={styles.pillRow}>
+                  {FREQUENCIES.map((f) => {
+                    const active = field.value === f;
+                    return (
+                      <Pressable
+                        key={f}
+                        onPress={() => field.onChange(f)}
+                        style={[
+                          styles.pill,
+                          {
+                            backgroundColor: active ? colors.success : colors.backgroundSecondary,
+                            borderRadius:    radius.full,
+                          },
+                        ]}
+                      >
+                        <Text style={[text.bodySm, { color: active ? '#fff' : colors.text }]}>
+                          {RECURRING_FREQ_LABELS[f]}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              )}
+            />
+          </>
+        )}
+
         {/* Submit */}
         <View style={styles.submit}>
           <Button
-            label="Add Income"
+            label={repeats ? 'Set Up Recurring Income' : 'Add Income'}
             onPress={handleSubmit(onSubmit)}
             loading={isSubmitting}
             size="lg"
@@ -276,8 +365,8 @@ export function AddIncomeSheet({ isOpen, onClose, onSuccess }: AddIncomeSheetPro
         onChange={(iso) => { setValue('date', iso); setShowDatePicker(false); }}
         onClose={() => setShowDatePicker(false)}
         minDate="2020-01-01"
-        maxDate={todayString()}
-        title="Select income date"
+        maxDate={repeats ? undefined : todayString()}
+        title={repeats ? 'First occurrence' : 'Select income date'}
       />
     </>
   );
@@ -323,5 +412,22 @@ const styles = StyleSheet.create({
   },
   submit: {
     marginTop: 28,
+  },
+  repeatsRow: {
+    flexDirection: 'row',
+    alignItems:    'center',
+    gap:           12,
+    padding:       14,
+    marginBottom:  20,
+  },
+  pillRow: {
+    flexDirection: 'row',
+    flexWrap:      'wrap',
+    gap:           8,
+    marginBottom:  20,
+  },
+  pill: {
+    paddingHorizontal: 14,
+    paddingVertical:   8,
   },
 });

@@ -34,7 +34,6 @@ import {
   Check,
   Camera,
   ExternalLink,
-  Repeat,
   HelpCircle,
 } from 'lucide-react-native';
 import { BottomSheetModal, BottomSheetView, BottomSheetBackdrop } from '@gorhom/bottom-sheet';
@@ -44,7 +43,6 @@ import { useAuthStore } from '../../store/auth.store';
 import { useUIStore } from '../../store/ui.store';
 import { useBillsStore } from '../../store/bills.store';
 import { useExpensesStore } from '../../store/expenses.store';
-import { useBudgetsStore } from '../../store/budgets.store';
 import { useGoalsStore } from '../../store/goals.store';
 import { useIncomeStore } from '../../store/income.store';
 import { UserAvatar } from '../../components/ui/UserAvatar';
@@ -223,7 +221,6 @@ export default function ProfileScreen() {
   const { showToast, currency, themeMode, setThemeMode } = useUIStore();
   const { bills }    = useBillsStore();
   const { expenses } = useExpensesStore();
-  const { budgets }  = useBudgetsStore();
   const { goals }    = useGoalsStore();
   const { allRecords: incomeRecords, loadAll: loadAllInc } = useIncomeStore();
 
@@ -334,7 +331,7 @@ export default function ProfileScreen() {
   const handleDeleteAccount = useCallback(() => {
     Alert.alert(
       'Delete Account',
-      'This will permanently delete your Akù account and everything in it — expenses, bills, goals, budgets, and income. This cannot be undone.',
+      'This will permanently delete your Akù account and everything in it — expenses, bills, goals, and income. This cannot be undone.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -519,19 +516,6 @@ export default function ProfileScreen() {
             </tr>`;
           }).join('') +
           `<tr class="subtotal"><td colspan="2">Total Income</td><td class="amount credit">${money(totalIncome)}</td></tr>`;
-
-      // ── Budget rows HTML ──
-      const budgetRows = budgets.length === 0
-        ? '<tr><td colspan="3" class="empty">No budgets recorded</td></tr>'
-        : budgets.map((b) => {
-            const pct = Math.round(b.progress * 100);
-            const statusColor = b.status === 'exceeded' ? '#D63B3B' : b.status === 'near-limit' ? '#D97706' : '#16C172';
-            return `<tr>
-              <td>${b.category}</td>
-              <td><span style="color:${statusColor};font-weight:600">${pct}%</span> used</td>
-              <td class="amount">${money(b.amount)}</td>
-            </tr>`;
-          }).join('');
 
       // ── Goal rows HTML ──
       const goalRows = filteredGoals.length === 0
@@ -747,18 +731,6 @@ export default function ProfileScreen() {
     </table>
   </div>
 
-  <!-- Budgets -->
-  <div class="section">
-    <div class="section-head">
-      <div class="section-title">Budgets</div>
-      <div class="section-rule"></div>
-    </div>
-    <table>
-      <thead><tr><th>Category</th><th>Usage</th><th style="text-align:right">Limit</th></tr></thead>
-      <tbody>${budgetRows}</tbody>
-    </table>
-  </div>
-
   <!-- Goals -->
   <div class="section">
     <div class="section-head">
@@ -798,7 +770,7 @@ export default function ProfileScreen() {
     } catch {
       showToast('error', 'Failed to generate PDF');
     }
-  }, [user, currency, bills, expenses, incomeRecords, budgets, goals, showToast]);
+  }, [user, currency, bills, expenses, incomeRecords, goals, showToast]);
 
   // ── Feedback ──────────────────────────────────────────────────────────
   const handleFeedback = useCallback(() => {
@@ -880,7 +852,7 @@ export default function ProfileScreen() {
             isLast
           />
         </SettingsGroup>
-        <Text style={[text.caption, { color: colors.textTertiary, marginTop: -16, marginBottom: 24, marginLeft: 4, lineHeight: 17 }]}>
+        <Text style={[text.caption, { color: colors.textTertiary, marginTop: 8, marginBottom: 24, marginHorizontal: 4, lineHeight: 17 }]}>
           Locks Akù with your device security — Face ID, fingerprint, or your
           phone's PIN. Nothing extra to remember.
         </Text>
@@ -892,18 +864,6 @@ export default function ProfileScreen() {
             icon={Bell}
             label="Notification settings"
             onPress={() => router.push('/notification-settings' as never)}
-            isFirst
-            isLast
-          />
-        </SettingsGroup>
-
-        {/* ── Expenses ── */}
-        <SectionHeader label="Expenses" />
-        <SettingsGroup>
-          <SettingsRow
-            icon={Repeat}
-            label="Recurring"
-            onPress={() => router.push('/recurring-expenses' as never)}
             isFirst
             isLast
           />
@@ -971,12 +931,14 @@ export default function ProfileScreen() {
           <SettingsRow
             icon={Shield}
             label="Privacy Policy"
-            onPress={() => router.push('/privacy')}
+            onPress={() => Linking.openURL('https://aku.nippysky.com/privacy').catch(() => {})}
+            isExternal
           />
           <SettingsRow
             icon={FileText}
             label="Terms of Service"
-            onPress={() => router.push('/terms')}
+            onPress={() => Linking.openURL('https://aku.nippysky.com/terms').catch(() => {})}
+            isExternal
           />
           <SettingsRow
             icon={MessageSquare}

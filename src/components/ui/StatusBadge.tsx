@@ -8,10 +8,7 @@ type BadgeStatus =
   | 'upcoming'
   | 'due-today'
   | 'paid'
-  | 'overdue'
-  | 'healthy'
-  | 'near-limit'
-  | 'exceeded';
+  | 'overdue';
 
 interface StatusBadgeProps {
   status: BadgeStatus;
@@ -26,9 +23,6 @@ const DEFAULT_LABELS: Record<BadgeStatus, string> = {
   'due-today': 'Due Today',
   paid:        'Paid',
   overdue:     'Overdue',
-  healthy:     'Healthy',
-  'near-limit':'Near Limit',
-  exceeded:    'Exceeded',
 };
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -64,24 +58,6 @@ export function StatusBadge({ status, label, style }: StatusBadgeProps) {
           dotColor:  colors.statusOverdue,
           bgColor:   colors.statusOverdueBg,
           textColor: colors.statusOverdue,
-        };
-      case 'healthy':
-        return {
-          dotColor:  colors.budgetHealthy,
-          bgColor:   colors.successBg,
-          textColor: colors.budgetHealthy,
-        };
-      case 'near-limit':
-        return {
-          dotColor:  colors.budgetNearLimit,
-          bgColor:   colors.warningBg,
-          textColor: colors.budgetNearLimit,
-        };
-      case 'exceeded':
-        return {
-          dotColor:  colors.budgetExceeded,
-          bgColor:   colors.dangerBg,
-          textColor: colors.budgetExceeded,
         };
     }
   })();

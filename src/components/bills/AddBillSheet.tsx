@@ -47,6 +47,7 @@ interface FormData {
   dueDate:   string;
   frequency: BillFrequency;
   notes:     string;
+  autoPay:   boolean;
   notify14:  boolean;
   notify7:   boolean;
   notify3:   boolean;
@@ -89,7 +90,9 @@ type FrequencyOption = { value: BillFrequency; label: string };
 
 const CATEGORIES = Object.keys(BILL_CATEGORIES) as BillCategory[];
 const FREQUENCIES: FrequencyOption[] = [
+  { value: 'daily',     label: 'Daily'     },
   { value: 'weekly',    label: 'Weekly'    },
+  { value: 'biweekly',  label: 'Biweekly'  },
   { value: 'monthly',   label: 'Monthly'   },
   { value: 'quarterly', label: 'Quarterly' },
   { value: 'yearly',    label: 'Yearly'    },
@@ -112,6 +115,7 @@ export function AddBillSheet({ isOpen, onClose, onSuccess }: AddBillSheetProps) 
       dueDate:   todayString(),
       frequency: 'monthly',
       notes:     '',
+      autoPay:   false,
       notify14:  true,
       notify7:   true,
       notify3:   true,
@@ -121,6 +125,7 @@ export function AddBillSheet({ isOpen, onClose, onSuccess }: AddBillSheetProps) 
   });
 
   const dueDate = watch('dueDate');
+  const autoPay = watch('autoPay');
 
   const handleClose = useCallback(() => {
     reset();
@@ -144,6 +149,7 @@ export function AddBillSheet({ isOpen, onClose, onSuccess }: AddBillSheetProps) 
         dueDate:     data.dueDate,
         frequency:   data.frequency,
         notes:       data.notes ?? null,
+        autoPay:     data.autoPay,
         notify30:    false,
         notify14:    data.notify14,
         notify7:     data.notify7,
@@ -363,37 +369,62 @@ export function AddBillSheet({ isOpen, onClose, onSuccess }: AddBillSheetProps) 
           )}
         />
 
-
-        {/* Notifications */}
-        <Text style={[text.label, { color: colors.textSecondary, marginBottom: 10, marginTop: 8 }]}>
-          Reminders
-        </Text>
-        {(
-          [
-            { key: 'notify14', label: '14 days before' },
-            { key: 'notify7',  label: '7 days before'  },
-            { key: 'notify3',  label: '3 days before'  },
-            { key: 'notify1',  label: '1 day before'   },
-            { key: 'notifyDay',label: 'On the day'     },
-          ] as const
-        ).map(({ key, label }) => (
-          <Controller
-            key={key}
-            control={control}
-            name={key}
-            render={({ field }) => (
-              <View style={[styles.toggleRow, { borderColor: colors.borderLight }]}>
-                <Text style={[text.body, { color: colors.text }]}>{label}</Text>
-                <Switch
-                  value={field.value}
-                  onValueChange={field.onChange}
-                  trackColor={{ false: colors.border, true: colors.primary }}
-                  thumbColor={colors.card}
-                />
+        {/* Auto-pay */}
+        <Controller
+          control={control}
+          name="autoPay"
+          render={({ field }) => (
+            <View style={[styles.autoPayRow, { backgroundColor: colors.backgroundSecondary, borderRadius: radius.md }]}>
+              <View style={{ flex: 1 }}>
+                <Text style={[text.bodyMedium, { color: colors.text }]}>Auto-pay</Text>
+                <Text style={[text.caption, { color: colors.textTertiary, marginTop: 2 }]}>
+                  Logs itself the moment it's due — no reminders, no confirming. For subscriptions on autopilot.
+                </Text>
               </View>
-            )}
-          />
-        ))}
+              <Switch
+                value={field.value}
+                onValueChange={field.onChange}
+                trackColor={{ false: colors.border, true: colors.primary }}
+                thumbColor={colors.card}
+              />
+            </View>
+          )}
+        />
+
+        {/* Notifications — auto-pay bills never need reminders */}
+        {!autoPay && (
+          <>
+            <Text style={[text.label, { color: colors.textSecondary, marginBottom: 10, marginTop: 8 }]}>
+              Reminders
+            </Text>
+            {(
+              [
+                { key: 'notify14', label: '14 days before' },
+                { key: 'notify7',  label: '7 days before'  },
+                { key: 'notify3',  label: '3 days before'  },
+                { key: 'notify1',  label: '1 day before'   },
+                { key: 'notifyDay',label: 'On the day'     },
+              ] as const
+            ).map(({ key, label }) => (
+              <Controller
+                key={key}
+                control={control}
+                name={key}
+                render={({ field }) => (
+                  <View style={[styles.toggleRow, { borderColor: colors.borderLight }]}>
+                    <Text style={[text.body, { color: colors.text }]}>{label}</Text>
+                    <Switch
+                      value={field.value}
+                      onValueChange={field.onChange}
+                      trackColor={{ false: colors.border, true: colors.primary }}
+                      thumbColor={colors.card}
+                    />
+                  </View>
+                )}
+              />
+            ))}
+          </>
+        )}
 
         {/* Submit */}
         <View style={styles.submit}>
@@ -464,6 +495,13 @@ const styles = StyleSheet.create({
     justifyContent:  'space-between',
     paddingVertical: 14,
     borderBottomWidth: 1,
+  },
+  autoPayRow: {
+    flexDirection:     'row',
+    alignItems:        'center',
+    gap:               12,
+    padding:           14,
+    marginBottom:      20,
   },
   submit: {
     marginTop: 28,

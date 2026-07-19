@@ -13,9 +13,18 @@ import { format, addDays, addWeeks, addMonths, addYears, parseISO } from 'date-f
 import { generateUUID } from '../lib/uuid';
 import { triggerPush, triggerDelete } from '../lib/sync/trigger';
 import type { IncomeCategory } from '../types';
-import type { RecurringFrequency } from './recurring-expenses.store';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+
+export type RecurringFrequency = 'daily' | 'weekly' | 'biweekly' | 'monthly' | 'yearly';
+
+export const RECURRING_FREQ_LABELS: Record<RecurringFrequency, string> = {
+  daily:    'Daily',
+  weekly:   'Weekly',
+  biweekly: 'Every 2 weeks',
+  monthly:  'Monthly',
+  yearly:   'Yearly',
+};
 
 export interface RecurringIncome {
   id:            string;
@@ -35,14 +44,12 @@ export interface RecurringIncome {
 }
 
 export interface RecurringIncomeCreateInput {
-  name:           string;
-  amount:         number;
-  category:       IncomeCategory;
-  frequency:      RecurringFrequency;
-  nextDate:       string;
-  notes?:         string;
-  goalId?:        string | null;
-  allocationPct?: number;
+  name:      string;
+  amount:    number;
+  category:  IncomeCategory;
+  frequency: RecurringFrequency;
+  nextDate:  string;
+  notes?:    string;
 }
 
 // ─── Frequency advance ────────────────────────────────────────────────────────
@@ -136,8 +143,10 @@ export const useRecurringIncomeStore = create<RecurringIncomeState>()((set, get)
       nextDate:  input.nextDate,
       notes:     input.notes ?? null,
       isActive:      true,
-      goalId:        input.goalId ?? null,
-      allocationPct: input.allocationPct ?? 0,
+      // Auto-allocate-to-goal was removed from the create flow for simplicity —
+      // goal contributions are manual only now. Columns kept for legacy rows.
+      goalId:        null,
+      allocationPct: 0,
       createdAt: now,
       updatedAt: now,
     });
@@ -151,8 +160,8 @@ export const useRecurringIncomeStore = create<RecurringIncomeState>()((set, get)
       nextDate:      input.nextDate,
       notes:         input.notes ?? null,
       isActive:      true,
-      goalId:        input.goalId ?? null,
-      allocationPct: input.allocationPct ?? 0,
+      goalId:        null,
+      allocationPct: 0,
       createdAt:     now,
       updatedAt:     now,
     };

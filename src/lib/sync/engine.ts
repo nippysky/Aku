@@ -25,7 +25,7 @@ import { trackReviewEvent } from '../review';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type EntityType = 'expense' | 'bill' | 'goal' | 'budget' | 'goal_contribution' | 'income' | 'recurring_expense' | 'recurring_income';
+type EntityType = 'expense' | 'bill' | 'goal' | 'goal_contribution' | 'income' | 'recurring_expense' | 'recurring_income';
 
 interface LocalRecord {
   syncId:     string;   // stable sync-record ID: type-prefix + entity UUID
@@ -56,7 +56,6 @@ const SYNC_PREFIX: Record<EntityType, string> = {
   expense:           'exp',
   bill:              'bill',
   goal:              'goal',
-  budget:            'bgt',
   goal_contribution: 'gc',
   income:            'inc',
   recurring_expense: 'rexp',
@@ -120,11 +119,10 @@ export async function pushAll(): Promise<void> {
   const db = getDatabase();
   const records: LocalRecord[] = [];
 
-  const [expenses, bills, goals, budgets, contribs, incomeRows, recurringExpRows, recurringIncRows] = await Promise.all([
+  const [expenses, bills, goals, contribs, incomeRows, recurringExpRows, recurringIncRows] = await Promise.all([
     db.select().from(schema.expenses),
     db.select().from(schema.bills),
     db.select().from(schema.goals),
-    db.select().from(schema.budgets),
     db.select().from(schema.goalContributions),
     db.select().from(schema.income),
     db.select().from(schema.recurringExpenses),
@@ -139,9 +137,6 @@ export async function pushAll(): Promise<void> {
   }
   for (const g of goals) {
     records.push({ syncId: `goal_${g.id}`, entityType: 'goal', entityId: g.id, payload: g, updatedAt: g.updatedAt });
-  }
-  for (const b of budgets) {
-    records.push({ syncId: `bgt_${b.id}`, entityType: 'budget', entityId: b.id, payload: b, updatedAt: b.updatedAt });
   }
   for (const c of contribs) {
     records.push({ syncId: `gc_${c.id}`, entityType: 'goal_contribution', entityId: c.id, payload: c, updatedAt: c.createdAt });
@@ -281,6 +276,16 @@ async function computeInsight(): Promise<UserInsightPayload> {
   // Pull all expenses (amounts in kobo — only used for relative comparisons)
   const allExpenses = await db.select().from(schema.expenses);
 
+  // Yesterday's total — the one raw amount reported to the server, so the
+  // notification worker can compose the "you spent X yesterday" push (the
+  // first notification of the day) while the app is closed.
+  const yesterdayDate = new Date(now);
+  yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+  const yesterdayStr  = yesterdayDate.toISOString().slice(0, 10);
+  const yesterdayExpenses    = allExpenses.filter((e) => e.date === yesterdayStr);
+  const yesterdayExpenseTotal = yesterdayExpenses.reduce((s, e) => s + e.amount, 0);
+  const yesterdayExpenseCount = yesterdayExpenses.length;
+
   // Monthly expenses
   const thisMonthExp = allExpenses.filter((e) => e.date >= startOfMonth);
 
@@ -313,34 +318,6 @@ async function computeInsight(): Promise<UserInsightPayload> {
     checkDay.setUTCDate(checkDay.getUTCDate() - 1);
   }
 
-  // Budget utilization: compare each budget's category spend vs its limit
-  const allBudgets = await db.select().from(schema.budgets);
-  let maxUtilization: number | null = null;
-  let hasOverBudget                 = false;
-
-  for (const b of allBudgets) {
-    if (!b.amount || b.amount === 0) continue;
-
-    // Determine period start
-    let periodStart: string;
-    if (b.period === 'weekly') {
-      periodStart = startOfWeekStr;
-    } else if (b.period === 'monthly') {
-      periodStart = startOfMonth;
-    } else {
-      // yearly
-      periodStart = `${now.getFullYear()}-01-01`;
-    }
-
-    const spent = allExpenses
-      .filter((e) => e.category === b.category && e.date >= periodStart)
-      .reduce((s, e) => s + e.amount, 0);
-
-    const util = spent / b.amount;
-    if (maxUtilization === null || util > maxUtilization) maxUtilization = util;
-    if (util >= 1.0) hasOverBudget = true;
-  }
-
   // Goals on track: saved ≥ 80 % of expected progress given deadline
   const allGoals   = await db.select().from(schema.goals);
   const activeGoals = allGoals.filter((g) => !g.isCompleted);
@@ -357,20 +334,22 @@ async function computeInsight(): Promise<UserInsightPayload> {
     return actualPct >= expectedPct * 0.8;
   }).length;
 
-  // Savings rate this month: (income − expenses) / income, as a percentage.
+  // Savings rate this month: % of income KEPT. Unified-ledger economics:
+  // 'savings'-category expenses (goal contributions, savings transfers) are
+  // money kept, not money spent — so they're excluded from the spend side.
   // Powers milestone-tailored push notifications (celebrate ≥ 20 %, warn < 0).
   const allIncome       = await db.select().from(schema.income);
   const thisMonthIncome = allIncome
     .filter((r) => r.date >= startOfMonth)
     .reduce((s2, r) => s2 + r.amount, 0);
-  const thisMonthSpend  = thisMonthExp.reduce((s2, e) => s2 + e.amount, 0);
+  const thisMonthSpend  = thisMonthExp
+    .filter((e) => e.category !== 'savings')
+    .reduce((s2, e) => s2 + e.amount, 0);
   const savingsRatePct: number | null = thisMonthIncome > 0
     ? Math.round(((thisMonthIncome - thisMonthSpend) / thisMonthIncome) * 100)
     : null;
 
   return {
-    budgetUtilization:   maxUtilization,
-    hasOverBudget,
     spendingStreak:      streak,
     weeklyChangePct,
     monthlyExpenseCount: thisMonthExp.length,
@@ -379,6 +358,8 @@ async function computeInsight(): Promise<UserInsightPayload> {
     goalsOnTrack,
     hasActiveGoals:      activeGoals.length > 0,
     savingsRatePct,
+    yesterdayExpenseTotal,
+    yesterdayExpenseCount,
   };
 }
 
@@ -449,15 +430,6 @@ async function upsertLocal(
           .onConflictDoUpdate({ target: schema.goals.id, set: { ...g, updatedAt: serverTs } });
         break;
       }
-      case 'budget': {
-        const b = payload as typeof schema.budgets.$inferSelect;
-        const [existing] = await db.select({ updatedAt: schema.budgets.updatedAt })
-          .from(schema.budgets).where(eq(schema.budgets.id, b.id)).limit(1);
-        if (existing && existing.updatedAt >= serverTs) return;
-        await db.insert(schema.budgets).values(b)
-          .onConflictDoUpdate({ target: schema.budgets.id, set: { ...b, updatedAt: serverTs } });
-        break;
-      }
       case 'goal_contribution': {
         const c = payload as typeof schema.goalContributions.$inferSelect;
         // Contributions are immutable — insert-only, never update
@@ -508,9 +480,6 @@ async function deleteLocal(db: DB, entityType: EntityType, entityId: string): Pr
         break;
       case 'goal':
         await db.delete(schema.goals).where(eq(schema.goals.id, entityId));
-        break;
-      case 'budget':
-        await db.delete(schema.budgets).where(eq(schema.budgets.id, entityId));
         break;
       case 'goal_contribution':
         await db.delete(schema.goalContributions).where(eq(schema.goalContributions.id, entityId));

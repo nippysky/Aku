@@ -4,21 +4,26 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Akù — Know your money. A personal finance app by NIPPYSKY</title>
-<meta name="description" content="Akù is a beautifully simple personal finance app. Log expenses and income in seconds, track bills, budgets and savings goals — all end-to-end encrypted and synced across your devices.">
+<meta name="description" content="Akù is a beautifully simple personal finance app. Log expenses and income in seconds, track bills and savings goals — all end-to-end encrypted and synced across your devices.">
+<meta name="theme-color" content="#163A2F">
+<link rel="icon" type="image/png" sizes="32x32" href="/img/favicon-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/img/icon-192.png">
+<link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@300;500&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/styles.css">
 <style>
 /* ── Landing-specific ── */
 .hero {
   background: linear-gradient(168deg, var(--forest) 0%, var(--forest-deep) 100%);
   color: var(--linen);
-  padding: clamp(56px, 9vw, 110px) clamp(20px, 5vw, 56px) 0;
+  padding: clamp(48px, 9vw, 110px) clamp(20px, 5vw, 56px) 0;
   overflow: hidden;
+  position: relative;
 }
 .hero-inner {
-  max-width: 1080px; margin: 0 auto;
+  max-width: 1120px; margin: 0 auto;
   display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 40px; align-items: center;
 }
 .hero .kicker {
@@ -27,25 +32,15 @@
 }
 .hero h1 {
   font-family: var(--serif); font-weight: 300;
-  font-size: clamp(40px, 6.5vw, 68px); line-height: 1.08;
+  font-size: clamp(36px, 6.5vw, 68px); line-height: 1.08;
   letter-spacing: -1.5px; margin: 16px 0 20px;
 }
 .hero h1 em { font-style: italic; color: var(--gold-light); }
 .hero .sub {
   font-size: clamp(16px, 2vw, 18px); color: rgba(245,242,236,0.75);
-  max-width: 46ch; margin-bottom: 32px;
+  max-width: 46ch; margin-bottom: 34px;
 }
-.hero .cta-row { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 56px; }
-.store-btn {
-  display: flex; align-items: center; gap: 10px;
-  background: var(--linen); color: var(--forest); text-decoration: none;
-  padding: 13px 22px; border-radius: 100px; font-weight: 700; font-size: 15px;
-}
-.store-btn.ghost {
-  background: transparent; color: var(--linen);
-  border: 1.5px solid rgba(245,242,236,0.35);
-}
-.store-btn small { display: block; font-size: 10.5px; font-weight: 500; opacity: 0.65; line-height: 1.1; }
+.hero .store-row { margin-bottom: 52px; }
 .hero-trust { display: flex; gap: 26px; flex-wrap: wrap; padding-bottom: 48px; }
 .hero-trust div { font-size: 13px; color: rgba(245,242,236,0.6); }
 .hero-trust strong { display: block; color: var(--gold-light); font-size: 15px; }
@@ -119,67 +114,96 @@
 .m-acct-name { font-size: 8.5px; color: rgba(245,242,236,0.7); margin-top: 2px; }
 
 /* ── Feature sections ── */
-.features { max-width: 1080px; margin: 0 auto; padding: clamp(64px, 9vw, 110px) clamp(20px, 5vw, 56px); }
+.features { max-width: 1120px; margin: 0 auto; padding: clamp(64px, 9vw, 120px) clamp(20px, 5vw, 56px); }
 .features .kicker { color: var(--forest-mut); font-size: 12.5px; letter-spacing: 3px; text-transform: uppercase; font-weight: 700; }
 .features h2 {
   font-family: var(--serif); font-weight: 300;
   font-size: clamp(30px, 4.5vw, 44px); letter-spacing: -1px;
   margin: 12px 0 14px; color: var(--forest);
 }
-.features .lead { color: var(--ink-soft); max-width: 60ch; margin-bottom: 44px; font-size: 17px; }
-.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 18px; }
+.features .lead { color: var(--ink-soft); max-width: 60ch; margin-bottom: 48px; font-size: 17px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; }
 .feat {
   background: var(--card); border: 1px solid var(--border);
-  border-radius: 20px; padding: 26px;
+  border-radius: 20px; padding: 28px;
+  transition: transform .28s ease, box-shadow .28s ease, border-color .28s ease;
+}
+.feat:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 20px 40px rgba(22,58,47,0.08);
+  border-color: rgba(22,58,47,0.14);
 }
 .feat .fi {
-  width: 44px; height: 44px; border-radius: 14px;
+  width: 46px; height: 46px; border-radius: 14px;
   background: rgba(22,58,47,0.08); display: flex; align-items: center; justify-content: center;
-  font-size: 20px; margin-bottom: 14px;
+  font-size: 21px; margin-bottom: 16px;
 }
-.feat h3 { font-size: 17px; margin-bottom: 6px; color: var(--forest); }
+.feat h3 { font-size: 17px; margin-bottom: 7px; color: var(--forest); }
 .feat p { font-size: 14.5px; color: var(--ink-soft); }
 
 /* ── Security band ── */
 .security {
   background: var(--forest); color: var(--linen);
-  padding: clamp(64px, 8vw, 96px) clamp(20px, 5vw, 56px);
+  padding: clamp(64px, 8vw, 100px) clamp(20px, 5vw, 56px);
 }
-.security .inner { max-width: 1080px; margin: 0 auto; text-align: center; }
+.security .inner { max-width: 1120px; margin: 0 auto; text-align: center; }
 .security h2 {
   font-family: var(--serif); font-weight: 300;
   font-size: clamp(28px, 4vw, 40px); letter-spacing: -0.5px; margin-bottom: 12px;
 }
-.security .lead { color: rgba(245,242,236,0.7); max-width: 62ch; margin: 0 auto 40px; }
+.security .lead { color: rgba(245,242,236,0.7); max-width: 62ch; margin: 0 auto 44px; }
 .sec-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; text-align: left; }
-.sec-item { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.09); border-radius: 18px; padding: 22px; }
+.sec-item {
+  background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.09);
+  border-radius: 18px; padding: 24px;
+  transition: background .25s ease, transform .25s ease;
+}
+.sec-item:hover { background: rgba(255,255,255,0.08); transform: translateY(-3px); }
 .sec-item h3 { color: var(--gold-light); font-size: 15.5px; margin-bottom: 6px; }
 .sec-item p { font-size: 13.5px; color: rgba(245,242,236,0.7); }
 
 /* ── Final CTA ── */
-.final { text-align: center; padding: clamp(64px, 9vw, 110px) 24px; }
+.final { text-align: center; padding: clamp(64px, 9vw, 120px) 24px; }
 .final h2 {
   font-family: var(--serif); font-weight: 300;
   font-size: clamp(30px, 5vw, 48px); color: var(--forest); letter-spacing: -1px; margin-bottom: 12px;
 }
-.final p { color: var(--ink-soft); margin-bottom: 28px; }
-.final .store-btn { background: var(--forest); color: var(--linen); display: inline-flex; margin: 0 6px 10px; }
+.final p { color: var(--ink-soft); margin-bottom: 32px; }
+.final .store-row { justify-content: center; }
 
 @media (max-width: 860px) {
   .hero-inner { grid-template-columns: 1fr; }
-  .phones { height: 470px; margin-top: 8px; }
+  .phones { height: 470px; margin-top: 12px; }
   .phone { width: 220px; }
   .phone .screen { height: 440px; }
   .phone.back { right: auto; left: 8%; }
   .phone.front { right: 8%; }
+}
+@media (max-width: 480px) {
+  .hero { padding-top: 36px; }
+  .hero h1 { font-size: clamp(32px, 9vw, 44px); letter-spacing: -1px; }
+  .hero .sub { max-width: none; }
+  .phones { height: 400px; }
+  .phone { width: 172px; }
+  .phone .screen { height: 350px; font-size: 10px; }
+  .hero-trust { gap: 20px 28px; padding-bottom: 40px; }
+  .store-btn { padding: 9px 16px 9px 12px; gap: 9px; }
+  .store-btn .store-txt strong { font-size: 15px; }
+  .features .lead, .security .lead { font-size: 15.5px; }
 }
 </style>
 </head>
 <body>
 
 <nav>
-  <a class="logo" href="/">Ak<span>ù</span></a>
-  <div class="links">
+  <a class="logo" href="/">
+    <img class="logo-mark" src="/img/icon-192.png" width="34" height="34" alt="">
+    <span class="logo-text">Ak<span class="accent">ù</span></span>
+  </a>
+  <button class="nav-toggle" id="navToggle" type="button" aria-label="Toggle menu" aria-expanded="false" aria-controls="navMenu">
+    <span></span><span></span><span></span>
+  </button>
+  <div class="links" id="navMenu">
     <a href="#features">Features</a>
     <a href="#security">Security</a>
     <a href="/privacy">Privacy</a>
@@ -191,14 +215,24 @@
 <header class="hero">
   <div class="hero-inner">
     <div>
-      <div class="kicker">Personal finance · by NIPPYSKY</div>
-      <h1>Know your money. <em>Own</em> your money.</h1>
-      <p class="sub">Akù makes tracking money feel effortless — log expenses and income in seconds, stay ahead of bills, and watch your savings goals come alive. Private by design, synced everywhere.</p>
-      <div class="cta-row" id="download">
-        <a class="store-btn" href="#" aria-disabled="true"> <small>Coming soon to the</small>App Store</a>
-        <a class="store-btn ghost" href="#" aria-disabled="true"> <small>Coming soon to</small>Google Play</a>
+      <div class="kicker reveal">Personal finance · by NIPPYSKY</div>
+      <h1 class="reveal reveal-d1">Know your money. <em>Own</em> your money.</h1>
+      <p class="sub reveal reveal-d2">Akù makes tracking money feel effortless — log expenses and income in seconds, stay ahead of bills, and watch your savings goals come alive. Private by design, synced everywhere.</p>
+
+      <div class="store-row reveal reveal-d3">
+        <div class="store-btn" role="img" aria-label="Coming soon on the App Store">
+          <svg class="store-ico" viewBox="0 0 384 512" width="24" height="24" fill="currentColor" aria-hidden="true"><path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z"/></svg>
+          <span class="store-txt"><small>Download on the</small><strong>App Store</strong></span>
+          <span class="soon-tag">Soon</span>
+        </div>
+        <div class="store-btn" role="img" aria-label="Coming soon on Google Play">
+          <svg class="store-ico" viewBox="0 0 512 512" width="22" height="22" fill="currentColor" aria-hidden="true"><path d="M325.3 234.3L104.6 13l280.8 161.2-60.1 60.1zM47 0C34 6.8 25.3 19.2 25.3 35.3v441.3c0 16.1 8.7 28.5 21.7 35.3l256.6-256L47 0zm425.2 225.6l-58.9-34.1-65.7 64.5 65.7 64.5 60.1-34.1c18-14.3 18-46.5-1.2-60.8zM104.6 499l280.8-161.2-60.1-60.1L104.6 499z"/></svg>
+          <span class="store-txt"><small>GET IT ON</small><strong>Google Play</strong></span>
+          <span class="soon-tag">Soon</span>
+        </div>
       </div>
-      <div class="hero-trust">
+
+      <div class="hero-trust reveal reveal-d4">
         <div><strong>E2E encrypted</strong>Your data, unreadable to anyone else</div>
         <div><strong>Real-time sync</strong>iPhone + Android, always in step</div>
         <div><strong>No bank access</strong>You log it. You control it.</div>
@@ -206,7 +240,7 @@
     </div>
 
     <!-- CSS phone mockups -->
-    <div class="phones" aria-hidden="true">
+    <div class="phones reveal reveal-d2" aria-hidden="true">
       <div class="phone back">
         <div class="screen">
           <div class="m-goal-hero">
@@ -258,39 +292,49 @@
 
 <!-- ── Features ── -->
 <section class="features" id="features">
-  <div class="kicker">Everything is income or expense</div>
-  <h2>Radically simple money tracking</h2>
-  <p class="lead">No bank connections, no jargon, no clutter. Akù is built around one honest idea: money comes in, money goes out — and you deserve to see it clearly.</p>
+  <div class="kicker reveal">Everything is income or expense</div>
+  <h2 class="reveal reveal-d1">Radically simple money tracking</h2>
+  <p class="lead reveal reveal-d2">No bank connections, no jargon, no clutter. Akù is built around one honest idea: money comes in, money goes out — and you deserve to see it clearly.</p>
   <div class="grid">
-    <div class="feat"><div class="fi">⚡</div><h3>Log in seconds</h3><p>A floating action button puts expense and income logging one tap away, from anywhere in the app.</p></div>
-    <div class="feat"><div class="fi">📅</div><h3>Bills that remind you</h3><p>Due-date reminders at 14, 7, 3 and 1 day out. Bills count as expenses the moment they're due — no double bookkeeping.</p></div>
-    <div class="feat"><div class="fi">🎯</div><h3>Goals with a destination</h3><p>Attach the actual account you're saving into — bank, PiggyVest, anywhere — and track pace, projections and history per goal.</p></div>
-    <div class="feat"><div class="fi">📊</div><h3>Analytics that teach</h3><p>Cash-flow charts, category donuts and your savings rate over 1–12 months. See the mathematics behind your money.</p></div>
-    <div class="feat"><div class="fi">🔁</div><h3>Recurring on autopilot</h3><p>Salaries, rent, subscriptions — logged automatically on schedule, with optional auto-contribution to goals.</p></div>
-    <div class="feat"><div class="fi">🔔</div><h3>Nudges that fit your day</h3><p>Smart, personal reminders from morning to bedtime — budget alerts, streaks, milestones, and a goodnight check-in.</p></div>
+    <div class="feat reveal reveal-d1"><div class="fi">⚡</div><h3>Log in seconds</h3><p>A floating action button puts expense and income logging one tap away, from anywhere in the app.</p></div>
+    <div class="feat reveal reveal-d2"><div class="fi">📅</div><h3>Bills that remind you</h3><p>Due-date reminders at 14, 7, 3 and 1 day out. Bills count as expenses the moment they're due — no double bookkeeping.</p></div>
+    <div class="feat reveal reveal-d3"><div class="fi">🎯</div><h3>Goals with a destination</h3><p>Attach the actual account you're saving into — bank, PiggyVest, anywhere — and track pace, projections and history per goal.</p></div>
+    <div class="feat reveal reveal-d1"><div class="fi">📊</div><h3>Analytics that teach</h3><p>Cash-flow charts, category donuts and your savings rate over 1–12 months. See the mathematics behind your money.</p></div>
+    <div class="feat reveal reveal-d2"><div class="fi">🔁</div><h3>Recurring on autopilot</h3><p>Salaries, rent, subscriptions — logged automatically on schedule, no manual re-entry.</p></div>
+    <div class="feat reveal reveal-d3"><div class="fi">🔔</div><h3>Nudges that fit your day</h3><p>Smart, personal reminders from morning to bedtime — spending recaps, streaks, milestones, and a goodnight check-in.</p></div>
   </div>
 </section>
 
 <!-- ── Security ── -->
 <section class="security" id="security">
   <div class="inner">
-    <h2>Private by design</h2>
-    <p class="lead">Akù never connects to your bank and never sees your balances. What you log is encrypted on your device before it ever leaves it.</p>
+    <h2 class="reveal">Private by design</h2>
+    <p class="lead reveal reveal-d1">Akù never connects to your bank and never sees your balances. What you log is encrypted on your device before it ever leaves it.</p>
     <div class="sec-grid">
-      <div class="sec-item"><h3>End-to-end encryption</h3><p>AES-256-GCM with a key only your devices hold. Our servers store ciphertext they cannot read.</p></div>
-      <div class="sec-item"><h3>Device-level lock</h3><p>Face ID, fingerprint, or your phone's PIN protect the app. Nothing extra to remember.</p></div>
-      <div class="sec-item"><h3>Real-time sync</h3><p>Log on your iPhone, watch it appear on your Android. Encrypted deltas, instantly delivered.</p></div>
-      <div class="sec-item"><h3>Your data, your call</h3><p>Export everything as a PDF statement, or delete your account and every record in one tap.</p></div>
+      <div class="sec-item reveal reveal-d1"><h3>End-to-end encryption</h3><p>AES-256-GCM with a key only your devices hold. Our servers store ciphertext they cannot read.</p></div>
+      <div class="sec-item reveal reveal-d2"><h3>Device-level lock</h3><p>Face ID, fingerprint, or your phone's PIN protect the app. Nothing extra to remember.</p></div>
+      <div class="sec-item reveal reveal-d3"><h3>Real-time sync</h3><p>Log on your iPhone, watch it appear on your Android. Encrypted deltas, instantly delivered.</p></div>
+      <div class="sec-item reveal reveal-d4"><h3>Your data, your call</h3><p>Export everything as a PDF statement, or delete your account and every record in one tap.</p></div>
     </div>
   </div>
 </section>
 
-<!-- ── Final CTA ── -->
-<section class="final">
-  <h2>Start understanding your money.</h2>
-  <p>Free. Private. Beautifully simple.</p>
-  <a class="store-btn" href="#"> <small>Coming soon to the</small>App Store</a>
-  <a class="store-btn" href="#"> <small>Coming soon to</small>Google Play</a>
+<!-- ── Final CTA / Download ── -->
+<section class="final" id="download">
+  <h2 class="reveal">Start understanding your money.</h2>
+  <p class="reveal reveal-d1">Free. Private. Beautifully simple.</p>
+  <div class="store-row reveal reveal-d2">
+    <div class="store-btn" role="img" aria-label="Coming soon on the App Store">
+      <svg class="store-ico" viewBox="0 0 384 512" width="24" height="24" fill="currentColor" aria-hidden="true"><path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z"/></svg>
+      <span class="store-txt"><small>Download on the</small><strong>App Store</strong></span>
+      <span class="soon-tag">Soon</span>
+    </div>
+    <div class="store-btn" role="img" aria-label="Coming soon on Google Play">
+      <svg class="store-ico" viewBox="0 0 512 512" width="22" height="22" fill="currentColor" aria-hidden="true"><path d="M325.3 234.3L104.6 13l280.8 161.2-60.1 60.1zM47 0C34 6.8 25.3 19.2 25.3 35.3v441.3c0 16.1 8.7 28.5 21.7 35.3l256.6-256L47 0zm425.2 225.6l-58.9-34.1-65.7 64.5 65.7 64.5 60.1-34.1c18-14.3 18-46.5-1.2-60.8zM104.6 499l280.8-161.2-60.1-60.1L104.6 499z"/></svg>
+      <span class="store-txt"><small>GET IT ON</small><strong>Google Play</strong></span>
+      <span class="soon-tag">Soon</span>
+    </div>
+  </div>
 </section>
 
 <footer>
@@ -315,5 +359,6 @@
   </div>
 </footer>
 
+<script src="/nav.js" defer></script>
 </body>
 </html>

@@ -99,15 +99,16 @@ router.post('/token', authMiddleware, async (c) => {
 // ─── POST /api/notifications/insight ─────────────────────────────────────────
 // Upsert financial insight signals for the authenticated user.
 // Called fire-and-forget by the app after each successful sync.
-// The server only receives aggregated signals (percentages, counts, booleans)
-// — never raw financial amounts — to craft personalised push messages.
+// The server receives mostly aggregated signals (percentages, counts, booleans)
+// to craft personalised push messages. The one deliberate exception is
+// yesterdayExpenseTotal — needed so the server can compose the "here's what you
+// spent yesterday" push (the first notification of the day) while the app is
+// closed. It's formatted with the user's own preferred currency symbol.
 
 router.post('/insight', authMiddleware, async (c) => {
   const { sub: userId } = c.get('jwtPayload');
 
   let body: {
-    budgetUtilization?:   number | null;
-    hasOverBudget?:       boolean;
     spendingStreak?:      number;
     weeklyChangePct?:     number | null;
     monthlyExpenseCount?: number;
@@ -116,6 +117,8 @@ router.post('/insight', authMiddleware, async (c) => {
     goalsOnTrack?:        number;
     hasActiveGoals?:      boolean;
     savingsRatePct?:      number | null;
+    yesterdayExpenseTotal?: number;
+    yesterdayExpenseCount?: number;
   };
 
   try {
@@ -128,9 +131,6 @@ router.post('/insight', authMiddleware, async (c) => {
 
   // Clamp / sanitise values so rogue clients can't pollute the DB
   const sanitised = {
-    budgetUtilization:   body.budgetUtilization != null
-      ? Math.min(Math.max(Number(body.budgetUtilization), 0), 10) : null,
-    hasOverBudget:       Boolean(body.hasOverBudget ?? false),
     spendingStreak:      Math.min(Math.max(Math.round(Number(body.spendingStreak ?? 0)), 0), 3650),
     weeklyChangePct:     body.weeklyChangePct != null
       ? Math.min(Math.max(Number(body.weeklyChangePct), -1000), 1000) : null,
@@ -142,6 +142,8 @@ router.post('/insight', authMiddleware, async (c) => {
     hasActiveGoals:      Boolean(body.hasActiveGoals ?? false),
     savingsRatePct:      body.savingsRatePct != null
       ? Math.min(Math.max(Number(body.savingsRatePct), -1000), 100) : null,
+    yesterdayExpenseTotal: Math.min(Math.max(Math.round(Number(body.yesterdayExpenseTotal ?? 0)), 0), 100_000_000_000),
+    yesterdayExpenseCount: Math.min(Math.max(Math.round(Number(body.yesterdayExpenseCount ?? 0)), 0), 100_000),
     updatedAt:           now,
   };
 
@@ -203,7 +205,6 @@ router.patch('/preferences', authMiddleware, async (c) => {
 
   let body: {
     billReminders?:  boolean;
-    budgetAlerts?:   boolean;
     goalMilestones?: boolean;
     dailyDigest?:    boolean;
   };
@@ -220,7 +221,7 @@ router.patch('/preferences', authMiddleware, async (c) => {
     }
   }
 
-  const allowedKeys = new Set(['billReminders', 'budgetAlerts', 'goalMilestones', 'dailyDigest']);
+  const allowedKeys = new Set(['billReminders', 'goalMilestones', 'dailyDigest']);
   const filtered = Object.fromEntries(
     Object.entries(body).filter(([k]) => allowedKeys.has(k)),
   );

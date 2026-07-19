@@ -47,14 +47,13 @@ import { useBillsStore } from '../../store/bills.store';
 import { useExpensesStore } from '../../store/expenses.store';
 import { useIncomeStore } from '../../store/income.store';
 import { useGoalsStore } from '../../store/goals.store';
-import { useBudgetsStore } from '../../store/budgets.store';
 import { useSyncStore } from '../../store/sync.store';
 import { useNotifHistoryStore } from '../../store/notif-history.store';
 import { FirstTimeHint } from '../../components/ui/FirstTimeHint';
 import { useFirstTimeHint } from '../../hooks/useFirstTimeHint';
 import { useCurrencyFormat } from '../../hooks/useCurrencyFormat';
 import { EXPENSE_CATEGORIES } from '../../types';
-import type { Bill, BudgetWithSpent, ExpenseCategory } from '../../types';
+import type { Bill, ExpenseCategory } from '../../types';
 
 // ─── Icon map for expenses ────────────────────────────────────────────────────
 
@@ -384,81 +383,6 @@ function SpendingSparkline({ data, onPress }: SparklineProps) {
   );
 }
 
-// ─── Budget progress mini-bars ────────────────────────────────────────────────
-
-interface BudgetProgressSectionProps {
-  budgets: BudgetWithSpent[];
-  onSeeAll: () => void;
-}
-
-function BudgetProgressSection({ budgets, onSeeAll }: BudgetProgressSectionProps) {
-  const { colors, text, radius } = useTheme();
-  const { fmt } = useCurrencyFormat();
-
-  const visible = budgets.slice(0, 3);
-
-  const fillColor = (status: BudgetWithSpent['status']) => {
-    if (status === 'exceeded')   return colors.budgetExceeded;
-    if (status === 'near-limit') return colors.budgetNearLimit;
-    return colors.budgetHealthy;
-  };
-
-  return (
-    <Card style={styles.budgetMiniCard}>
-      {visible.map((b, idx) => {
-        const meta      = EXPENSE_CATEGORIES[b.category];
-        const pct       = Math.min(b.progress * 100, 100);
-        const isLast    = idx === visible.length - 1;
-        return (
-          <View
-            key={b.id}
-            style={[
-              styles.budgetMiniRow,
-              !isLast && { borderBottomWidth: 1, borderBottomColor: colors.borderLight },
-            ]}
-          >
-            <Text
-              style={[text.bodySm, { color: colors.text, flex: 1 }]}
-              numberOfLines={1}
-            >
-              {meta?.label ?? b.category}
-            </Text>
-            <Text style={[text.caption, { color: colors.textTertiary, marginRight: 8, minWidth: 32, textAlign: 'right' }]}>
-              {Math.round(pct)}%
-            </Text>
-            <View style={[styles.budgetMiniTrack, { backgroundColor: colors.backgroundSecondary, borderRadius: radius.full }]}>
-              <View
-                style={[
-                  styles.budgetMiniFill,
-                  {
-                    width:           `${pct}%`,
-                    backgroundColor: fillColor(b.status),
-                    borderRadius:    radius.full,
-                  },
-                ]}
-              />
-            </View>
-          </View>
-        );
-      })}
-
-      {budgets.length === 0 && (
-        <View style={styles.budgetMiniEmpty}>
-          <Text style={[text.bodySm, { color: colors.textSecondary }]}>No budgets set</Text>
-        </View>
-      )}
-
-      <Pressable onPress={onSeeAll} style={[styles.budgetMiniSeeAll, { borderTopColor: colors.borderLight }]}>
-        <Text style={[text.bodySm, { color: colors.accent }]}>
-          {budgets.length > 3
-            ? `See all ${budgets.length} budgets`
-            : 'Manage budgets'}
-        </Text>
-      </Pressable>
-    </Card>
-  );
-}
-
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function HomeScreen() {
@@ -470,12 +394,11 @@ export default function HomeScreen() {
   const { expenses, allExpenses, loadAll: loadExpenses, isLoading: expensesLoading } = useExpensesStore();
   const { allRecords: incRecords, loadAll: loadAllInc } = useIncomeStore();
   const { goals, load: loadGoals, isLoading: goalsLoading } = useGoalsStore();
-  const { budgets, load: loadBudgets, isLoading: budgetsLoading } = useBudgetsStore();
   const notifUnread = useNotifHistoryStore((s) => s.unreadCount);
   const syncVersion = useSyncStore((s) => s.syncVersion);
   const hintBell = useFirstTimeHint('hint_home_bell');
 
-  const isLoading = billsLoading || expensesLoading || goalsLoading || budgetsLoading;
+  const isLoading = billsLoading || expensesLoading || goalsLoading;
   const [refreshing, setRefreshing] = useState(false);
   const { fmt, fmtCompact } = useCurrencyFormat();
 
@@ -484,7 +407,6 @@ export default function HomeScreen() {
     if (user) {
       loadBills(user.id);
       loadExpenses(user.id);
-      loadBudgets(user.id);
       loadAllInc(user.id);
       loadGoals(user.id);
     }
@@ -495,7 +417,6 @@ export default function HomeScreen() {
     if (!user || syncVersion === 0) return;
     loadBills(user.id);
     loadExpenses(user.id);
-    loadBudgets(user.id);
     loadAllInc(user.id);
     loadGoals(user.id);
   }, [syncVersion]);
@@ -507,12 +428,11 @@ export default function HomeScreen() {
     await Promise.all([
       loadBills(user.id),
       loadExpenses(user.id),
-      loadBudgets(user.id),
       loadAllInc(user.id),
       loadGoals(user.id),
     ]);
     setRefreshing(false);
-  }, [user, loadBills, loadExpenses, loadBudgets, loadAllInc, loadGoals]);
+  }, [user, loadBills, loadExpenses, loadAllInc, loadGoals]);
 
   const firstName = user?.name?.split(' ')[0] ?? 'there';
   const greeting  = getGreeting();
@@ -549,7 +469,6 @@ export default function HomeScreen() {
     () => last7DaysSpending(allExpenses.length > 0 ? allExpenses : expenses),
     [allExpenses, expenses],
   );
-  const activeBudgets  = budgets.filter((b) => b.status !== 'healthy' || b.progress > 0);
   const insight = useMemo(
     () => !isLoading
       ? computeInsight(allExpenses, incRecords, bills, goals, fmt)
@@ -740,20 +659,6 @@ export default function HomeScreen() {
             <InsightCard
               insight={insight}
               onPress={() => router.push('/analytics' as never)}
-            />
-          </Animated.View>
-        )}
-
-        {/* ── SECTION 2.7: Budget Progress ── */}
-        {!isLoading && budgets.length > 0 && (
-          <Animated.View entering={FadeInDown.delay(160).duration(280)}>
-            <SectionHeader
-              title="Budgets"
-              onSeeAll={() => router.push('/budgets' as never)}
-            />
-            <BudgetProgressSection
-              budgets={activeBudgets.length > 0 ? activeBudgets : budgets}
-              onSeeAll={() => router.push('/budgets' as never)}
             />
           </Animated.View>
         )}
@@ -1065,35 +970,5 @@ const styles = StyleSheet.create({
   },
   sparklineBarFill: {
     width: '100%',
-  },
-
-  // Budget mini
-  budgetMiniCard: {
-    overflow: 'hidden',
-  },
-  budgetMiniRow: {
-    flexDirection:     'row',
-    alignItems:        'center',
-    paddingHorizontal: 16,
-    paddingVertical:   12,
-    gap:               8,
-  },
-  budgetMiniTrack: {
-    width:   80,
-    height:  6,
-    overflow: 'hidden',
-  },
-  budgetMiniFill: {
-    height: '100%',
-  },
-  budgetMiniEmpty: {
-    paddingVertical:   20,
-    alignItems:        'center',
-    paddingHorizontal: 16,
-  },
-  budgetMiniSeeAll: {
-    paddingHorizontal: 16,
-    paddingVertical:   10,
-    borderTopWidth:    1,
   },
 });

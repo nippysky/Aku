@@ -58,18 +58,11 @@ export default function EmailScreen() {
     setSendError(null);
 
     try {
-      // In production: sends a real magic link email via the server
-      // In __DEV__: the server call still fires but the dev-skip button in
-      // verify.tsx lets you bypass it without opening the email.
+      // Sends a real magic link email via the server.
       await signIn(normalised, name);
     } catch (err) {
-      // Non-fatal if the server is unreachable during local dev
-      if (__DEV__) {
-        console.warn('[email] signIn failed (dev mode — use skip button):', err);
-      } else {
-        setSendError(err instanceof Error ? err.message : 'Could not send email. Please try again.');
-        return;
-      }
+      setSendError(err instanceof Error ? err.message : 'Could not send email. Please try again.');
+      return;
     }
 
     router.push({ pathname: '/(onboarding)/verify', params: { email: normalised } });
@@ -92,7 +85,7 @@ export default function EmailScreen() {
         bottomOffset={20}
       >
         <OnboardingHeader
-          step={2}
+          step={3}
           total={6}
           onBack={() => router.back()}
           dark={false}

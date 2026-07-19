@@ -99,11 +99,6 @@ export const LightColors = {
   statusOverdue:       '#8B1A0E',
   statusOverdueBg:     '#FDEDEC',
 
-  // Budget status
-  budgetHealthy:       Palette.success,
-  budgetNearLimit:     Palette.warning,
-  budgetExceeded:      Palette.danger,
-
   // Overlay
   overlay:             'rgba(0,0,0,0.35)',
   overlayLight:        'rgba(0,0,0,0.12)',
@@ -167,11 +162,6 @@ export const DarkColors = {
   statusPaidBg:        '#0D2A1A',
   statusOverdue:       '#FF6B6B',
   statusOverdueBg:     '#3A0D0A',
-
-  // Budget status
-  budgetHealthy:       '#34C47A',
-  budgetNearLimit:     '#F0B429',
-  budgetExceeded:      '#F05C4E',
 
   // Overlay
   overlay:             'rgba(0,0,0,0.6)',

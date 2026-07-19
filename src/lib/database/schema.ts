@@ -34,6 +34,10 @@ export const bills = sqliteTable('bills', {
   notes:       text('notes'),
   isPaid:      int('is_paid', { mode: 'boolean' }).default(false),
   paidAt:      text('paid_at'),
+  /** Auto-logged expense created on payment (unified ledger link). */
+  lastPaymentExpenseId: text('last_payment_expense_id'),
+  /** Silently logs itself + advances on due date — no reminders, no confirm. */
+  autoPay:     int('auto_pay', { mode: 'boolean' }).default(false),
   // notification toggles
   notify30:    int('notify_30', { mode: 'boolean' }).default(false),
   notify14:    int('notify_14', { mode: 'boolean' }).default(true),
@@ -82,21 +86,6 @@ export const income = sqliteTable('income', {
   index('idx_income_category').on(t.category),
 ]);
 
-// ─── Budgets ──────────────────────────────────────────────────────────────
-
-export const budgets = sqliteTable('budgets', {
-  id:          text('id').primaryKey(),
-  userId:      text('user_id').notNull(),
-  category:    text('category').notNull(),
-  amount:      int('amount').notNull(),       // in kobo
-  period:      text('period', { enum: ['weekly', 'monthly', 'yearly'] }).notNull(),
-  createdAt:   text('created_at').notNull(),
-  updatedAt:   text('updated_at').notNull(),
-}, (t) => [
-  index('idx_budgets_user').on(t.userId),
-  index('idx_budgets_category').on(t.category),
-]);
-
 // ─── Goals ────────────────────────────────────────────────────────────────
 
 export const goals = sqliteTable('goals', {
@@ -142,7 +131,7 @@ export const notifications = sqliteTable('notifications', {
   type:        text('type').notNull(),
   title:       text('title').notNull(),
   body:        text('body').notNull(),
-  referenceId: text('reference_id'),       // billId, goalId, budgetId, etc.
+  referenceId: text('reference_id'),       // billId, goalId, etc.
   isRead:      int('is_read', { mode: 'boolean' }).default(false),
   scheduledAt: text('scheduled_at'),       // ISO8601 — null means "sent immediately"
   createdAt:   text('created_at').notNull(),
@@ -215,7 +204,6 @@ export const schema = {
   bills,
   expenses,
   income,
-  budgets,
   goals,
   goalContributions,
   notifications,

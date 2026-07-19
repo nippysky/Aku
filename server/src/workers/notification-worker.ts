@@ -12,13 +12,15 @@
  *
  * ── Tier 2 · App-reported insights ──────────────────────────────────────────
  *   After each sync the app posts lightweight financial signals
- *   (budget %, streak, top category, weekly delta) to POST /api/notifications/insight.
+ *   (streak, top category, weekly delta) to POST /api/notifications/insight.
  *   The worker reads these to craft personalised message variants:
- *     • Over-budget alert  · Budget warning (>80 %)  · Streak celebration
- *     • Weekly spend spike / drop  · Top-category callout  · Goal nudge
+ *     • Streak celebration · Weekly spend spike / drop
+ *     • Top-category callout  · Goal nudge
  *
  * ── Tier 3 · Hourly engagement engine ───────────────────────────────────────
  *   Runs every hour at :00. For each user's local timezone:
+ *     • 08:00          — yesterday recap: "You spent ₦X yesterday" (the FIRST
+ *       notification of the day), or an encouraging nudge if nothing was logged
  *     • 09:00 → 20:00  — one creative, hour-themed nudge per hour
  *       (the 19:00 slot delivers the fully personalised Tier 1/2 message)
  *     • 21:00          — bedtime wrap-up: "hope you logged all your expenses
@@ -53,14 +55,12 @@ interface PushPayload {
 
 interface NotifPrefs {
   billReminders:  boolean;
-  budgetAlerts:   boolean;
   goalMilestones: boolean;
   dailyDigest:    boolean;
 }
 
 const DEFAULT_PREFS: NotifPrefs = {
   billReminders:  true,
-  budgetAlerts:   true,
   goalMilestones: true,
   dailyDigest:    true,  // server-worker default is enabled (user can opt out)
 };
@@ -71,7 +71,6 @@ function parsePrefs(json: string | null): NotifPrefs {
     const parsed = JSON.parse(json) as Partial<NotifPrefs>;
     return {
       billReminders:  parsed.billReminders  ?? DEFAULT_PREFS.billReminders,
-      budgetAlerts:   parsed.budgetAlerts   ?? DEFAULT_PREFS.budgetAlerts,
       goalMilestones: parsed.goalMilestones ?? DEFAULT_PREFS.goalMilestones,
       dailyDigest:    parsed.dailyDigest    ?? DEFAULT_PREFS.dailyDigest,
     };
@@ -86,8 +85,6 @@ interface UserRow {
   timezone:            string | null;
   createdAt:           Date;
   lastSyncAt:          Date | null;
-  budgetUtilization:   number | null;
-  hasOverBudget:       boolean | null;
   spendingStreak:      number | null;
   weeklyChangePct:     number | null;
   monthlyExpenseCount: number | null;
@@ -97,6 +94,9 @@ interface UserRow {
   totalGoalsCount:     number | null;
   savingsRatePct:      number | null;
   notifPrefsJson:      string | null;
+  yesterdayExpenseTotal: number | null;
+  yesterdayExpenseCount: number | null;
+  currencySymbol:        string | null;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -107,10 +107,11 @@ const LAPSING_HOURS  = 3 * 24;
 const NEW_USER_DAYS  = 3;
 
 // ── Hourly engagement window (user-local time) ───────────────────────────────
-const HOURLY_START = 9;   // first nudge of the day
-const HOURLY_END   = 21;  // bedtime wrap-up message
-const INSIGHT_HOUR = 19;  // the fully personalised Tier 1/2 slot
-const WEEKLY_HOUR  = 18;  // Sunday weekly summary
+const RECAP_HOUR    = 8;   // yesterday's spend recap — the FIRST notification of the day
+const HOURLY_START  = 9;   // first creative nudge of the day
+const HOURLY_END    = 21;  // bedtime wrap-up message
+const INSIGHT_HOUR  = 19;  // the fully personalised Tier 1/2 slot
+const WEEKLY_HOUR   = 18;  // Sunday weekly summary
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -173,6 +174,52 @@ function rotateIdx(userId: string, pool: number, salt = 0): number {
   return hash % pool;
 }
 
+/** Formats a kobo/cent integer amount as "₦12,345" (whole-unit, comma-grouped). */
+function formatMoney(amountMinor: number, symbol: string): string {
+  const whole = Math.round(amountMinor / 100);
+  return `${symbol}${whole.toLocaleString('en-US')}`;
+}
+
+// ─── Yesterday recap — the FIRST notification of the day ────────────────────
+// Reports the previous calendar day's total spend, or an encouraging nudge if
+// nothing was logged. Gated by dailyDigest like the rest of the engagement
+// stream (the master "Daily reminders" toggle).
+
+const NO_SPEND_POOL: Array<{ title: string; body: string }> = [
+  { title: 'A clean slate yesterday 🌱',      body: "You didn't log any expenses yesterday. Nothing spent, or just nothing logged? Either way, keep it up." },
+  { title: 'Zero spend yesterday 👏',         body: 'No expenses logged yesterday. If that\'s accurate, that\'s real discipline — keep the streak alive today.' },
+  { title: 'Quiet day, moneywise 🍃',         body: 'Yesterday shows no logged spending. Nice if intentional — just make sure nothing slipped through unlogged.' },
+];
+
+function pickYesterdaySummaryMessage(u: UserRow, prefs: NotifPrefs): PushPayload | null {
+  if (!prefs.dailyDigest) return null;
+
+  const symbol = u.currencySymbol ?? '₦';
+  const count  = u.yesterdayExpenseCount ?? 0;
+
+  if (count === 0) {
+    const { title, body } = NO_SPEND_POOL[rotateIdx(u.userId, NO_SPEND_POOL.length, 8)];
+    return {
+      title, body,
+      channelId: 'digest',
+      data: { type: 'yesterday_recap', screen: 'expenses', action: 'log' },
+    };
+  }
+
+  const total = formatMoney(u.yesterdayExpenseTotal ?? 0, symbol);
+  const pool: Array<{ title: string; body: string }> = [
+    { title: `You spent ${total} yesterday 📊`,        body: `Across ${count} ${count === 1 ? 'entry' : 'entries'}. Tap to see the full breakdown and start today fresh.` },
+    { title: `Yesterday's total: ${total} 💸`,          body: `${count} ${count === 1 ? 'expense' : 'expenses'} logged. See where it went, then log today as it happens.` },
+    { title: `${total} logged yesterday 📋`,            body: 'Here\'s your recap. A new day of spending starts now — keep the habit going.' },
+  ];
+  const { title, body } = pool[rotateIdx(u.userId, pool.length, 8)];
+  return {
+    title, body,
+    channelId: 'digest',
+    data: { type: 'yesterday_recap', screen: 'expenses', action: 'log' },
+  };
+}
+
 function pickDailyMessage(u: UserRow, now: Date, prefs: NotifPrefs): PushPayload | null {
   const msPerHour    = 3_600_000;
   const accountAgeH  = (now.getTime() - u.createdAt.getTime()) / msPerHour;
@@ -195,10 +242,10 @@ function pickDailyMessage(u: UserRow, now: Date, prefs: NotifPrefs): PushPayload
     };
 
     if (dayNum === 2) return {
-      title:     'Set your first budget 🎯',
-      body:      'Budgets keep your spending honest. Takes less than a minute to set up.',
+      title:     'Add a bill you pay regularly 🧾',
+      body:      'Rent, subscriptions, electricity — track them so nothing sneaks up on you.',
       channelId: 'digest',
-      data:      { ...baseData, screen: 'budgets' },
+      data:      { ...baseData, screen: 'bills' },
     };
 
     return {
@@ -233,38 +280,6 @@ function pickDailyMessage(u: UserRow, now: Date, prefs: NotifPrefs): PushPayload
   }
 
   // ── ACTIVE user — Tier 2 personalisation ──────────────────────────────────
-
-  // Budget alerts (gated by pref)
-  if (prefs.budgetAlerts) {
-    if (u.hasOverBudget) {
-      const pool: Array<{ title: string; body: string }> = [
-        { title: 'Budget exceeded! ⚠️',  body: 'You have gone over budget this period. Tap to see where the overspend happened.' },
-        { title: 'Budget limit hit 🔴',   body: 'One or more budgets are maxed out. Time to review your spending.' },
-      ];
-      const { title, body } = pool[rotateIdx(u.userId, pool.length, 1)];
-      return { title, body, channelId: 'digest', data: { ...baseData, screen: 'budgets' } };
-    }
-
-    if (u.budgetUtilization != null && u.budgetUtilization >= 0.9) {
-      const pct = Math.round(u.budgetUtilization * 100);
-      return {
-        title:     `${pct}% of your budget used 🔴`,
-        body:      'You are nearly at your limit. Review what is left before the period ends.',
-        channelId: 'digest',
-        data:      { ...baseData, screen: 'budgets' },
-      };
-    }
-
-    if (u.budgetUtilization != null && u.budgetUtilization >= 0.8) {
-      const pct = Math.round(u.budgetUtilization * 100);
-      return {
-        title:     `Budget at ${pct}% 🟡`,
-        body:      'Approaching your budget ceiling. Tap to check your remaining headroom.',
-        channelId: 'digest',
-        data:      { ...baseData, screen: 'budgets' },
-      };
-    }
-  }
 
   // Non-digest users: only goal nudges if goalMilestones is on
   if (!prefs.dailyDigest) {
@@ -357,7 +372,7 @@ function pickDailyMessage(u: UserRow, now: Date, prefs: NotifPrefs): PushPayload
   // Top-category callout
   if (u.topCategory && u.monthlyExpenseCount != null && u.monthlyExpenseCount >= 5) {
     const pool: Array<{ title: string; body: string }> = [
-      { title: `${u.topCategory} is your top spend 💡`,          body: 'It is claiming the most from your budget this month. Tap to see the breakdown.' },
+      { title: `${u.topCategory} is your top spend 💡`,          body: 'It is claiming the most of your spending this month. Tap to see the breakdown.' },
       { title: `Most of your money went to ${u.topCategory} 💡`, body: 'See if that aligns with your priorities — tap to review.' },
     ];
     const { title, body } = pool[rotateIdx(u.userId, pool.length, 5)];
@@ -389,7 +404,7 @@ function pickDailyMessage(u: UserRow, now: Date, prefs: NotifPrefs): PushPayload
     { title: 'Track it, own it 💪',             body: 'You cannot improve what you do not measure. Log today\'s spending now.' },
     { title: 'Your future self is watching 🔮', body: 'Every expense logged is a step toward financial clarity. Tap to add today.' },
     { title: 'Money in, money out 🔄',          body: 'Logging takes seconds. Knowing where your money goes is worth far more.' },
-    { title: "What's left in the tank? ⛽",     body: 'Check in on your spending and see how today compared to your budget.' },
+    { title: "What's left in the tank? ⛽",     body: 'Check in on your spending and see how today is shaping up.' },
     { title: '30 seconds to clarity ⏱️',        body: 'A quick log now keeps your finances sharp. Open Akù and add your expenses.' },
   ];
   const { title, body } = genericPool[rotateIdx(u.userId, genericPool.length)];
@@ -439,7 +454,7 @@ function pickWeeklyMessage(u: UserRow, prefs: NotifPrefs): PushPayload | null {
   if (u.topCategory) {
     const pool: Array<{ title: string; body: string }> = [
       { title: 'Your week in review 📊',     body: `${u.topCategory} was your top category this week. Tap for the full breakdown.` },
-      { title: 'Weekly spending recap 📊',   body: `${u.topCategory} claimed the most of your budget. See where else your money went.` },
+      { title: 'Weekly spending recap 📊',   body: `${u.topCategory} claimed the most of your spending. See where else your money went.` },
     ];
     const { title, body } = pool[rotateIdx(u.userId, pool.length, 50)];
     return { title, body, channelId: 'digest', data: baseData };
@@ -472,8 +487,8 @@ function pickWeeklyMessage(u: UserRow, prefs: NotifPrefs): PushPayload | null {
 //
 // One nudge per hour from 09:00 to 20:00 local, plus a 21:00 bedtime wrap-up.
 // Each slot has its own themed pool; variants rotate per user per day.
-// A few slots weave in analytical insights (budget health, streaks, top
-// category) so the day feels personal, not robotic.
+// A few slots weave in analytical insights (streaks, top category) so the
+// day feels personal, not robotic.
 // All hourly slots are gated by the dailyDigest preference.
 
 const HOURLY_POOLS: Record<number, Array<{ title: string; body: string }>> = {
@@ -504,8 +519,8 @@ const HOURLY_POOLS: Record<number, Array<{ title: string; body: string }>> = {
     { title: 'Stay on top of it 💼',           body: 'Money moves fast in the afternoon. Log as you go and nothing escapes.' },
   ],
   14: [
-    { title: 'Afternoon pulse 🕑',             body: 'How is today tracking against your budget? One tap to find out.' },
-    { title: 'Budget vibes check 🎯',          body: 'You set budgets for a reason. See how today is shaping up so far.' },
+    { title: 'Afternoon pulse 🕑',             body: "How is today's spending tracking? One tap to find out." },
+    { title: 'Midday money check 🎯',          body: 'See how today is shaping up so far — tap for a quick look.' },
     { title: 'Keep the streak alive 🔥',       body: 'Consistent logging is the single best money habit. Add anything new.' },
   ],
   15: [
@@ -557,7 +572,7 @@ function pickBedtimeMessage(u: UserRow, prefs: NotifPrefs): PushPayload | null {
 
 /**
  * Creative hourly nudge with light analytical seasoning:
- * a few slots surface real insights (budget, streak, top category) when the
+ * a few slots surface real insights (streak, top category) when the
  * data supports it; otherwise the hour-themed creative pool rotates daily.
  */
 function pickHourlyMessage(u: UserRow, hour: number, prefs: NotifPrefs): PushPayload | null {
@@ -566,15 +581,6 @@ function pickHourlyMessage(u: UserRow, hour: number, prefs: NotifPrefs): PushPay
   const baseData = { type: 'hourly_reminder', screen: 'expenses', action: 'log' };
 
   // ── Analytical seasoning — specific hours, only when the data is real ──────
-  if (hour === 10 && prefs.budgetAlerts && u.hasOverBudget) {
-    return {
-      title:     'Heads up — a budget is maxed out ⚠️',
-      body:      'You have gone over one of your budgets. Worth a look before you spend more today.',
-      channelId: 'digest',
-      data:      { ...baseData, screen: 'budgets' },
-    };
-  }
-
   if (hour === 11 && u.spendingStreak != null && u.spendingStreak >= 3) {
     return {
       title:     `${u.spendingStreak}-day logging streak 🔥`,
@@ -601,21 +607,6 @@ function pickHourlyMessage(u: UserRow, hour: number, prefs: NotifPrefs): PushPay
         data:      { ...baseData, screen: 'expenses' },
       };
     }
-  }
-
-  if (
-    hour === 14 &&
-    prefs.budgetAlerts &&
-    u.budgetUtilization != null &&
-    u.budgetUtilization >= 0.8
-  ) {
-    const pct = Math.round(u.budgetUtilization * 100);
-    return {
-      title:     `Budget check: ${pct}% used 🟡`,
-      body:      'The afternoon is when budgets quietly slip. See what is left before dinner.',
-      channelId: 'digest',
-      data:      { ...baseData, screen: 'budgets' },
-    };
   }
 
   if (hour === 16 && u.topCategory && u.monthlyExpenseCount != null && u.monthlyExpenseCount >= 5) {
@@ -682,8 +673,6 @@ async function runPersonalisedJob(
         token:               pushTokens.token,
         timezone:            pushTokens.timezone,
         createdAt:           users.createdAt,
-        budgetUtilization:   userInsights.budgetUtilization,
-        hasOverBudget:       userInsights.hasOverBudget,
         spendingStreak:      userInsights.spendingStreak,
         weeklyChangePct:     userInsights.weeklyChangePct,
         monthlyExpenseCount: userInsights.monthlyExpenseCount,
@@ -693,6 +682,9 @@ async function runPersonalisedJob(
         totalGoalsCount:     userInsights.totalGoalsCount,
         savingsRatePct:      userInsights.savingsRatePct,
         notifPrefsJson:      userInsights.notifPrefsJson,
+        yesterdayExpenseTotal: userInsights.yesterdayExpenseTotal,
+        yesterdayExpenseCount: userInsights.yesterdayExpenseCount,
+        currencySymbol:        users.preferredCurrencySymbol,
       })
       .from(pushTokens)
       .innerJoin(users, eq(pushTokens.userId, users.id))
@@ -734,7 +726,7 @@ async function runPersonalisedJob(
         const prefs = parsePrefs(row.notifPrefsJson ?? null);
 
         // Skip users who opted out of all push notification types
-        const wantsAnything = prefs.dailyDigest || prefs.budgetAlerts || prefs.goalMilestones;
+        const wantsAnything = prefs.dailyDigest || prefs.goalMilestones;
         if (!wantsAnything) continue;
 
         const userRow: UserRow = {
@@ -743,8 +735,6 @@ async function runPersonalisedJob(
           timezone:            row.timezone,
           createdAt:           row.createdAt,
           lastSyncAt:          lastSyncMap.get(row.userId) ?? null,
-          budgetUtilization:   row.budgetUtilization,
-          hasOverBudget:       row.hasOverBudget,
           spendingStreak:      row.spendingStreak,
           weeklyChangePct:     row.weeklyChangePct,
           monthlyExpenseCount: row.monthlyExpenseCount,
@@ -754,6 +744,9 @@ async function runPersonalisedJob(
           totalGoalsCount:     row.totalGoalsCount,
           savingsRatePct:      row.savingsRatePct,
           notifPrefsJson:      row.notifPrefsJson ?? null,
+          yesterdayExpenseTotal: row.yesterdayExpenseTotal,
+          yesterdayExpenseCount: row.yesterdayExpenseCount,
+          currencySymbol:        row.currencySymbol,
         };
 
         const payload = picker(userRow, now, prefs);
@@ -830,8 +823,8 @@ async function hourlyCheck(): Promise<void> {
     tzByHour.get(h)!.add(tz);
   }
 
-  // ── Hourly engagement slots: 09:00 … 21:00 local ─────────────────────────
-  for (let hour = HOURLY_START; hour <= HOURLY_END; hour++) {
+  // ── Hourly engagement slots: 08:00 (yesterday recap) … 21:00 local ───────
+  for (let hour = RECAP_HOUR; hour <= HOURLY_END; hour++) {
     if (shutdownRequested) return;
 
     const tzs         = tzByHour.get(hour) ?? new Set<string>();
@@ -839,11 +832,13 @@ async function hourlyCheck(): Promise<void> {
     if (tzs.size === 0 && !includeNull) continue;
 
     const slotType =
+      hour === RECAP_HOUR   ? 'yesterday_recap'  :
       hour === HOURLY_END   ? 'bedtime_reminder' :
       hour === INSIGHT_HOUR ? 'daily_reminder'   :
       `hourly_${hour}`;
 
     const picker: MessagePicker =
+      hour === RECAP_HOUR   ? (u, _n, prefs) => pickYesterdaySummaryMessage(u, prefs) :
       hour === HOURLY_END   ? (u, _n, prefs) => pickBedtimeMessage(u, prefs) :
       hour === INSIGHT_HOUR ? pickDailyMessage :
       (u, _n, prefs) => pickHourlyMessage(u, hour, prefs);
@@ -913,7 +908,7 @@ process.on('SIGINT', () => {
 // ─── Start ────────────────────────────────────────────────────────────────────
 
 console.log('[worker] Akù notification worker starting…');
-console.log('[worker] Mode: hourly engagement engine · 09:00–21:00 local · Tier 1 (behavioural) + Tier 2 (insights) + bedtime wrap-up');
+console.log('[worker] Mode: hourly engagement engine · 08:00–21:00 local · yesterday recap + Tier 1 (behavioural) + Tier 2 (insights) + bedtime wrap-up');
 
 scheduleNextHour();
 

@@ -106,6 +106,7 @@ export default function FirstBillScreen() {
           dueDate,
           frequency,
           notes:       null,
+          autoPay:     false,
           notify30:    false,
           notify14:    true,
           notify7:     true,
@@ -115,7 +116,7 @@ export default function FirstBillScreen() {
         },
         user.id,
       );
-      router.push('/(onboarding)/first-budget');
+      router.push('/(onboarding)/first-goal');
     } catch {
       setError('Could not save bill. Please try again.');
     } finally {
@@ -124,7 +125,7 @@ export default function FirstBillScreen() {
   }
 
   function handleSkip() {
-    router.push('/(onboarding)/first-budget');
+    router.push('/(onboarding)/first-goal');
   }
 
   return (
@@ -143,7 +144,7 @@ export default function FirstBillScreen() {
         style={styles.container}
       >
         <OnboardingHeader
-          step={4}
+          step={5}
           total={6}
           onBack={() => router.back()}
           dark={false}

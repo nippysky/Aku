@@ -3,6 +3,7 @@ import { getSQLiteDatabase } from '../lib/database/client';
 import { generateUUID } from '../lib/uuid';
 import type { CurrencyOption } from '../lib/currencies';
 import { DEFAULT_CURRENCY, CURRENCIES } from '../lib/currencies';
+import { updateCurrencyPreference } from '../lib/api-client';
 
 // ─── Persistence keys (SQLite app_state table) ────────────────────────────────
 const KEY_THEME    = 'aku_theme_mode';
@@ -60,6 +61,9 @@ interface UIState {
   currency:         CurrencyOption;
   baseCurrencyCode: string;
   setCurrency:      (currency: CurrencyOption) => void;
+  /** Applies a currency that came FROM the server (login / restore) — updates
+   *  local state + SQLite without re-posting it back to the server. */
+  hydrateCurrencyFromServer: (code: string, symbol: string) => void;
 
   // Exchange rates (relative to USD — fetched from exchangerate-api.com)
   exchangeRates:    Record<string, number> | null;
@@ -101,7 +105,7 @@ export const useUIStore = create<UIState>()((set, get) => ({
 
   setGlobalLoading: (v) => set({ isGlobalLoading: v }),
 
-  setCurrency: (currency) =>
+  setCurrency: (currency) => {
     set((s) => {
       const baseCurrencyCode = s.baseCurrencyCode || DEFAULT_CURRENCY.code;
       appStateSet(KEY_CURRENCY, currency.code);
@@ -113,7 +117,24 @@ export const useUIStore = create<UIState>()((set, get) => ({
         // baseCurrencyCode locks in the ENTRY currency. Only set it once.
         baseCurrencyCode,
       };
-    }),
+    });
+    // Persist server-side so it survives logout / reinstall / new device —
+    // fire-and-forget, retried implicitly next time the user changes it.
+    updateCurrencyPreference(currency.code, currency.symbol).catch(() => {});
+  },
+
+  hydrateCurrencyFromServer: (code, symbol) => {
+    const found = CURRENCIES.find((c) => c.code === code);
+    const option: CurrencyOption = found ?? {
+      code, symbol, name: code, flag: '🌍',
+    };
+    set((s) => {
+      appStateSet(KEY_CURRENCY, option.code);
+      const baseCurrencyCode = s.baseCurrencyCode || DEFAULT_CURRENCY.code;
+      if (!s.baseCurrencyCode) appStateSet(KEY_BASE_CCY, baseCurrencyCode);
+      return { currency: option, baseCurrencyCode };
+    });
+  },
 
   fetchExchangeRates: async () => {
     const { ratesFetchedAt } = get();

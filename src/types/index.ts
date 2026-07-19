@@ -40,6 +40,7 @@ export interface BiometricConfig {
 
 export type BillFrequency =
   | 'one-time'
+  | 'daily'
   | 'weekly'
   | 'biweekly'
   | 'monthly'
@@ -79,7 +80,15 @@ export interface Bill {
   notes:        string | null;
   isPaid:       boolean;
   paidAt:       ISO8601 | null;
+  /** Ledger link — the auto-logged expense created when this bill was paid.
+   *  Cleared (and the expense removed) if the bill is un-marked. */
+  lastPaymentExpenseId: UUID | null;
   status:       BillStatus;
+  /** When true, this bill logs itself as an expense the moment it's due —
+   *  no reminders, no confirmation. For subscriptions/auto-debits you never
+   *  want to think about (Netflix, gym). When false (default), it behaves
+   *  like a normal bill: reminders + manual "Mark Paid". */
+  autoPay:      boolean;
   // notification settings
   notify30:     boolean;
   notify14:     boolean;
@@ -92,7 +101,7 @@ export interface Bill {
 }
 
 export type BillCreateInput = Omit<Bill,
-  'id' | 'userId' | 'isPaid' | 'paidAt' | 'status' | 'createdAt' | 'updatedAt'
+  'id' | 'userId' | 'isPaid' | 'paidAt' | 'lastPaymentExpenseId' | 'status' | 'createdAt' | 'updatedAt'
 >;
 
 export type BillUpdateInput = Partial<BillCreateInput> & { id: UUID };
@@ -136,32 +145,6 @@ export interface ExpenseSummary {
   month:           string; // 'YYYY-MM'
   previousMonth:   Record<ExpenseCategory, NGN> | null;
 }
-
-// ─── Budgets ──────────────────────────────────────────────────────────────
-
-export type BudgetPeriod = 'weekly' | 'monthly' | 'yearly';
-export type BudgetStatus = 'healthy' | 'near-limit' | 'exceeded';
-
-export interface Budget {
-  id:           UUID;
-  userId:       UUID;
-  category:     ExpenseCategory;
-  amount:       NGN;
-  period:       BudgetPeriod;
-  createdAt:    ISO8601;
-  updatedAt:    ISO8601;
-}
-
-export interface BudgetWithSpent extends Budget {
-  spent:    NGN;
-  remaining: NGN;
-  progress: number; // 0-1
-  status:   BudgetStatus;
-}
-
-export type BudgetCreateInput = Omit<Budget,
-  'id' | 'userId' | 'createdAt' | 'updatedAt'
->;
 
 // ─── Goals ────────────────────────────────────────────────────────────────
 
@@ -249,8 +232,6 @@ export type NotificationType =
   | 'bill-upcoming'
   | 'bill-due-today'
   | 'bill-overdue'
-  | 'budget-near-limit'
-  | 'budget-exceeded'
   | 'goal-milestone'
   | 'goal-completed'
   | 'weekly-summary';
@@ -342,6 +323,7 @@ export const INCOME_CATEGORIES: Record<IncomeCategory, CategoryMeta> = {
 
 export const BILL_FREQUENCY_LABELS: Record<BillFrequency, string> = {
   'one-time':  'One-time',
+  'daily':     'Daily',
   'weekly':    'Weekly',
   'biweekly':  'Every 2 weeks',
   'monthly':   'Monthly',

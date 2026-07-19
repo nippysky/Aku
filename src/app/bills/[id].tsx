@@ -178,14 +178,23 @@ export default function BillDetailScreen() {
     if (!bill) return;
     setIsPaidLoading(true);
     try {
+      const isRecurring = bill.frequency !== 'one-time' && bill.frequency !== 'custom';
       await markPaid(bill.id);
-      showToast('success', 'Bill marked as paid');
+      showToast(
+        'success',
+        isRecurring
+          ? 'Paid & logged to expenses — due date moved to next cycle'
+          : 'Paid & logged to expenses',
+      );
+      // Return to the bills list — it now shows the next due date (recurring)
+      // or the bill under Paid (one-time). The payment lives in the ledger.
+      router.back();
     } catch {
       showToast('error', 'Failed to update bill');
     } finally {
       setIsPaidLoading(false);
     }
-  }, [bill, markPaid, showToast]);
+  }, [bill, markPaid, showToast, router]);
 
   const handleMarkUnpaid = useCallback(async () => {
     if (!bill) return;
@@ -297,7 +306,14 @@ export default function BillDetailScreen() {
             {fmt(bill.amount)}
           </Text>
 
-          <StatusBadge status={bill.status} style={{ marginTop: 12 }} />
+          {bill.autoPay && bill.status !== 'paid' ? (
+            <View style={[styles.autoPayHeroBadge, { backgroundColor: colors.primary + '18', marginTop: 12 }]}>
+              <RefreshCw size={13} color={colors.primary} strokeWidth={2} />
+              <Text style={[text.caption, { color: colors.primary }]}>Auto-pay</Text>
+            </View>
+          ) : (
+            <StatusBadge status={bill.status} style={{ marginTop: 12 }} />
+          )}
         </Animated.View>
 
         {/* ── Details card ── */}
@@ -330,7 +346,18 @@ export default function BillDetailScreen() {
           </Card>
         </Animated.View>
 
-        {/* ── Notifications card ── */}
+        {/* ── Notifications card — not applicable to auto-pay bills ── */}
+        {bill.autoPay ? (
+          <Animated.View entering={FadeInDown.delay(160).duration(200)}>
+            <Card style={[styles.card, styles.autoPayInfoCard]}>
+              <RefreshCw size={18} color={colors.primary} strokeWidth={1.8} />
+              <Text style={[text.bodySm, { color: colors.textSecondary, flex: 1 }]}>
+                Auto-pay is on — this bill logs itself as an expense the moment it's due,
+                with no reminders and nothing to confirm.
+              </Text>
+            </Card>
+          </Animated.View>
+        ) : (
         <Animated.View entering={FadeInDown.delay(160).duration(200)}>
           <Text
             style={[
@@ -376,6 +403,7 @@ export default function BillDetailScreen() {
             ))}
           </Card>
         </Animated.View>
+        )}
 
         {/* ── Actions ── */}
         <Animated.View
@@ -388,6 +416,14 @@ export default function BillDetailScreen() {
               variant="secondary"
               size="lg"
               onPress={handleMarkUnpaid}
+              loading={isPaidLoading}
+            />
+          ) : bill.autoPay ? (
+            <Button
+              label="Log Now"
+              variant="secondary"
+              size="lg"
+              onPress={handleMarkPaid}
               loading={isPaidLoading}
             />
           ) : (
@@ -494,6 +530,22 @@ const styles = StyleSheet.create({
     flexDirection:   'row',
     alignItems:      'center',
     paddingVertical: 14,
+  },
+
+  // Auto-pay
+  autoPayHeroBadge: {
+    flexDirection:     'row',
+    alignItems:        'center',
+    gap:               6,
+    paddingHorizontal: 12,
+    paddingVertical:   6,
+    borderRadius:      999,
+  },
+  autoPayInfoCard: {
+    flexDirection: 'row',
+    alignItems:    'center',
+    gap:           12,
+    paddingVertical: 16,
   },
 
   // Actions

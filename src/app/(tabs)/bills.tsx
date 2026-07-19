@@ -16,7 +16,12 @@ import Animated, {
   FadeInDown,
   FadeOutUp,
 } from 'react-native-reanimated';
-import { Plus, Search, X, Receipt } from 'lucide-react-native';
+import { format, parseISO, isToday, isYesterday } from 'date-fns';
+import {
+  Plus, Search, X, Receipt, CheckCircle2, MoreHorizontal,
+  Home, Zap, Car, UtensilsCrossed, Heart, BookOpen, Tv,
+  ShoppingBag, Users, PiggyBank, RefreshCw, Shield,
+} from 'lucide-react-native';
 import { useTheme } from '../../theme';
 import { Palette } from '../../theme/colors';
 import { BannerAmount } from '../../components/ui/CompactAmountDisplay';
@@ -27,12 +32,19 @@ import { BillRow } from '../../components/home/BillRow';
 import { AddBillSheet } from '../../components/bills/AddBillSheet';
 import { EditBillSheet } from '../../components/bills/EditBillSheet';
 import { useBillsStore } from '../../store/bills.store';
+import { useExpensesStore } from '../../store/expenses.store';
 import { useAuthStore } from '../../store/auth.store';
 import { useSyncStore } from '../../store/sync.store';
 import { useCurrencyFormat } from '../../hooks/useCurrencyFormat';
 import { FirstTimeHint } from '../../components/ui/FirstTimeHint';
 import { useFirstTimeHint } from '../../hooks/useFirstTimeHint';
+import { BILL_CATEGORIES } from '../../types';
 import type { Bill } from '../../types';
+
+const BILL_ICONS: Record<string, React.ComponentType<{ size?: number; color?: string; strokeWidth?: number }>> = {
+  Home, Zap, Car, UtensilsCrossed, Heart, BookOpen, Tv,
+  ShoppingBag, Users, PiggyBank, RefreshCw, Shield, MoreHorizontal,
+};
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -60,6 +72,56 @@ function filterBills(bills: Bill[], segment: SegmentKey, query: string): Bill[] 
     );
   }
   return filtered.sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+}
+
+// ─── Paid tab: ledger-sourced payment history ─────────────────────────────────
+// Recurring bills reset to 'upcoming' the instant they're paid (their due date
+// just advances to the next cycle) — the payment itself only lives on in the
+// expense ledger. So "Paid" can't filter on bill.status; it reads the ledger.
+
+interface PaymentRecord {
+  id:       string;   // expense id
+  billName: string;
+  amount:   number;
+  date:     string;
+  category: Bill['category'] | null; // matched to a live bill, if any
+}
+
+const BILL_PAYMENT_PREFIX = 'Bill: ';
+
+function buildPaymentHistory(allExpenses: { id: string; description: string | null; amount: number; date: string }[], bills: Bill[]): PaymentRecord[] {
+  const billsByName = new Map(bills.map((b) => [b.name.toLowerCase(), b]));
+  return allExpenses
+    .filter((e) => e.description?.startsWith(BILL_PAYMENT_PREFIX))
+    .map((e) => {
+      const billName = e.description!.slice(BILL_PAYMENT_PREFIX.length);
+      const match = billsByName.get(billName.toLowerCase());
+      return {
+        id:       e.id,
+        billName,
+        amount:   e.amount,
+        date:     e.date,
+        category: match?.category ?? null,
+      };
+    })
+    .sort((a, b) => b.date.localeCompare(a.date));
+}
+
+function filterPaymentHistory(records: PaymentRecord[], query: string): PaymentRecord[] {
+  if (!query.trim()) return records;
+  const q = query.toLowerCase();
+  return records.filter((r) => r.billName.toLowerCase().includes(q));
+}
+
+function formatPaidDate(dateStr: string): string {
+  try {
+    const d = parseISO(dateStr);
+    if (isToday(d)) return 'Paid today';
+    if (isYesterday(d)) return 'Paid yesterday';
+    return `Paid ${format(d, 'MMM d, yyyy')}`;
+  } catch {
+    return `Paid ${dateStr}`;
+  }
 }
 
 // ─── Snapshot banner (matches home screen style exactly) ─────────────────────
@@ -250,6 +312,47 @@ function SearchBar({
   );
 }
 
+// ─── Payment history row (Paid tab) ───────────────────────────────────────────
+
+function PaymentHistoryRow({ record, style }: { record: PaymentRecord; style?: object }) {
+  const { colors, text, radius } = useTheme();
+  const { fmt } = useCurrencyFormat();
+
+  const meta = record.category ? BILL_CATEGORIES[record.category] : null;
+  const IconComp = meta ? (BILL_ICONS[meta.icon] ?? Receipt) : Receipt;
+  const iconColor = meta?.color ?? colors.textSecondary;
+
+  return (
+    <View style={[styles.paymentRow, { borderBottomColor: colors.borderLight }, style]}>
+      <View
+        style={[
+          styles.iconCircle,
+          { backgroundColor: iconColor + '20', borderRadius: radius.full },
+        ]}
+      >
+        <IconComp size={20} color={iconColor} strokeWidth={1.8} />
+      </View>
+
+      <View style={styles.center}>
+        <Text style={[text.bodyMedium, { color: colors.text }]} numberOfLines={1}>
+          {record.billName}
+        </Text>
+        <Text style={[text.caption, { color: colors.textSecondary, marginTop: 2 }]} numberOfLines={1}>
+          {formatPaidDate(record.date)}
+        </Text>
+      </View>
+
+      <View style={styles.right}>
+        <Text style={[text.amount, { color: colors.text }]}>{fmt(record.amount)}</Text>
+        <View style={styles.paidBadge}>
+          <CheckCircle2 size={12} color={colors.statusPaid} strokeWidth={2} />
+          <Text style={[text.caption, { color: colors.statusPaid, fontSize: 11 }]}>Paid</Text>
+        </View>
+      </View>
+    </View>
+  );
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function BillsScreen() {
@@ -258,6 +361,7 @@ export default function BillsScreen() {
   const router  = useRouter();
 
   const { bills, load: loadBills, isLoading } = useBillsStore();
+  const { allExpenses, loadAll: loadAllExpenses } = useExpensesStore();
   const { user } = useAuthStore();
   const syncVersion = useSyncStore((s) => s.syncVersion);
   const hintBill = useFirstTimeHint('hint_bills_paid');
@@ -271,21 +375,25 @@ export default function BillsScreen() {
   const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
-    if (user) loadBills(user.id);
+    if (user) {
+      loadBills(user.id);
+      loadAllExpenses(user.id);
+    }
   }, [user]);
 
   // ── Sync version watcher — reload silently when server pull lands ─────────
   useEffect(() => {
     if (!user || syncVersion === 0) return;
     loadBills(user.id);
+    loadAllExpenses(user.id);
   }, [syncVersion]);
 
   const onRefresh = useCallback(async () => {
     if (!user) return;
     setRefreshing(true);
-    await loadBills(user.id);
+    await Promise.all([loadBills(user.id), loadAllExpenses(user.id)]);
     setRefreshing(false);
-  }, [user, loadBills]);
+  }, [user, loadBills, loadAllExpenses]);
 
   const handleSearchClose = useCallback(() => {
     setSearchOpen(false);
@@ -293,10 +401,15 @@ export default function BillsScreen() {
   }, []);
 
   const handleReload = useCallback(() => {
-    if (user) loadBills(user.id);
-  }, [user, loadBills]);
+    if (user) {
+      loadBills(user.id);
+      loadAllExpenses(user.id);
+    }
+  }, [user, loadBills, loadAllExpenses]);
 
   const filtered = filterBills(bills, segment, searchQuery);
+  const paymentHistory = filterPaymentHistory(buildPaymentHistory(allExpenses, bills), searchQuery);
+  const isPaidSegment = segment === 'paid';
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
@@ -372,7 +485,30 @@ export default function BillsScreen() {
         )}
 
         {/* Bills list — wrapped in Card exactly like home screen */}
-        {isLoading ? (
+        {isPaidSegment ? (
+          isLoading ? (
+            <SkeletonCard rows={4} />
+          ) : paymentHistory.length === 0 ? (
+            <EmptyState
+              icon={CheckCircle2}
+              title="No payments yet"
+              message="Bills you mark as paid show up here, logged straight to your expenses"
+              style={{ marginTop: 12 }}
+            />
+          ) : (
+            <Animated.View entering={FadeInDown.delay(40).duration(280)}>
+              <Card style={styles.billsCard}>
+                {paymentHistory.map((record, idx) => (
+                  <PaymentHistoryRow
+                    key={record.id}
+                    record={record}
+                    style={idx === paymentHistory.length - 1 ? { borderBottomWidth: 0 } : undefined}
+                  />
+                ))}
+              </Card>
+            </Animated.View>
+          )
+        ) : isLoading ? (
           <SkeletonCard rows={4} />
         ) : filtered.length === 0 ? (
           <EmptyState
@@ -507,5 +643,28 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical:   8,
     borderRadius:      16,
+  },
+
+  // Payment history row (Paid tab)
+  paymentRow: {
+    flexDirection:     'row',
+    alignItems:        'center',
+    paddingVertical:   14,
+    borderBottomWidth: 1,
+  },
+  iconCircle: {
+    width:          44,
+    height:         44,
+    alignItems:     'center',
+    justifyContent: 'center',
+    marginRight:    12,
+    flexShrink:     0,
+  },
+  center: { flex: 1, marginRight: 10 },
+  right:  { alignItems: 'flex-end', flexShrink: 0, gap: 4 },
+  paidBadge: {
+    flexDirection: 'row',
+    alignItems:    'center',
+    gap:           4,
   },
 });

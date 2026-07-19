@@ -9,7 +9,6 @@
  * Each notification type maps to the most contextually relevant screen:
  *
  *  bill_reminder    → /bills/[id]          (bill detail)
- *  budget_alert     → /budgets/[id]        (budget detail)
  *  goal_milestone   → /goals/[id]          (goal detail)
  *  daily_digest     → /(tabs)/expenses     (log today's spending)
  *  daily_reminder   → /(tabs)/expenses     (server push → log spending)
@@ -25,9 +24,9 @@ import * as Notifications from 'expo-notifications';
 // ─── Notification data payload (shared with server worker) ────────────────────
 
 export interface NotificationData {
-  type?:     string;   // 'bill_reminder' | 'budget_alert' | 'goal_milestone' | 'hourly_reminder' | …
-  screen?:   string;   // legacy / override: 'bill' | 'budgets' | 'goal' | 'home'
-  id?:       string;   // entity ID — bill/budget/goal primary key
+  type?:     string;   // 'bill_reminder' | 'goal_milestone' | 'hourly_reminder' | …
+  screen?:   string;   // legacy / override: 'bill' | 'goal' | 'home'
+  id?:       string;   // entity ID — bill/goal primary key
   action?:   string;   // optional action hint ('log', 'review', 'pay')
 }
 
@@ -128,13 +127,6 @@ function resolveRoute(data: NotificationData): ResolvedRoute | null {
       case 'bills':
         return { href: '/(tabs)/bills', type: 'tab' };
 
-      case 'budget':
-        if (id) return { href: `/budgets/${id}`, type: 'detail' };
-        return { href: '/budgets', type: 'tab' };
-
-      case 'budgets':
-        return { href: '/budgets', type: 'tab' };
-
       case 'goal':
         if (id) return { href: `/goals/${id}`, type: 'detail' };
         return { href: '/(tabs)/goals', type: 'tab' };
@@ -168,13 +160,6 @@ function resolveRoute(data: NotificationData): ResolvedRoute | null {
     case 'bill-overdue':
       if (id) return { href: `/bills/${id}`, type: 'detail' };
       return { href: '/(tabs)/bills', type: 'tab' };
-
-    // Budget alerts — go to the specific budget detail
-    case 'budget_alert':
-    case 'budget-near-limit':
-    case 'budget-exceeded':
-      if (id) return { href: `/budgets/${id}`, type: 'detail' };
-      return { href: '/budgets', type: 'tab' };
 
     // Goal milestones — go to the goal detail
     case 'goal_milestone':

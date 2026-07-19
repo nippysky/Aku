@@ -75,15 +75,23 @@ const FAQ_DATA: FAQCategory[] = [
     items: [
       {
         q: "What is the difference between expenses and bills?",
-        a: "Expenses are one-off purchases (coffee, groceries, fuel). Bills are recurring fixed obligations (Netflix, rent, electricity). Bills have a due date and a status — pending, paid, or overdue.",
+        a: "Expenses are one-off purchases (coffee, groceries, fuel). Bills are anything with a due date and a status — pending, paid, or overdue — whether it repeats (Netflix, rent, electricity) or not.",
       },
       {
         q: "Can I track income in Aku?",
         a: "Yes. Tap the Expenses tab and switch to the Income segment. Tap + to log income with an amount, category, and date. You can also see income vs expenses on the Analytics screen.",
       },
       {
-        q: "What are recurring expenses and income?",
-        a: "Recurring items are auto-logged on their schedule (daily, weekly, monthly, etc.). Go to More then Recurring to set them up. Aku will log them automatically so you never miss an entry.",
+        q: "What is Auto-pay on a bill?",
+        a: "Turn on Auto-pay for any bill (Netflix, gym, subscriptions) and it logs itself as an expense the moment it's due — no reminders, nothing to confirm. Turn it off and it behaves like a normal bill: reminders before it's due, and you tap Mark Paid yourself.",
+      },
+      {
+        q: "What happened to Recurring Expenses?",
+        a: "It's now built into Bills — just turn on Auto-pay instead of using a separate screen. This also fixes a real problem: entering the same subscription in both places used to double-log it every cycle.",
+      },
+      {
+        q: "What is Recurring Income?",
+        a: "For money that arrives automatically — salary, rent income, dividends. When adding income, turn on Repeats instead of using a separate screen — pick a frequency and Aku logs it for you on schedule. Your recurring items show up right there in the Income tab, where you can pause, resume, or remove them.",
       },
       {
         q: "How do I edit or delete an expense?",
@@ -92,20 +100,12 @@ const FAQ_DATA: FAQCategory[] = [
     ],
   },
   {
-    title: "Budgets & Goals",
+    title: "Goals",
     emoji: "🎯",
     items: [
       {
-        q: "How do budgets work?",
-        a: "You set a monthly spending limit for a category (e.g. Food). Aku tracks your actual spending in that category and shows you how much is left. You will get a push notification when you are near or over the limit.",
-      },
-      {
         q: "How do savings goals work?",
-        a: "Create a goal with a target amount and optional deadline. Manually add contributions, or auto-allocate a percentage of recurring income. Aku tracks your progress and shows a completion percentage.",
-      },
-      {
-        q: "Can I contribute to a goal automatically?",
-        a: "Yes. When setting up a recurring income (e.g. monthly salary), enable Auto-allocate to goal and choose a percentage. Each time the income is auto-logged, that percentage is contributed to your chosen goal.",
+        a: "Create a goal with a target amount and optional deadline. Add contributions whenever you like from the goal's detail screen. Aku tracks your progress and shows a completion percentage.",
       },
     ],
   },
@@ -133,11 +133,11 @@ const FAQ_DATA: FAQCategory[] = [
     items: [
       {
         q: "What kinds of notifications does Aku send?",
-        a: "Aku sends bill due date reminders, budget threshold alerts, savings goal milestones, hourly logging nudges through the day, and personalised financial insights.",
+        a: "Aku sends bill due date reminders, savings goal milestones, hourly logging nudges through the day, and personalised financial insights.",
       },
       {
         q: "How do I turn off certain notifications?",
-        a: "Go to More > Notification Settings. You can toggle each category on or off independently — bills, budgets, goals, and daily reminders each have their own switch.",
+        a: "Go to More > Notification Settings. You can toggle each category on or off independently — bills, goals, and daily reminders each have their own switch.",
       },
     ],
   },
@@ -151,7 +151,7 @@ const FAQ_DATA: FAQCategory[] = [
       },
       {
         q: "What does the statement include?",
-        a: "The PDF includes income, expenses, bills, budgets, and savings goals for the selected period. It also shows a net cash flow summary (earned minus spent equals surplus or deficit).",
+        a: "The PDF includes income, expenses, bills, and savings goals for the selected period. It also shows a net cash flow summary (earned minus spent equals surplus or deficit).",
       },
     ],
   },

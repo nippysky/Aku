@@ -57,6 +57,8 @@ const CREATE_TABLES_SQL = `
     notes TEXT,
     is_paid INTEGER DEFAULT 0,
     paid_at TEXT,
+    last_payment_expense_id TEXT,
+    auto_pay INTEGER DEFAULT 0,
     notify_30 INTEGER DEFAULT 0,
     notify_14 INTEGER DEFAULT 1,
     notify_7 INTEGER DEFAULT 1,
@@ -74,16 +76,6 @@ const CREATE_TABLES_SQL = `
     category TEXT NOT NULL,
     description TEXT,
     date TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS budgets (
-    id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    category TEXT NOT NULL,
-    amount INTEGER NOT NULL,
-    period TEXT NOT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
@@ -203,6 +195,10 @@ const MIGRATIONS_SQL = [
   // recurring income → goal auto-contribute
   "ALTER TABLE recurring_income ADD COLUMN goal_id TEXT",
   "ALTER TABLE recurring_income ADD COLUMN allocation_pct INTEGER DEFAULT 0",
+  // unified ledger: bill → auto-logged expense link
+  "ALTER TABLE bills ADD COLUMN last_payment_expense_id TEXT",
+  // Auto-pay bills (merged in from the old separate Recurring Expenses feature)
+  "ALTER TABLE bills ADD COLUMN auto_pay INTEGER DEFAULT 0",
   // goal destination account details
   "ALTER TABLE goals ADD COLUMN bank_name TEXT",
   "ALTER TABLE goals ADD COLUMN account_name TEXT",
@@ -225,6 +221,10 @@ const MIGRATIONS_SQL = [
   "ALTER TABLE budgets DROP COLUMN is_shared",
   "ALTER TABLE goals DROP COLUMN household_id",
   "ALTER TABLE goals DROP COLUMN is_shared",
+  // ── Budgets feature removed — clean up on existing installs ──
+  "DROP TABLE IF EXISTS budgets",
+  "DROP INDEX IF EXISTS idx_budgets_user",
+  "DROP INDEX IF EXISTS idx_budgets_category",
 ];
 
 export async function initializeDatabase(): Promise<void> {

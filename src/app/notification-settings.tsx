@@ -25,7 +25,6 @@ import {
   Bell,
   BellOff,
   Receipt,
-  Wallet,
   Target,
   Sun,
 } from 'lucide-react-native';
@@ -33,8 +32,7 @@ import { useTheme } from '../theme';
 import { Palette } from '../theme/colors';
 import { Divider } from '../components/ui/Divider';
 import { useNotifPrefsStore } from '../store/notif-prefs.store';
-import { sendTestPush } from '../lib/api-client';
-import { useUIStore } from '../store/ui.store';
+import { notificationService } from '../lib/notifications';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -136,7 +134,7 @@ function PermBanner({
   const IconComp = isDenied ? BellOff           : Bell;
   const message  = isDenied
     ? 'Notifications are blocked. Enable them in your device Settings.'
-    : 'Allow Akù to send you bill reminders and budget alerts.';
+    : 'Allow Akù to send you bill reminders and goal updates.';
   const action = isDenied ? 'Open Settings' : 'Enable Notifications';
 
   return (
@@ -162,12 +160,10 @@ export default function NotificationSettingsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
 
-  const { billReminders, budgetAlerts, goalMilestones, dailyDigest, load, set: setPref, isLoaded } =
+  const { billReminders, goalMilestones, dailyDigest, load, set: setPref, isLoaded } =
     useNotifPrefsStore();
-  const { showToast } = useUIStore();
 
-  const [permStatus, setPermStatus]   = useState<PermissionStatus>('undetermined');
-  const [testSending, setTestSending] = useState(false);
+  const [permStatus, setPermStatus] = useState<PermissionStatus>('undetermined');
 
   useEffect(() => {
     if (!isLoaded) load();
@@ -182,19 +178,6 @@ export default function NotificationSettingsScreen() {
     const r = await Notifications.requestPermissionsAsync();
     setPermStatus(r.granted ? 'granted' : !r.canAskAgain ? 'denied' : 'undetermined');
   }, []);
-
-  const handleTestPush = useCallback(async () => {
-    if (testSending) return;
-    setTestSending(true);
-    try {
-      const { sent } = await sendTestPush();
-      showToast('success', `Test notification sent to ${sent} device${sent === 1 ? '' : 's'}`);
-    } catch (e: any) {
-      showToast('error', e?.message ?? 'Test push failed');
-    } finally {
-      setTestSending(false);
-    }
-  }, [testSending, showToast]);
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
@@ -247,7 +230,8 @@ export default function NotificationSettingsScreen() {
 
         {/* Description */}
         <Text style={[text.bodySm, styles.desc, { color: colors.textSecondary }]}>
-          Choose which alerts Akù can send you. These settings are saved on your device.
+          Choose which alerts Akù can send you. Synced to your account, so changes take
+          effect immediately — even for notifications sent while the app is closed.
         </Text>
 
         {/* Toggles */}
@@ -275,14 +259,6 @@ export default function NotificationSettingsScreen() {
             isFirst
           />
           <ToggleRow
-            icon={Wallet}
-            label="Budget alerts"
-            sublabel="Warns when you're approaching your limit"
-            value={budgetAlerts}
-            onChange={(v) => setPref('budgetAlerts', v)}
-            disabled={permStatus !== 'granted'}
-          />
-          <ToggleRow
             icon={Target}
             label="Goal milestones"
             sublabel="Celebrate 25%, 50%, 75% and 100% progress"
@@ -292,37 +268,22 @@ export default function NotificationSettingsScreen() {
           />
           <ToggleRow
             icon={Sun}
-            label="Daily digest"
-            sublabel="Morning summary of what's due today"
+            label="Daily reminders"
+            sublabel="Smart nudges through the day, a morning digest and a bedtime check-in"
             value={dailyDigest}
-            onChange={(v) => setPref('dailyDigest', v)}
+            onChange={(v) => {
+              setPref('dailyDigest', v);
+              // Apply the local 8am digest immediately (not just on next launch)
+              if (v) {
+                notificationService.scheduleDailyDigest(8, 0).catch(() => {});
+              } else {
+                notificationService.cancelDailyDigest().catch(() => {});
+              }
+            }}
             disabled={permStatus !== 'granted'}
             isLast
           />
         </View>
-
-        {/* DEV-only: test push notification */}
-        {__DEV__ && (
-          <Pressable
-            onPress={handleTestPush}
-            disabled={testSending}
-            style={[
-              styles.testPushBtn,
-              {
-                backgroundColor: colors.card,
-                borderRadius:     radius.lg,
-                borderWidth:      1,
-                borderColor:      colors.border,
-                opacity:          testSending ? 0.6 : 1,
-              },
-            ]}
-          >
-            <Bell size={16} color={colors.primary} strokeWidth={1.8} />
-            <Text style={[text.bodyMedium, { color: colors.text, flex: 1 }]}>
-              {testSending ? 'Sending…' : 'Send test push (Dev)'}
-            </Text>
-          </Pressable>
-        )}
       </ScrollView>
     </View>
   );
@@ -372,15 +333,6 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   group: {},
-  testPushBtn: {
-    flexDirection:     'row',
-    alignItems:        'center',
-    paddingVertical:   14,
-    paddingHorizontal: 14,
-    gap:               12,
-    marginTop:         20,
-    minHeight:         52,
-  },
   toggleRow: {
     flexDirection:     'row',
     alignItems:        'center',

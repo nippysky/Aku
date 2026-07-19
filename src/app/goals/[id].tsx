@@ -143,9 +143,10 @@ function HeroBanner({ goal, showConfetti }: HeroBannerProps) {
     barWidth.value = withTiming(Math.min(goal.progress, 1), { duration: 800, easing: Easing.out(Easing.cubic) });
   }, [goal.progress]);
 
-  const pct         = Math.round(goal.progress * 100);
-  const accentColor = goal.color ?? Palette.gold;
-  const greenAccent = '#34C47A';
+  const pct           = Math.round(goal.progress * 100);
+  const overshootPct  = Math.max(pct - 100, 0);
+  const accentColor   = goal.color ?? Palette.gold;
+  const greenAccent   = '#34C47A';
 
   return (
     <Animated.View entering={FadeInDown.delay(0).duration(240)} style={styles.heroBanner}>
@@ -197,7 +198,11 @@ function HeroBanner({ goal, showConfetti }: HeroBannerProps) {
           ]}
         >
           <Text style={[{ fontFamily: font.sansSemiBold, fontSize: fontSize.sm, color: goal.isCompleted ? greenAccent : accentColor }]}>
-            {goal.isCompleted ? '✓ Goal complete!' : `${pct}% saved`}
+            {goal.isCompleted
+              ? overshootPct > 0
+                ? `🎉 Smashed it — ${overshootPct}% over!`
+                : '✓ Goal complete!'
+              : `${pct}% saved`}
           </Text>
         </View>
       </View>

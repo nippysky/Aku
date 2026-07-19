@@ -50,7 +50,7 @@ export default function NameScreen() {
 
   function onSubmit({ name }: FormValues) {
     OnboardingStorage.setName(name.trim());
-    router.push('/(onboarding)/email');
+    router.push('/(onboarding)/currency');
   }
 
   return (

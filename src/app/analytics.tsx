@@ -9,8 +9,9 @@
  *  • Savings-rate trend — how much of your income you kept, per month
  */
 
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -26,35 +27,54 @@ import {
   TrendingUp,
   TrendingDown,
   Minus,
+  BarChart3,
 } from 'lucide-react-native';
 import { format, subMonths, subDays } from 'date-fns';
 import { useTheme } from '../theme';
 import { Card } from '../components/ui/Card';
+import { EmptyState } from '../components/ui/EmptyState';
+import { SkeletonBanner, SkeletonCard } from '../components/ui/Skeleton';
 import { useExpensesStore } from '../store/expenses.store';
 import { useIncomeStore } from '../store/income.store';
 import { useBillsStore } from '../store/bills.store';
 import { useGoalsStore } from '../store/goals.store';
+import { useAuthStore } from '../store/auth.store';
+import { useSyncStore } from '../store/sync.store';
 import { useCurrencyFormat } from '../hooks/useCurrencyFormat';
 import { EXPENSE_CATEGORIES } from '../types';
 import type { ExpenseCategory } from '../types';
 
 // ─── Ranges ───────────────────────────────────────────────────────────────────
+// Granularity drives both the bucket span (rangeStart) and how many bars are
+// drawn on the cash-flow / savings-trend charts.
 
-type RangeKey = '1M' | '3M' | '6M' | '1Y';
+type RangeKey = 'D' | 'W' | '1M' | '3M' | '6M' | '1Y';
+type Granularity = 'day' | 'week' | 'month';
 
-const RANGES: { key: RangeKey; label: string; months: number }[] = [
-  { key: '1M', label: '1M', months: 1 },
-  { key: '3M', label: '3M', months: 3 },
-  { key: '6M', label: '6M', months: 6 },
-  { key: '1Y', label: '1Y', months: 12 },
+interface RangeConfig {
+  key:         RangeKey;
+  label:       string; // pill text
+  fullLabel:   string; // used in "Last {fullLabel} · Net" style headers
+  granularity: Granularity;
+  count:       number; // number of buckets / span length in that unit
+}
+
+const RANGES: RangeConfig[] = [
+  { key: 'D',  label: 'D',  fullLabel: '7 Days',  granularity: 'day',   count: 7  },
+  { key: 'W',  label: 'W',  fullLabel: '8 Weeks',  granularity: 'week',  count: 8  },
+  { key: '1M', label: '1M', fullLabel: '1M',       granularity: 'week',  count: 4  },
+  { key: '3M', label: '3M', fullLabel: '3M',       granularity: 'month', count: 3  },
+  { key: '6M', label: '6M', fullLabel: '6M',       granularity: 'month', count: 6  },
+  { key: '1Y', label: '1Y', fullLabel: '1Y',       granularity: 'month', count: 12 },
 ];
 
 /** Earliest date (YYYY-MM-DD) included in a range. */
 function rangeStart(range: RangeKey): string {
   const now = new Date();
-  if (range === '1M') return format(subDays(now, 27), 'yyyy-MM-dd');
-  const months = RANGES.find((r) => r.key === range)!.months;
-  return format(subMonths(now, months - 1), 'yyyy-MM') + '-01';
+  const cfg = RANGES.find((r) => r.key === range)!;
+  if (cfg.granularity === 'day')  return format(subDays(now, cfg.count - 1), 'yyyy-MM-dd');
+  if (cfg.granularity === 'week') return format(subDays(now, cfg.count * 7 - 1), 'yyyy-MM-dd');
+  return format(subMonths(now, cfg.count - 1), 'yyyy-MM') + '-01';
 }
 
 // ─── Bucketed chart data ──────────────────────────────────────────────────────
@@ -67,7 +87,9 @@ interface Bucket {
 }
 
 /**
- * 1M → 4 weekly buckets; 3M/6M/1Y → one bucket per month.
+ * Day granularity → one bucket per calendar day (D).
+ * Week granularity → one bucket per 7-day window (W, and the legacy 1M view).
+ * Month granularity → one bucket per calendar month (3M/6M/1Y).
  */
 function buildBuckets(
   expenses: { date: string; amount: number }[],
@@ -75,11 +97,26 @@ function buildBuckets(
   range:    RangeKey,
 ): Bucket[] {
   const now = new Date();
+  const cfg = RANGES.find((r) => r.key === range)!;
 
-  if (range === '1M') {
-    return Array.from({ length: 4 }, (_, i) => {
-      const start = subDays(now, (3 - i) * 7 + 6);
-      const end   = subDays(now, (3 - i) * 7);
+  if (cfg.granularity === 'day') {
+    return Array.from({ length: cfg.count }, (_, i) => {
+      const d = subDays(now, cfg.count - 1 - i);
+      const s = format(d, 'yyyy-MM-dd');
+      return {
+        key:     s,
+        label:   format(d, 'EEE'),
+        income:  income.filter((r)   => r.date === s).reduce((t, r) => t + r.amount, 0),
+        expense: expenses.filter((r) => r.date === s).reduce((t, r) => t + r.amount, 0),
+      };
+    });
+  }
+
+  if (cfg.granularity === 'week') {
+    return Array.from({ length: cfg.count }, (_, i) => {
+      const weeksAgo = cfg.count - 1 - i;
+      const start = subDays(now, weeksAgo * 7 + 6);
+      const end   = subDays(now, weeksAgo * 7);
       const s     = format(start, 'yyyy-MM-dd');
       const e     = format(end,   'yyyy-MM-dd');
       const within = (d: string) => d >= s && d <= e;
@@ -92,13 +129,12 @@ function buildBuckets(
     });
   }
 
-  const months = RANGES.find((r) => r.key === range)!.months;
-  return Array.from({ length: months }, (_, i) => {
-    const d     = subMonths(now, months - 1 - i);
+  return Array.from({ length: cfg.count }, (_, i) => {
+    const d     = subMonths(now, cfg.count - 1 - i);
     const month = format(d, 'yyyy-MM');
     return {
       key:     month,
-      label:   format(d, months >= 12 ? 'MMMMM' : 'MMM'), // 1Y → single letter
+      label:   format(d, cfg.count >= 12 ? 'MMMMM' : 'MMM'), // 1Y → single letter
       income:  income.filter((r)   => r.date.startsWith(month)).reduce((t, r) => t + r.amount, 0),
       expense: expenses.filter((r) => r.date.startsWith(month)).reduce((t, r) => t + r.amount, 0),
     };
@@ -554,18 +590,63 @@ export default function AnalyticsScreen() {
   const router = useRouter();
   const { fmt, fmtCompact } = useCurrencyFormat();
 
-  const { allExpenses } = useExpensesStore();
-  const { allRecords: allIncome } = useIncomeStore();
-  const { bills } = useBillsStore();
-  const { goals } = useGoalsStore();
+  const { allExpenses, loadAll: loadAllExpenses, isLoading: expensesLoading } = useExpensesStore();
+  const { allRecords: allIncome, loadAll: loadAllIncome, isLoading: incomeLoading } = useIncomeStore();
+  const { bills, load: loadBills } = useBillsStore();
+  const { goals, load: loadGoals } = useGoalsStore();
+  const { user } = useAuthStore();
+  const syncVersion = useSyncStore((s) => s.syncVersion);
 
-  const [range, setRange] = useState<RangeKey>('6M');
+  const [range, setRange]         = useState<RangeKey>('6M');
+  const [refreshing, setRefreshing] = useState(false);
+
+  const loadEverything = useCallback((userId: string) => {
+    loadAllExpenses(userId);
+    loadAllIncome(userId);
+    loadBills(userId);
+    loadGoals(userId);
+  }, [loadAllExpenses, loadAllIncome, loadBills, loadGoals]);
+
+  // ── Initial load — analytics reads straight from the ledger, so make sure
+  // it's populated even if this is the first screen the user opens. ──────────
+  useEffect(() => {
+    if (user) loadEverything(user.id);
+  }, [user]);
+
+  // ── Sync version watcher — reload silently the moment a server pull lands,
+  // so analytics never shows stale pre-sync numbers. ─────────────────────────
+  useEffect(() => {
+    if (!user || syncVersion === 0) return;
+    loadEverything(user.id);
+  }, [syncVersion]);
+
+  const onRefresh = useCallback(async () => {
+    if (!user) return;
+    setRefreshing(true);
+    await Promise.all([
+      loadAllExpenses(user.id),
+      loadAllIncome(user.id),
+      loadBills(user.id),
+      loadGoals(user.id),
+    ]);
+    setRefreshing(false);
+  }, [user, loadAllExpenses, loadAllIncome, loadBills, loadGoals]);
+
+  const isInitialLoading = (expensesLoading || incomeLoading) && allExpenses.length === 0 && allIncome.length === 0;
+  const hasAnyData = allExpenses.length > 0 || allIncome.length > 0;
 
   const currentMonth = format(new Date(), 'yyyy-MM');
   const start        = useMemo(() => rangeStart(range), [range]);
 
   const buckets = useMemo(
     () => buildBuckets(allExpenses, allIncome, range),
+    [allExpenses, allIncome, range],
+  );
+
+  // Savings-rate trend: 'savings'-category expenses (goal contributions,
+  // savings transfers) are money KEPT — excluded from the spend side.
+  const trendBuckets = useMemo(
+    () => buildBuckets(allExpenses.filter((e) => e.category !== 'savings'), allIncome, range),
     [allExpenses, allIncome, range],
   );
   const categoryData = useMemo(
@@ -628,11 +709,17 @@ export default function AnalyticsScreen() {
   const netPositive = rangeNet >= 0;
   const netColor    = netPositive ? colors.success : colors.danger;
 
-  const rangeLabel = RANGES.find((r) => r.key === range)!.label;
+  const rangeCfg   = RANGES.find((r) => r.key === range)!;
+  const rangeLabel = rangeCfg.fullLabel;
 
-  // Savings rate for the range (for the trend section footer)
+  // Savings rate for the range: % of income kept ('savings' expenses count
+  // as kept, not spent — they went into goals / savings destinations)
+  const rangeNonSavingsSpend = useMemo(
+    () => allExpenses.filter((r) => r.date >= start && r.category !== 'savings').reduce((s, r) => s + r.amount, 0),
+    [allExpenses, start],
+  );
   const rangeSavingsRate = rangeIncome > 0
-    ? Math.round((rangeNet / rangeIncome) * 100)
+    ? Math.round(((rangeIncome - rangeNonSavingsSpend) / rangeIncome) * 100)
     : null;
 
   return (
@@ -665,8 +752,31 @@ export default function AnalyticsScreen() {
       <ScrollView
         contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 40 }]}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+          />
+        }
       >
 
+        {isInitialLoading ? (
+          <>
+            <SkeletonBanner />
+            <SkeletonCard rows={3} />
+            <SkeletonCard rows={4} />
+          </>
+        ) : !hasAnyData ? (
+          <EmptyState
+            icon={BarChart3}
+            title="Nothing to analyze yet"
+            message="Log an expense or income entry and your money mathematics will show up here"
+            style={{ marginTop: 24 }}
+          />
+        ) : (
+        <>
         {/* ── Range selector ── */}
         <Animated.View entering={FadeInDown.delay(0).duration(220)}>
           <RangeSelector value={range} onChange={setRange} />
@@ -806,9 +916,9 @@ export default function AnalyticsScreen() {
           </Text>
           <Card style={styles.trendCard}>
             <Text style={[text.caption, { color: colors.textTertiary, marginBottom: 12 }]}>
-              How much of your income you kept each {range === '1M' ? 'week' : 'month'}
+              How much of your income you kept each {rangeCfg.granularity}
             </Text>
-            {buckets.map((b) => (
+            {trendBuckets.map((b) => (
               <SavingsTrendRow key={b.key} bucket={b} />
             ))}
             {rangeSavingsRate !== null && (
@@ -824,6 +934,8 @@ export default function AnalyticsScreen() {
             )}
           </Card>
         </Animated.View>
+        </>
+        )}
 
       </ScrollView>
     </View>

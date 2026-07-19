@@ -1,12 +1,12 @@
 /**
  * notifications.tsx — Akù Notification Center
  *
- * Live, smart alert feed derived from bills, budgets and goals stores.
+ * Live, smart alert feed derived from bills and goals stores.
  * No external service needed — alerts are computed from existing data.
  *
  * Sections:
- *   1. "Needs Attention"  — overdue bills, blown budgets
- *   2. "Updates"          — upcoming bills, budget warnings, goal milestones
+ *   1. "Needs Attention"  — overdue bills
+ *   2. "Updates"          — upcoming bills, goal milestones
  *   3. "Preferences"      — push notification toggles
  */
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
@@ -451,7 +451,7 @@ export default function NotificationsScreen() {
                 },
               ]}
             >
-              No overdue bills, budgets on track, goals progressing well.
+              No overdue bills, goals progressing well.
             </Text>
           </Animated.View>
         )}

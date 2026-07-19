@@ -7,7 +7,6 @@ import type {
   Expense, ExpenseCreateInput, ExpenseUpdateInput,
   ExpenseSummary, ExpenseCategory,
 } from '../types';
-import { useBudgetsStore } from './budgets.store';
 import { triggerPush, triggerDelete } from '../lib/sync/trigger';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
@@ -59,7 +58,8 @@ interface ExpensesState {
   load:           (userId: string) => Promise<void>;
   loadAll:        (userId: string) => Promise<void>;  // loads all-time without month filter
   loadMonth:      (userId: string, month: string) => Promise<void>;
-  add:            (input: ExpenseCreateInput, userId: string) => Promise<Expense>;
+  /** `forcedId` lets ledger sources (bills, goal contributions) hard-link the entry. */
+  add:            (input: ExpenseCreateInput, userId: string, forcedId?: string) => Promise<Expense>;
   update:         (input: ExpenseUpdateInput) => Promise<void>;
   remove:         (id: string) => Promise<void>;
   setMonth:       (month: string) => void;
@@ -132,12 +132,12 @@ export const useExpensesStore = create<ExpensesState>()((set, get) => ({
     await get().load(userId);
   },
 
-  add: async (input, userId) => {
+  add: async (input, userId, forcedId) => {
     set({ isLoading: true, error: null });
     try {
       const db = getDatabase();
       const now = new Date().toISOString();
-      const id = generateUUID();
+      const id = forcedId ?? generateUUID();
 
       await db.insert(schema.expenses).values({
         id,
@@ -168,12 +168,6 @@ export const useExpensesStore = create<ExpensesState>()((set, get) => ({
       const summaryMonth = get().selectedMonth === 'all' ? currentMonth : get().selectedMonth;
       const summary = buildSummary(expenses, summaryMonth);
       set({ expenses, allExpenses, summary });
-
-      // Refresh period-aware budget spent + fire threshold notifications (fire-and-forget)
-      useBudgetsStore
-        .getState()
-        .refreshCategory(userId, input.category)
-        .catch(() => {});
 
       triggerPush();
       return newExpense;

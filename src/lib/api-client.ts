@@ -116,6 +116,9 @@ export type UserProfile = {
   email:      string;
   avatarUrl:  string | null;
   avatarData: string | null;
+  /** Server-persisted currency preference — null if never set. */
+  preferredCurrencyCode?:   string | null;
+  preferredCurrencySymbol?: string | null;
   /** True only when the account was created in this magic-link request. */
   isNew?:     boolean;
 };
@@ -195,6 +198,17 @@ export async function deleteAccount(): Promise<void> {
  * Pass the full data URI: `data:image/jpeg;base64,...`
  * Server stores it in the users.avatar_data PostgreSQL column.
  */
+/**
+ * Persist the user's preferred currency server-side so it survives logout,
+ * reinstall, and sign-in on a new device. Fire-and-forget from the caller.
+ */
+export async function updateCurrencyPreference(code: string, symbol: string): Promise<void> {
+  await apiFetch('/api/user/currency', {
+    method: 'PUT',
+    body:   { code, symbol },
+  });
+}
+
 export async function syncAvatarData(avatarData: string): Promise<void> {
   await apiFetch('/api/user/avatar-data', {
     method: 'PUT',
@@ -273,18 +287,15 @@ export async function sendTestPush(): Promise<{ sent: number }> {
  * Report aggregated financial insight signals to the server after each sync.
  * The server uses these to craft personalised push notifications.
  *
- * All values are aggregated/relative — no raw financial amounts ever leave the
- * device. Budget utilization is a 0.0–2.0+ ratio; amounts stay on device.
+ * Most values are aggregated/relative — amounts otherwise stay on device.
+ * The one exception is yesterdayExpenseTotal, needed to compose the
+ * "yesterday you spent X" push.
  *
  * Best-effort, fire-and-forget: call without awaiting.
  */
 export type UserInsightPayload = {
   /** % of this month's income kept (income − expenses) / income. null = no income logged. */
   savingsRatePct:      number | null;
-  /** Highest budget utilization ratio (0.0–2.0+). null = no budgets. */
-  budgetUtilization:   number | null;
-  /** True if any budget is ≥ 100 % spent this period. */
-  hasOverBudget:       boolean;
   /** Consecutive days with at least one expense logged. */
   spendingStreak:      number;
   /** % change in total spending vs the previous 7-day window. null = < 2 weeks of data. */
@@ -299,6 +310,14 @@ export type UserInsightPayload = {
   goalsOnTrack:        number;
   /** True if any active goals exist. */
   hasActiveGoals:      boolean;
+  /**
+   * Total spent yesterday (kobo/cents) + entry count — the one deliberate
+   * exception to "no raw amounts leave the device". Needed so the server can
+   * compose the "here's what you spent yesterday" push while the app is
+   * closed. Formatted server-side with the user's own currency symbol.
+   */
+  yesterdayExpenseTotal: number;
+  yesterdayExpenseCount: number;
 };
 
 export async function reportInsight(payload: UserInsightPayload): Promise<void> {
@@ -315,7 +334,6 @@ export async function reportInsight(payload: UserInsightPayload): Promise<void> 
  */
 export async function updateNotifPrefs(prefs: {
   billReminders:  boolean;
-  budgetAlerts:   boolean;
   goalMilestones: boolean;
   dailyDigest:    boolean;
 }): Promise<void> {

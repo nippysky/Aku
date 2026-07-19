@@ -25,7 +25,6 @@ const VALID_ENTITY_TYPES = new Set([
   'expense',
   'bill',
   'goal',
-  'budget',
   'goal_contribution',
   'income',
   'recurring_expense',

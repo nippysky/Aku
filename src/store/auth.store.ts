@@ -12,6 +12,7 @@ import {
   fetchDek,
   uploadDek,
   deleteAccount as deleteAccountApi,
+  updateCurrencyPreference,
   type UserProfile,
 } from '../lib/api-client';
 import { getDatabase, schema } from '../lib/database/client';
@@ -26,12 +27,10 @@ function resetAllDataStores() {
   // Lazy import avoids circular dep: auth → stores → auth
   const { useBillsStore }    = require('./bills.store');
   const { useExpensesStore } = require('./expenses.store');
-  const { useBudgetsStore }  = require('./budgets.store');
   const { useGoalsStore }    = require('./goals.store');
 
   useBillsStore.setState({ bills: [], isLoading: false, error: null });
   useExpensesStore.setState({ expenses: [], allExpenses: [], summary: null, isLoading: false, error: null });
-  useBudgetsStore.setState({ budgets: [], isLoading: false, error: null });
   useGoalsStore.setState({ goals: [], contributions: {}, isLoading: false, error: null });
 }
 
@@ -175,6 +174,16 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
             createdAt:   user?.createdAt ?? new Date().toISOString(),
             updatedAt:   new Date().toISOString(),
           };
+
+          // Currency preference is server-authoritative once set — keeps this
+          // device in sync if it was changed elsewhere.
+          if (profile.preferredCurrencyCode && profile.preferredCurrencySymbol) {
+            const { useUIStore } = require('./ui.store');
+            useUIStore.getState().hydrateCurrencyFromServer(
+              profile.preferredCurrencyCode,
+              profile.preferredCurrencySymbol,
+            );
+          }
           // Save to SecureStore WITHOUT avatarData (too large for Keychain)
           const { avatarData: _strip, ...toStore } = validatedUser;
           void _strip;
@@ -382,6 +391,22 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
 
     // Locked = true so PIN screen shows before entering the app
     set({ user, session, isLocked: true });
+
+    // ── Currency preference reconciliation ─────────────────────────────────
+    // Returning user with a currency already on file: server wins, so this
+    // device picks up whatever was set elsewhere. Brand-new user (or one
+    // who never set it server-side): push whatever the onboarding currency
+    // step selected locally so it's persisted from the very first session.
+    const { useUIStore } = require('./ui.store');
+    if (profile.preferredCurrencyCode && profile.preferredCurrencySymbol) {
+      useUIStore.getState().hydrateCurrencyFromServer(
+        profile.preferredCurrencyCode,
+        profile.preferredCurrencySymbol,
+      );
+    } else {
+      const localCurrency = useUIStore.getState().currency;
+      updateCurrencyPreference(localCurrency.code, localCurrency.symbol).catch(() => {});
+    }
   },
 
   // ── Sign Out — full wipe so nav guard lands on onboarding, not PIN loop ──
@@ -443,7 +468,6 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       const db = getDatabase();
       await db.delete(schema.goalContributions);
       await db.delete(schema.goals);
-      await db.delete(schema.budgets);
       await db.delete(schema.income);
       await db.delete(schema.expenses);
       await db.delete(schema.bills);

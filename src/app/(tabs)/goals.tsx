@@ -184,11 +184,15 @@ function GoalCardLarge({ goal, onPress, onAddSavings }: GoalCardLargeProps) {
   const { colors, text, font, fontSize, radius, shadow } = useTheme();
   const { fmt, fmtCompact } = useCurrencyFormat();
 
-  const percentage = Math.min(Math.round(goal.progress * 100), 100);
-  const barWidth   = useSharedValue(0);
+  // Real percentage, uncapped — overshoot (saved > target) shows as e.g. 145%
+  // rather than getting silently stuck at 100%.
+  const percentage = Math.round(goal.progress * 100);
+  const overshootPct = Math.max(percentage - 100, 0);
+  const barWidth    = useSharedValue(0);
 
   useEffect(() => {
-    barWidth.value = withTiming(goal.progress, { duration: 700 });
+    // Visual fill still caps at 100% — the badge/copy carries the real number.
+    barWidth.value = withTiming(Math.min(goal.progress, 1), { duration: 700 });
   }, [goal.progress]);
 
   const barStyle = useAnimatedStyle(() => ({
@@ -330,6 +334,10 @@ function GoalCardLarge({ goal, onPress, onAddSavings }: GoalCardLargeProps) {
           {!goal.isCompleted && goal.monthlyRequired && goal.monthlyRequired > 0 ? (
             <Text style={[text.caption, { color: colors.textTertiary }]}>
               {fmtCompact(goal.monthlyRequired)}/mo needed
+            </Text>
+          ) : goal.isCompleted && overshootPct > 0 ? (
+            <Text style={[text.caption, { color: colors.success }]}>
+              🎉 Smashed it — {overshootPct}% over target!
             </Text>
           ) : goal.isCompleted ? (
             <Text style={[text.caption, { color: colors.success }]}>

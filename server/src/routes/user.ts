@@ -4,6 +4,7 @@
  * GET /api/user/me           — Get current user's profile
  * PUT /api/user/me           — Update name
  * PUT /api/user/avatar-data  — Sync base64 avatar (fire-and-forget from device)
+ * PUT /api/user/currency     — Set preferred currency (persists across devices)
  * GET /api/user/dek          — Fetch the user's DEK (decrypted) — new-device restore
  * POST /api/user/dek         — Store/update the user's DEK (encrypted at rest)
  */
@@ -34,12 +35,14 @@ router.get('/me', async (c) => {
   if (!user) return c.json({ error: 'User not found' }, 404);
 
   return c.json({
-    id:         user.id,
-    name:       user.name,
-    email:      user.email,
-    avatarUrl:  user.avatarUrl,
-    avatarData: user.avatarData,
-    createdAt:  user.createdAt,
+    id:                      user.id,
+    name:                    user.name,
+    email:                   user.email,
+    avatarUrl:               user.avatarUrl,
+    avatarData:              user.avatarData,
+    preferredCurrencyCode:   user.preferredCurrencyCode ?? null,
+    preferredCurrencySymbol: user.preferredCurrencySymbol ?? null,
+    createdAt:               user.createdAt,
   });
 });
 
@@ -107,6 +110,40 @@ router.put('/avatar-data', async (c) => {
   notifyUser(userId);
 
   return c.json({ success: true });
+});
+
+// ─── PUT /api/user/currency ───────────────────────────────────────────────────
+// Sets the user's preferred currency. Called on registration (onboarding) and
+// whenever the user changes it in More > Currency. Persisted server-side so it
+// carries over across logout / reinstall / new-device sign-in.
+// Body: { code: 'NGN', symbol: '₦' }
+
+router.put('/currency', async (c) => {
+  const { sub: userId } = c.get('jwtPayload');
+
+  let body: { code?: string; symbol?: string };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: 'Invalid JSON body' }, 400);
+  }
+
+  const code   = body.code?.trim().toUpperCase();
+  const symbol = body.symbol?.trim();
+
+  if (!code || code.length < 2 || code.length > 8) {
+    return c.json({ error: 'code must be a 2-8 character currency code' }, 400);
+  }
+  if (!symbol || symbol.length > 8) {
+    return c.json({ error: 'symbol is required (max 8 characters)' }, 400);
+  }
+
+  await db
+    .update(users)
+    .set({ preferredCurrencyCode: code, preferredCurrencySymbol: symbol, updatedAt: new Date() })
+    .where(eq(users.id, userId));
+
+  return c.json({ success: true, code, symbol });
 });
 
 // ─── GET /api/user/dek ───────────────────────────────────────────────────────

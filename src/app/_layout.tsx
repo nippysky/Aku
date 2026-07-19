@@ -14,9 +14,10 @@ import { initializeDatabase } from '../lib/database/client';
 import { useAuthStore } from '../store/auth.store';
 import { useUIStore } from '../store/ui.store';
 import { useNotifPrefsStore } from '../store/notif-prefs.store';
-import { useRecurringExpensesStore } from '../store/recurring-expenses.store';
+import { useBillsStore } from '../store/bills.store';
 import { useRecurringIncomeStore } from '../store/recurring-income.store';
 import { useNotifHistoryStore } from '../store/notif-history.store';
+import { migrateRecurringExpensesToBills } from '../lib/migrations/recurring-to-bills';
 import { ToastContainer } from '../components/ui/ToastContainer';
 import { AppLoader } from '../components/ui/AppLoader';
 import { LightColors, DarkColors } from '../theme/colors';
@@ -87,7 +88,7 @@ export default function RootLayout() {
       const granted = await notificationService.requestPermissions();
       if (granted) {
         await notificationService.setupNotificationChannels();
-        // Only schedule daily digest if user has opted in (defaults to false)
+        // Only schedule daily digest if user has opted in (defaults to ON)
         const { dailyDigest } = useNotifPrefsStore.getState();
         if (dailyDigest) {
           await notificationService.scheduleDailyDigest(8, 0);
@@ -105,7 +106,7 @@ export default function RootLayout() {
     }
   }, [fontsLoaded, isInitialized]);
 
-  // ── Recurring expenses: auto-log overdue items on unlock ────────────
+  // ── Auto-pay bills + recurring income: auto-log overdue items on unlock ──
   const prevLockedRef = useRef(true);
   useEffect(() => {
     const wasLocked = prevLockedRef.current;
@@ -116,12 +117,18 @@ export default function RootLayout() {
       const today = new Date().toISOString().slice(0, 10);
       lastRecurringDateRef.current = today;
 
-      const { processOverdue: processExpenses } = useRecurringExpensesStore.getState();
-      const { processOverdue: processIncome }   = useRecurringIncomeStore.getState();
+      // One-time, self-gating: folds any leftover legacy recurring-expense
+      // rows into Bills (autoPay=true) before auto-pay processing runs.
+      migrateRecurringExpensesToBills(user.id)
+        .then(() => useBillsStore.getState().load(user.id))
+        .then(() => {
+          const { processAutoPay } = useBillsStore.getState();
+          const { processOverdue: processIncome } = useRecurringIncomeStore.getState();
 
-      Promise.all([processExpenses(user.id), processIncome(user.id)])
-        .then(([expLogged, incLogged]) => {
-          const allLogged = [...expLogged, ...incLogged];
+          return Promise.all([processAutoPay(user.id), processIncome(user.id)]);
+        })
+        .then(([billsLogged, incLogged]) => {
+          const allLogged = [...billsLogged, ...incLogged];
           if (allLogged.length > 0) {
             const { showToast } = useUIStore.getState();
             const names = allLogged.map((l) => l.name).join(', ');
@@ -168,11 +175,11 @@ export default function RootLayout() {
         const today = new Date().toISOString().slice(0, 10);
         if (user && !isLocked && lastRecurringDateRef.current && lastRecurringDateRef.current < today) {
           lastRecurringDateRef.current = today;
-          const { processOverdue: processExpenses } = useRecurringExpensesStore.getState();
-          const { processOverdue: processIncome }   = useRecurringIncomeStore.getState();
-          Promise.all([processExpenses(user.id), processIncome(user.id)])
-            .then(([expLogged, incLogged]) => {
-              const allLogged = [...expLogged, ...incLogged];
+          const { processAutoPay }                = useBillsStore.getState();
+          const { processOverdue: processIncome } = useRecurringIncomeStore.getState();
+          Promise.all([processAutoPay(user.id), processIncome(user.id)])
+            .then(([billsLogged, incLogged]) => {
+              const allLogged = [...billsLogged, ...incLogged];
               if (allLogged.length > 0) {
                 const { showToast } = useUIStore.getState();
                 const names = allLogged.map((l) => l.name).join(', ');
@@ -323,8 +330,11 @@ export default function RootLayout() {
 
     } else if (hasSession) {
       // Authenticated & unlocked — allow anywhere in the app.
-      // Only push back to tabs if we're stuck in an auth/onboarding shell.
-      if (inAuth || inOnboarding) router.replace('/(tabs)');
+      // Redirect out of auth/onboarding shells AND the null root index
+      // (the root renders nothing — without this, an unlocked cold start
+      // sits on a blank white screen forever).
+      const atRootIndex = !segments[0] || (segments[0] as string) === 'index';
+      if (inAuth || inOnboarding || atRootIndex) router.replace('/(tabs)');
 
     } else {
       // Onboarding complete but no active session — force re-auth

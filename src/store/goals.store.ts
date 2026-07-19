@@ -13,8 +13,12 @@ import type {
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
 function withProgress(goal: Goal): GoalWithProgress {
+  // Deliberately NOT clamped to 1 — overshoot (saved > target) is real and the
+  // UI should reflect it (e.g. "145%"), not silently cap at 100%. Progress
+  // bars clamp their own visual fill separately; this is the source-of-truth
+  // ratio used for badges, copy, and the financial health score.
   const progress = goal.targetAmount > 0
-    ? Math.min(goal.savedAmount / goal.targetAmount, 1)
+    ? goal.savedAmount / goal.targetAmount
     : 0;
   const remaining = Math.max(goal.targetAmount - goal.savedAmount, 0);
 
@@ -250,6 +254,23 @@ export const useGoalsStore = create<GoalsState>()((set, get) => ({
 
     const contribution: GoalContribution = { id, ...input, userId, createdAt: now };
 
+    // ── Unified ledger: money left the wallet into a savings destination ──
+    // Every contribution materialises as a 'savings' expense, hard-linked by
+    // sharing the contribution's id — deleting the contribution reverses it.
+    try {
+      const { useExpensesStore } = await import('./expenses.store');
+      await useExpensesStore.getState().add(
+        {
+          amount:      input.amount,
+          category:    'savings',
+          description: `Goal savings: ${goal.emoji ? goal.emoji + ' ' : ''}${goal.name}`,
+          date:        input.date,
+        },
+        userId,
+        id, // linked ledger entry
+      );
+    } catch { /* ledger write failed — contribution still stands */ }
+
     // Fire milestone notification if a threshold was crossed (25 / 50 / 75 / 100%)
     const oldProgress = goal.targetAmount > 0 ? goal.savedAmount / goal.targetAmount : 0;
     const newProgress = goal.targetAmount > 0 ? newSaved / goal.targetAmount : 0;
@@ -308,6 +329,13 @@ export const useGoalsStore = create<GoalsState>()((set, get) => ({
         [goalId]: (s.contributions[goalId] ?? []).filter((c) => c.id !== contributionId),
       },
     }));
+
+    // ── Unified ledger: reverse the linked 'savings' expense ──
+    try {
+      const { useExpensesStore } = await import('./expenses.store');
+      await useExpensesStore.getState().remove(contributionId);
+    } catch { /* linked expense already gone — fine */ }
+
     triggerDelete('goal_contribution', contributionId);
   },
 

@@ -70,6 +70,8 @@ router.post('/magic-link', async (c) => {
       avatarUrl:    null,
       avatarData:   null,
       encryptedDek: null,  // set by the client after first PIN setup
+      preferredCurrencyCode:   null,
+      preferredCurrencySymbol: null,
       createdAt:    new Date(),
       updatedAt:    new Date(),
     };
@@ -183,12 +185,14 @@ router.get('/magic-link/verify', async (c) => {
   // or PIN-setup-only (returning user on a new device).
   const scheme   = process.env.APP_SCHEME ?? 'aku';
   const userData = Buffer.from(JSON.stringify({
-    id:         user.id,
-    name:       user.name,
-    email:      user.email,
-    avatarUrl:  user.avatarUrl,
-    avatarData: user.avatarData,
-    isNew:      isNewUser,
+    id:                      user.id,
+    name:                    user.name,
+    email:                   user.email,
+    avatarUrl:               user.avatarUrl,
+    avatarData:              user.avatarData,
+    preferredCurrencyCode:   user.preferredCurrencyCode ?? null,
+    preferredCurrencySymbol: user.preferredCurrencySymbol ?? null,
+    isNew:                   isNewUser,
   })).toString('base64');
 
   const deepLink = `${scheme}://auth-callback?token=${encodeURIComponent(jwt)}&user=${encodeURIComponent(userData)}`;
@@ -248,11 +252,13 @@ router.post('/magic-link/verify-otp', async (c) => {
       jwt:   demoJwt,
       isNew: false,
       user: {
-        id:         demoUser!.id,
-        name:       demoUser!.name,
-        email:      demoUser!.email,
-        avatarUrl:  demoUser!.avatarUrl,
-        avatarData: demoUser!.avatarData ?? null,
+        id:                      demoUser!.id,
+        name:                    demoUser!.name,
+        email:                   demoUser!.email,
+        avatarUrl:               demoUser!.avatarUrl,
+        avatarData:              demoUser!.avatarData ?? null,
+        preferredCurrencyCode:   demoUser!.preferredCurrencyCode ?? null,
+        preferredCurrencySymbol: demoUser!.preferredCurrencySymbol ?? null,
       },
     });
   }
@@ -312,11 +318,13 @@ router.post('/magic-link/verify-otp', async (c) => {
     jwt,
     isNew: record.isNew,
     user:  {
-      id:         user.id,
-      name:       user.name,
-      email:      user.email,
-      avatarUrl:  user.avatarUrl,
-      avatarData: user.avatarData,
+      id:                      user.id,
+      name:                    user.name,
+      email:                   user.email,
+      avatarUrl:               user.avatarUrl,
+      avatarData:              user.avatarData,
+      preferredCurrencyCode:   user.preferredCurrencyCode ?? null,
+      preferredCurrencySymbol: user.preferredCurrencySymbol ?? null,
     },
   });
 });
@@ -337,11 +345,13 @@ router.get('/session', authMiddleware, async (c) => {
 
   return c.json({
     user: {
-      id:         user.id,
-      name:       user.name,
-      email:      user.email,
-      avatarUrl:  user.avatarUrl,
-      avatarData: user.avatarData,
+      id:                      user.id,
+      name:                    user.name,
+      email:                   user.email,
+      avatarUrl:               user.avatarUrl,
+      avatarData:              user.avatarData,
+      preferredCurrencyCode:   user.preferredCurrencyCode ?? null,
+      preferredCurrencySymbol: user.preferredCurrencySymbol ?? null,
     },
     sessionId: payload.sessionId,
   });

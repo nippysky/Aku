@@ -4,6 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Terms of Service — Akù by NIPPYSKY</title>
+<meta name="theme-color" content="#163A2F">
+<link rel="icon" type="image/png" sizes="32x32" href="/img/favicon-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/img/icon-192.png">
+<link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@300;500&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -11,8 +15,14 @@
 </head>
 <body>
 <nav>
-  <a class="logo" href="/">Ak<span>ù</span></a>
-  <div class="links">
+  <a class="logo" href="/">
+    <img class="logo-mark" src="/img/icon-192.png" width="34" height="34" alt="">
+    <span class="logo-text">Ak<span class="accent">ù</span></span>
+  </a>
+  <button class="nav-toggle" id="navToggle" type="button" aria-label="Toggle menu" aria-expanded="false" aria-controls="navMenu">
+    <span></span><span></span><span></span>
+  </button>
+  <div class="links" id="navMenu">
     <a href="/privacy">Privacy</a>
     <a href="/terms">Terms</a>
     <a class="cta" href="/#download">Get the app</a>
@@ -33,10 +43,10 @@
   <p>You must be at least 13 years old. You sign in with a magic link or one-time code sent to your email — keep access to that email secure, and notify us at <a href="mailto:contact@nippysky.com">contact@nippysky.com</a> if you suspect unauthorised access.</p>
 
   <h2>3. The service</h2>
-  <p>Akù lets you manually track income and expenses, set budgets, manage bill reminders, create savings goals, and receive personalised insights and notifications. Akù is a manual tracking tool only: we do not connect to your bank, hold funds, move money, or act as a financial institution, payment provider, or investment advisor.</p>
+  <p>Akù lets you manually track income and expenses, manage bill reminders, create savings goals, and receive personalised insights and notifications. Akù is a manual tracking tool only: we do not connect to your bank, hold funds, move money, or act as a financial institution, payment provider, or investment advisor.</p>
 
   <h2>4. Not financial advice</h2>
-  <p>Nothing in Akù — budgets, insights, projections, or notification messages — constitutes financial, legal, tax, or investment advice. Always consult a qualified professional for decisions that materially affect your finances.</p>
+  <p>Nothing in Akù — insights, projections, or notification messages — constitutes financial, legal, tax, or investment advice. Always consult a qualified professional for decisions that materially affect your finances.</p>
 
   <h2>5. Acceptable use</h2>
   <ul>
@@ -88,5 +98,6 @@
     <div>Akù by <a href="https://nippysky.com">NIPPYSKY</a></div>
   </div>
 </footer>
+<script src="/nav.js" defer></script>
 </body>
 </html>

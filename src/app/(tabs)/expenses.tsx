@@ -1,11 +1,13 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import {
+  Alert,
   FlatList,
   Platform,
   Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
@@ -13,8 +15,9 @@ import {
 import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { FadeInDown } from 'react-native-reanimated';
-import { Plus, Wallet, TrendingUp, Search, X } from 'lucide-react-native';
+import { Plus, Wallet, TrendingUp, Search, X, Repeat, Trash2 } from 'lucide-react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import { format, parseISO } from 'date-fns';
 import { useTheme } from '../../theme';
 import { Palette } from '../../theme/colors';
 import { BannerAmount } from '../../components/ui/CompactAmountDisplay';
@@ -28,8 +31,10 @@ import { AddIncomeSheet } from '../../components/income/AddIncomeSheet';
 import { IncomeRow } from '../../components/income/IncomeRow';
 import { useExpensesStore } from '../../store/expenses.store';
 import { useIncomeStore } from '../../store/income.store';
+import { useRecurringIncomeStore, RECURRING_FREQ_LABELS } from '../../store/recurring-income.store';
 import { useAuthStore } from '../../store/auth.store';
 import { useSyncStore } from '../../store/sync.store';
+import { useUIStore } from '../../store/ui.store';
 import { useCurrencyFormat } from '../../hooks/useCurrencyFormat';
 import { FirstTimeHint } from '../../components/ui/FirstTimeHint';
 import { useFirstTimeHint } from '../../hooks/useFirstTimeHint';
@@ -107,6 +112,10 @@ function formatDateHeader(dateStr: string): string {
   const dayNames   = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
   const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   return `${dayNames[date.getDay()]} ${parseInt(d, 10)} ${monthNames[parseInt(m, 10) - 1]}`;
+}
+
+function prettyRecurringDate(iso: string): string {
+  try { return format(parseISO(iso), 'd MMM yyyy'); } catch { return iso; }
 }
 
 function groupExpensesByDate(expenses: Expense[]): ExpenseDateGroup[] {
@@ -233,8 +242,17 @@ export default function ExpensesScreen() {
     load: loadInc, loadAll: loadAllInc, loadMonth: loadMonthInc, setMonth: setIncMonth,
   } = useIncomeStore();
 
+  // ── Recurring income store (auto-logging templates) ──────────────────────
+  const {
+    items: recurringItems,
+    load: loadRecurring,
+    remove: removeRecurring,
+    toggleActive: toggleRecurring,
+  } = useRecurringIncomeStore();
+
   const { user }             = useAuthStore();
   const { fmt, fmtCompact }  = useCurrencyFormat();
+  const { showToast }        = useUIStore();
   const hintSwipe            = useFirstTimeHint('hint_expenses_swipe');
   const syncVersion          = useSyncStore((s) => s.syncVersion);
 
@@ -263,6 +281,7 @@ export default function ExpensesScreen() {
   // ── Initial load ──────────────────────────────────────────────────────────
   useEffect(() => {
     if (!user) return;
+    loadRecurring(user.id);
     if (viewMode === 'all') {
       loadAllExp(user.id);
       loadAllInc(user.id);
@@ -275,6 +294,7 @@ export default function ExpensesScreen() {
   // ── Sync version watcher — reload silently when server pull lands ─────────
   useEffect(() => {
     if (!user || syncVersion === 0) return;
+    loadRecurring(user.id);
     if (viewMode === 'all') {
       loadAllExp(user.id);
       loadAllInc(user.id);
@@ -290,12 +310,31 @@ export default function ExpensesScreen() {
     if (!user) return;
     setRefreshing(true);
     if (viewMode === 'all') {
-      await Promise.all([loadAllExp(user.id), loadAllInc(user.id)]);
+      await Promise.all([loadAllExp(user.id), loadAllInc(user.id), loadRecurring(user.id)]);
     } else {
-      await Promise.all([loadExp(user.id), loadInc(user.id)]);
+      await Promise.all([loadExp(user.id), loadInc(user.id), loadRecurring(user.id)]);
     }
     setRefreshing(false);
-  }, [user, viewMode, loadAllExp, loadAllInc, loadExp, loadInc]);
+  }, [user, viewMode, loadAllExp, loadAllInc, loadExp, loadInc, loadRecurring]);
+
+  // ── Recurring income row actions ──────────────────────────────────────────
+  const handleToggleRecurring = useCallback((id: string) => {
+    toggleRecurring(id);
+  }, [toggleRecurring]);
+
+  const handleDeleteRecurring = useCallback((id: string, name: string) => {
+    Alert.alert(
+      'Remove recurring income',
+      `Stop auto-logging "${name}"?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove', style: 'destructive',
+          onPress: async () => { await removeRecurring(id); showToast('success', 'Removed'); },
+        },
+      ],
+    );
+  }, [removeRecurring, showToast]);
 
   const isLoading = segment === 'expenses' ? expLoading : incLoading;
 
@@ -633,9 +672,67 @@ export default function ExpensesScreen() {
             );
           })}
         </ScrollView>
+
+        {/* Recurring income */}
+        {recurringItems.length > 0 && (
+          <View style={styles.recurringSection}>
+            <Text style={[text.labelCaps, { color: colors.textSecondary, marginBottom: 10 }]}>
+              Recurring Income
+            </Text>
+            <Card style={styles.recurringCard}>
+              {recurringItems.map((item, idx) => (
+                <View
+                  key={item.id}
+                  style={[
+                    styles.recurringRow,
+                    idx < recurringItems.length - 1 && { borderBottomWidth: 1, borderBottomColor: colors.borderLight },
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.recurringIcon,
+                      { backgroundColor: colors.success + '18', borderRadius: radius.full, opacity: item.isActive ? 1 : 0.4 },
+                    ]}
+                  >
+                    <Repeat size={16} color={colors.success} strokeWidth={1.8} />
+                  </View>
+                  <View style={{ flex: 1, marginRight: 8 }}>
+                    <Text style={[text.bodyMedium, { color: colors.text, opacity: item.isActive ? 1 : 0.5 }]} numberOfLines={1}>
+                      {item.name}
+                    </Text>
+                    <Text style={[text.caption, { color: colors.textTertiary, marginTop: 2 }]} numberOfLines={1}>
+                      {RECURRING_FREQ_LABELS[item.frequency]} · {fmtCompact(item.amount)} · next {prettyRecurringDate(item.nextDate)}
+                    </Text>
+                  </View>
+                  <Switch
+                    value={item.isActive}
+                    onValueChange={() => handleToggleRecurring(item.id)}
+                    trackColor={{ false: colors.border, true: colors.success }}
+                    thumbColor={Platform.OS === 'android' ? colors.card : undefined}
+                    style={{ marginRight: 2 }}
+                  />
+                  <Pressable
+                    onPress={() => handleDeleteRecurring(item.id, item.name)}
+                    hitSlop={8}
+                    style={styles.recurringDeleteBtn}
+                  >
+                    <Trash2 size={15} color={colors.danger} strokeWidth={1.8} />
+                  </Pressable>
+                </View>
+              ))}
+            </Card>
+            <Text style={[text.caption, { color: colors.textTertiary, marginTop: 8 }]}>
+              Toggle "Repeats" when adding income to set up a new one.
+            </Text>
+          </View>
+        )}
       </>
     ),
-    [top1Inc, incTxCount, totalIncome, categoryFilter, viewMode, isLoading, colors, text, font, fontSize, radius, fmtCompact],
+    [
+      top1Inc, incTxCount, totalIncome, categoryFilter, viewMode, isLoading,
+      colors, text, font, fontSize, radius, fmtCompact,
+      recurringItems, handleToggleRecurring, handleDeleteRecurring,
+    ],
   );
 
   // Expense list renderItem
@@ -972,4 +1069,27 @@ const styles = StyleSheet.create({
   listContent: { paddingTop: 8, paddingHorizontal: 24, gap: 16 },
   dateLabel: { fontSize: 12, marginBottom: 8, marginTop: 4 },
   dateCard: { paddingHorizontal: 16, paddingVertical: 8 },
+
+  // Recurring income
+  recurringSection: { marginTop: 16, marginBottom: 4 },
+  recurringCard:    { paddingHorizontal: 16, paddingVertical: 4 },
+  recurringRow: {
+    flexDirection: 'row',
+    alignItems:    'center',
+    gap:           10,
+    paddingVertical: 12,
+  },
+  recurringIcon: {
+    width:          32,
+    height:         32,
+    alignItems:     'center',
+    justifyContent: 'center',
+    flexShrink:     0,
+  },
+  recurringDeleteBtn: {
+    width:          28,
+    height:         28,
+    alignItems:     'center',
+    justifyContent: 'center',
+  },
 });

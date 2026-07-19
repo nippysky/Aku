@@ -12,7 +12,6 @@ import { updateNotifPrefs } from '../lib/api-client';
 // ─── Preference keys ──────────────────────────────────────────────────────────
 
 const KEY_BILL_REMINDERS  = 'notif_bill_reminders';
-const KEY_BUDGET_ALERTS   = 'notif_budget_alerts';
 const KEY_GOAL_MILESTONES = 'notif_goal_milestones';
 const KEY_DAILY_DIGEST    = 'notif_daily_digest';
 
@@ -43,7 +42,6 @@ function appStateSet(key: string, value: boolean): void {
 
 export interface NotifPrefs {
   billReminders:  boolean;
-  budgetAlerts:   boolean;
   goalMilestones: boolean;
   dailyDigest:    boolean;
 }
@@ -58,17 +56,18 @@ interface NotifPrefsState extends NotifPrefs {
 
 export const useNotifPrefsStore = create<NotifPrefsState>()((set, get) => ({
   billReminders:  true,
-  budgetAlerts:   true,
   goalMilestones: true,
-  dailyDigest:    false,
+  // Master switch for the daily engagement stream (hourly nudges, 7pm digest,
+  // bedtime check-in, weekly summary). Defaults ON — matches the server-side
+  // worker default so client and backend always agree.
+  dailyDigest:    true,
   isLoaded:       false,
 
   load: () => {
     const prefs: NotifPrefs = {
       billReminders:  appStateGet(KEY_BILL_REMINDERS,  true),
-      budgetAlerts:   appStateGet(KEY_BUDGET_ALERTS,   true),
       goalMilestones: appStateGet(KEY_GOAL_MILESTONES, true),
-      dailyDigest:    appStateGet(KEY_DAILY_DIGEST,    false),
+      dailyDigest:    appStateGet(KEY_DAILY_DIGEST,    true),
     };
     set({ ...prefs, isLoaded: true });
   },
@@ -77,7 +76,6 @@ export const useNotifPrefsStore = create<NotifPrefsState>()((set, get) => ({
     set((s) => ({ ...s, [key]: value }));
     const keyMap: Record<keyof NotifPrefs, string> = {
       billReminders:  KEY_BILL_REMINDERS,
-      budgetAlerts:   KEY_BUDGET_ALERTS,
       goalMilestones: KEY_GOAL_MILESTONES,
       dailyDigest:    KEY_DAILY_DIGEST,
     };
@@ -88,7 +86,6 @@ export const useNotifPrefsStore = create<NotifPrefsState>()((set, get) => ({
     const current = useNotifPrefsStore.getState();
     updateNotifPrefs({
       billReminders:  key === 'billReminders'  ? value : current.billReminders,
-      budgetAlerts:   key === 'budgetAlerts'   ? value : current.budgetAlerts,
       goalMilestones: key === 'goalMilestones' ? value : current.goalMilestones,
       dailyDigest:    key === 'dailyDigest'    ? value : current.dailyDigest,
     });

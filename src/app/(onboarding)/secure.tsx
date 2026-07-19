@@ -94,7 +94,7 @@ export default function SecureScreen() {
           router.replace('/(tabs)');
         } else {
           // New user — DON'T mark onboarding complete yet; the guard would
-          // bounce them to tabs and skip first-bill/budget/goal. The final
+          // bounce them to tabs and skip first-bill/first-goal. The final
           // onboarding screen (first-goal) calls markOnboardingComplete().
           setPhase('ready');
         }
