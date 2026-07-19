@@ -27,7 +27,7 @@ import { ChevronLeft, Mail } from 'lucide-react-native';
 import { Button, Input } from '../components/ui';
 import { useTheme } from '../theme';
 import { useAuthStore } from '../store/auth.store';
-import { verifyMagicOTP } from '../lib/api-client';
+import { verifyMagicOTP, getFriendlyErrorMessage } from '../lib/api-client';
 
 // ─── Schema ────────────────────────────────────────────────────────────────
 
@@ -80,7 +80,7 @@ export default function SignInScreen() {
       setOtpError(null);
       setStep('sent');
     } catch (err) {
-      setSendError(err instanceof Error ? err.message : 'Could not send email. Please try again.');
+      setSendError(getFriendlyErrorMessage(err, 'Could not send the email. Please try again.'));
     }
   }, [signIn]);
 
@@ -95,7 +95,7 @@ export default function SignInScreen() {
       setResent(true);
       setTimeout(() => setResent(false), 4000);
     } catch (err) {
-      setSendError(err instanceof Error ? err.message : 'Could not resend. Please try again.');
+      setSendError(getFriendlyErrorMessage(err, 'Could not resend. Please try again.'));
     } finally {
       setResending(false);
     }
@@ -119,7 +119,7 @@ export default function SignInScreen() {
           router.replace('/(onboarding)/secure?returning=1' as never);
         }
       } catch (err) {
-        setOtpError(err instanceof Error ? err.message : 'Invalid code. Please try again.');
+        setOtpError(getFriendlyErrorMessage(err, 'Invalid code. Please try again.'));
         setOtp('');
         setTimeout(() => otpRef.current?.focus(), 100);
       } finally {

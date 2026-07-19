@@ -19,6 +19,7 @@ import { Button, Input, OnboardingHeader } from '../../components/ui';
 import { useTheme } from '../../theme';
 import { OnboardingStorage } from '../../lib/onboarding-storage';
 import { useAuthStore } from '../../store/auth.store';
+import { getFriendlyErrorMessage } from '../../lib/api-client';
 
 // ─── Schema ────────────────────────────────────────────────────────────────
 
@@ -61,7 +62,7 @@ export default function EmailScreen() {
       // Sends a real magic link email via the server.
       await signIn(normalised, name);
     } catch (err) {
-      setSendError(err instanceof Error ? err.message : 'Could not send email. Please try again.');
+      setSendError(getFriendlyErrorMessage(err, 'Could not send the email. Please try again.'));
       return;
     }
 

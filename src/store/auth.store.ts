@@ -14,6 +14,7 @@ import {
   uploadDek,
   deleteAccount as deleteAccountApi,
   updateCurrencyPreference,
+  getFriendlyErrorMessage,
   type UserProfile,
 } from '../lib/api-client';
 import { getDatabase, schema } from '../lib/database/client';
@@ -360,8 +361,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       // After this, the user checks their email and taps the magic link.
       // The deep link opens the app and calls handleAuthCallback().
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to send magic link';
-      set({ error: msg });
+      set({ error: getFriendlyErrorMessage(err, 'Could not send the sign-in email. Please try again.') });
       throw err;
     } finally {
       set({ isLoading: false });

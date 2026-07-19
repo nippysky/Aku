@@ -108,6 +108,38 @@ async function apiFetch<T>(path: string, opts: FetchOptions = {}): Promise<T> {
   return data;
 }
 
+// ─── Friendly error messages ────────────────────────────────────────────────
+// Non-technical users shouldn't ever see raw server/network errors like
+// "Internal server error" or "Network request failed". This translates any
+// error into plain, reassuring copy while still logging the real message for
+// debugging. Messages we wrote ourselves server-side (validation, rate limits,
+// "session expired") are already human-readable, so those pass through as-is.
+
+const FRIENDLY_FALLBACK = 'Something went wrong on our end. Please try again in a moment.';
+
+export function getFriendlyErrorMessage(err: unknown, fallback: string = FRIENDLY_FALLBACK): string {
+  if (err instanceof ApiError) {
+    // 5xx = server-side bug or crash — the raw message is for developers, not users.
+    if (err.status >= 500) {
+      console.error('[api] Server error:', err.message);
+      return fallback;
+    }
+    // 4xx messages are hand-written server-side (e.g. "Valid email is required",
+    // "Too many attempts, please wait 15 minutes") — safe to show directly.
+    return err.message;
+  }
+
+  if (err instanceof TypeError && /network|fetch/i.test(err.message)) {
+    return "Can't reach Akù right now. Check your internet connection and try again.";
+  }
+
+  if (err instanceof Error) {
+    console.error('[api] Unexpected error:', err.message);
+  }
+
+  return fallback;
+}
+
 // ─── Auth endpoints ───────────────────────────────────────────────────────────
 
 export type UserProfile = {

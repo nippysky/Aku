@@ -22,7 +22,7 @@ import { useTheme } from '../../theme';
 import { Palette } from '../../theme/colors';
 import { useAuthStore } from '../../store/auth.store';
 import { OnboardingStorage } from '../../lib/onboarding-storage';
-import { verifyMagicOTP } from '../../lib/api-client';
+import { verifyMagicOTP, getFriendlyErrorMessage } from '../../lib/api-client';
 
 // ─── Envelope + Check SVG ──────────────────────────────────────────────────
 
@@ -134,8 +134,8 @@ export default function VerifyScreen() {
       } else {
         router.replace('/(onboarding)/secure?returning=1' as never);
       }
-    } catch (e: any) {
-      setOtpError(e?.message ?? 'Invalid or expired code. Request a new link and try again.');
+    } catch (e) {
+      setOtpError(getFriendlyErrorMessage(e, 'Invalid or expired code. Request a new link and try again.'));
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     } finally {
       setVerifying(false);

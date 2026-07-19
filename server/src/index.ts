@@ -85,8 +85,10 @@ app.notFound((c) => c.json({ error: 'Route not found' }, 404));
 // ── Error handler ─────────────────────────────────────────────────────────────
 
 app.onError((err, c) => {
-  console.error('[server] Unhandled error:', err);
-  return c.json({ error: 'Internal server error' }, 500);
+  // Include method + path so `pm2 logs aku-api` pinpoints which route broke
+  // without needing to reproduce the bug live.
+  console.error(`[server] Unhandled error on ${c.req.method} ${c.req.path}:`, err);
+  return c.json({ error: 'Something went wrong on our end. Please try again in a moment.' }, 500);
 });
 
 // ── Start ─────────────────────────────────────────────────────────────────────
