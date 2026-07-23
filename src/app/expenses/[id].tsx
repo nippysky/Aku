@@ -24,7 +24,7 @@ import {
   Trash2,
   Users,
   UtensilsCrossed, Car, ShoppingBag, Tv, Home, Zap,
-  Heart, BookOpen, PiggyBank, Gift, MoreHorizontal,
+  Heart, BookOpen, PiggyBank, Gift, HandCoins, MoreHorizontal,
 } from 'lucide-react-native';
 import { format, parseISO } from 'date-fns';
 import { useTheme } from '../../theme';
@@ -52,6 +52,7 @@ const EXPENSE_ICONS: Record<
   education:     BookOpen,
   savings:       PiggyBank,
   gifts:         Gift,
+  loans:         HandCoins,
   other:         MoreHorizontal,
 };
 

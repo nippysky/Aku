@@ -10,9 +10,6 @@ export const users = sqliteTable('users', {
   id:          text('id').primaryKey(),
   name:        text('name').notNull(),
   email:       text('email').notNull().unique(),
-  avatarUrl:   text('avatar_url'),
-  /** Base64 data URI for profile photo — stored locally, never hits a CDN. */
-  avatarData:  text('avatar_data'),
   pinHash:     text('pin_hash'),          // bcrypt hash
   biometricEnabled: int('biometric_enabled', { mode: 'boolean' }).default(false),
   createdAt:   text('created_at').notNull(),

@@ -197,9 +197,6 @@ function resolveRoute(data: NotificationData): ResolvedRoute | null {
       case 'finance':
         return { href: '/(tabs)/expenses', type: 'tab' };
 
-      case 'notifications':
-        return { href: '/notifications', type: 'detail' };
-
       case 'analytics':
         return { href: '/analytics', type: 'detail' };
 
@@ -238,8 +235,6 @@ function resolveRoute(data: NotificationData): ResolvedRoute | null {
 
     // Server push: weekly summary
     // Open Analytics, which shows the weekly/monthly financial overview
-    // (matches the in-app notification history's own mapping — see
-    // src/app/notifications.tsx's getHistoryHref).
     case 'weekly_summary':
       return { href: '/analytics', type: 'detail' };
 

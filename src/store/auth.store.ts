@@ -8,7 +8,6 @@ import {
   requestMagicLink,
   validateSession,
   revokeSession,
-  syncAvatarData,
   getMe,
   fetchDek,
   uploadDek,
@@ -115,13 +114,8 @@ interface AuthState {
    */
   completeOnboardingAndUnlock: () => Promise<void>;
   /**
-   * Save a new avatar (base64 data URI) locally and sync to server.
-   * avatarData is stored in SQLite only — never SecureStore (size limit).
-   */
-  saveAvatarData:          (avatarData: string) => Promise<void>;
-  /**
-   * Pull the latest profile (name + avatar) from the server and update
-   * local SQLite + in-memory state. Called on WS sync push from another device.
+   * Pull the latest profile (name) from the server and update local SQLite +
+   * in-memory state. Called on WS sync push from another device.
    */
   refreshProfile:          () => Promise<void>;
 
@@ -204,13 +198,11 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
             set({ user: null, session: null, biometric, hasOnboarded, isLocked: false, isInitialized: true });
             return;
           }
-          // Sync latest profile from server (avatarData comes from SQLite below)
+          // Sync latest profile from server
           validatedUser = {
             id:          profile.id,
             name:        profile.name,
             email:       profile.email,
-            avatarUrl:   profile.avatarUrl,
-            avatarData:  null, // loaded from SQLite below
             createdAt:   user?.createdAt ?? new Date().toISOString(),
             updatedAt:   new Date().toISOString(),
           };
@@ -224,51 +216,29 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
               profile.preferredCurrencySymbol,
             );
           }
-          // Save to SecureStore WITHOUT avatarData (too large for Keychain)
-          const { avatarData: _strip, ...toStore } = validatedUser;
-          void _strip;
-          await SecureStore.setItemAsync(KEYS.USER, JSON.stringify(toStore));
+          await SecureStore.setItemAsync(KEYS.USER, JSON.stringify(validatedUser));
         } catch {
           // Network unavailable — trust the local cache
         }
       }
 
-      // Load avatarData from SQLite — it's stored there, not SecureStore
-      let avatarData: string | null = null;
-      if (validatedUser?.id) {
-        try {
-          const db = getDatabase();
-          const rows = await db
-            .select({ avatarData: schema.users.avatarData })
-            .from(schema.users)
-            .where(eq(schema.users.id, validatedUser.id))
-            .limit(1);
-          avatarData = rows[0]?.avatarData ?? null;
-        } catch { /* SQLite not yet ready — non-fatal */ }
-      }
-
-      const userWithAvatar: User | null = validatedUser
-        ? { ...validatedUser, avatarData }
-        : null;
-
       // Upsert to SQLite so queries can resolve the user's name.
-      if (userWithAvatar) {
+      if (validatedUser) {
         const db  = getDatabase();
         const now = new Date().toISOString();
         try {
           await db.insert(schema.users).values({
-            id:        userWithAvatar.id,
-            name:      userWithAvatar.name,
-            email:     userWithAvatar.email,
-            avatarUrl: userWithAvatar.avatarUrl ?? null,
+            id:        validatedUser.id,
+            name:      validatedUser.name,
+            email:     validatedUser.email,
             createdAt: now,
             updatedAt: now,
           });
         } catch {
           try {
             await db.update(schema.users)
-              .set({ name: userWithAvatar.name, updatedAt: now })
-              .where(eq(schema.users.id, userWithAvatar.id));
+              .set({ name: validatedUser.name, updatedAt: now })
+              .where(eq(schema.users.id, validatedUser.id));
           } catch { /* ignore */ }
         }
       }
@@ -276,7 +246,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       const willBeLocked = hasOnboarded && locallyValid && biometric.enabled;
 
       set({
-        user:          userWithAvatar,
+        user:          validatedUser,
         session,
         biometric,
         hasOnboarded,
@@ -292,7 +262,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       // If the app starts UNLOCKED (App Lock off, or no enrolled device
       // security), no unlock flow will ever run — so load the DEK and kick
       // off sync here. Locked starts load the DEK in unlockWithDeviceAuth().
-      if (!willBeLocked && hasOnboarded && userWithAvatar) {
+      if (!willBeLocked && hasOnboarded && validatedUser) {
         void useSyncStore.getState().loadDek().then((loaded) => {
           if (loaded) {
             import('../lib/sync/engine').then(({ fullSync }) => fullSync()).catch(() => {});
@@ -315,8 +285,6 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       id:          generateUUID(),
       name,
       email,
-      avatarUrl:   null,
-      avatarData:  null,
       createdAt:   now.toISOString(),
       updatedAt:   now.toISOString(),
     };
@@ -338,7 +306,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     try {
       await upsertDb.insert(schema.users).values({
         id: user.id, name: user.name, email: user.email,
-        avatarUrl: null, createdAt: upsertNow, updatedAt: upsertNow,
+        createdAt: upsertNow, updatedAt: upsertNow,
       });
     } catch {
       try {
@@ -385,10 +353,6 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       id:          profile.id,
       name:        profile.name,
       email:       profile.email,
-      avatarUrl:   profile.avatarUrl,
-      // Restore avatar from server on new device — written to SQLite below.
-      // SecureStore has a size limit so base64 images are never stored there.
-      avatarData:  profile.avatarData ?? null,
       createdAt:   now.toISOString(),
       updatedAt:   now.toISOString(),
     };
@@ -399,31 +363,25 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       expiresAt,
     };
 
-    // Store user WITHOUT avatarData — base64 is too large for SecureStore (Keychain)
-    const { avatarData: _strip, ...toStore } = user;
-    void _strip;
     await Promise.all([
-      SecureStore.setItemAsync(KEYS.USER,    JSON.stringify(toStore)),
+      SecureStore.setItemAsync(KEYS.USER,    JSON.stringify(user)),
       SecureStore.setItemAsync(KEYS.SESSION, JSON.stringify(session)),
     ]);
 
-    // Upsert to SQLite — include avatarData so it's available immediately on
-    // new device without waiting for a sync pull (avatar is also in sync_records
-    // but this path is faster and ensures it's present before the PIN screen).
+    // Upsert to SQLite so queries can resolve the user's name immediately,
+    // without waiting for a sync pull.
     const db2  = getDatabase();
     const now2 = new Date().toISOString();
     try {
       await db2.insert(schema.users).values({
         id: user.id, name: user.name, email: user.email,
-        avatarUrl:  user.avatarUrl  ?? null,
-        avatarData: user.avatarData ?? null,   // restore from server
         createdAt:  now2,
         updatedAt:  now2,
       });
     } catch {
       try {
         await db2.update(schema.users)
-          .set({ name: user.name, avatarData: user.avatarData ?? null, updatedAt: now2 })
+          .set({ name: user.name, updatedAt: now2 })
           .where(eq(schema.users.id, user.id));
       } catch { /* ignore */ }
     }
@@ -547,38 +505,12 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     if (!current) return;
     const updated = { ...current, ...patch, updatedAt: new Date().toISOString() };
     set({ user: updated });
-    // Strip avatarData — too large for SecureStore (Keychain size limit)
-    const { avatarData: _strip, ...toStore } = updated;
-    void _strip;
-    SecureStore.setItemAsync(KEYS.USER, JSON.stringify(toStore)).catch(() => {});
-  },
-
-  // ── Save Avatar Data ───────────────────────────────────────────────────
-  // Persists a base64 data URI to SQLite, updates in-memory state,
-  // then fire-and-forgets a sync to the server. Never throws.
-  saveAvatarData: async (avatarData: string) => {
-    const { user } = get();
-    if (!user) return;
-
-    // 1. Optimistic in-memory update — UI responds instantly
-    set({ user: { ...user, avatarData } });
-
-    // 2. Persist to SQLite
-    try {
-      const db = getDatabase();
-      await db
-        .update(schema.users)
-        .set({ avatarData })
-        .where(eq(schema.users.id, user.id));
-    } catch { /* SQLite write failed — in-memory state still updated */ }
-
-    // 3. Fire-and-forget server sync — failure is silent, local is authoritative
-    void syncAvatarData(avatarData).catch(() => {});
+    SecureStore.setItemAsync(KEYS.USER, JSON.stringify(updated)).catch(() => {});
   },
 
   // ── Refresh Profile from Server ────────────────────────────────────────
   // Called by the WS client when a sync push arrives from another device.
-  // Fetches the latest name + avatar from the server and updates local state.
+  // Fetches the latest name from the server and updates local state.
   refreshProfile: async () => {
     const { user } = get();
     if (!user) return;
@@ -589,17 +521,13 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       // Update SQLite so other queries see the latest values
       await db
         .update(schema.users)
-        .set({ name: profile.name, avatarData: profile.avatarData ?? null, updatedAt: now })
+        .set({ name: profile.name, updatedAt: now })
         .where(eq(schema.users.id, user.id));
-      // Update in-memory state — UI re-renders the avatar immediately
-      set({
-        user: {
-          ...user,
-          name:      profile.name,
-          avatarUrl: profile.avatarUrl,
-          avatarData: profile.avatarData ?? null,
-        },
-      });
+      // Update in-memory state + SecureStore — UI re-renders immediately, and
+      // a fully-offline cold-start relaunch still sees the latest name.
+      const updated = { ...user, name: profile.name };
+      set({ user: updated });
+      await SecureStore.setItemAsync(KEYS.USER, JSON.stringify(updated)).catch(() => {});
     } catch { /* Non-fatal — profile refreshes on next app open */ }
   },
 

@@ -13,7 +13,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import {
   Briefcase, Zap, Building2, TrendingUp,
-  Home, ArrowLeftRight, RotateCcw, MoreHorizontal,
+  Home, ArrowLeftRight, RotateCcw, HandCoins, MoreHorizontal,
 } from 'lucide-react-native';
 import { useTheme } from '../../theme';
 import { INCOME_CATEGORIES, type IncomeCategory } from '../../types';
@@ -33,6 +33,7 @@ const INCOME_ICONS: Record<
   rental:     Home,
   transfer:   ArrowLeftRight,
   refund:     RotateCcw,
+  loans:      HandCoins,
   other:      MoreHorizontal,
 };
 

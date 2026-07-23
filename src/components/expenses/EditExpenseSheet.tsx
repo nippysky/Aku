@@ -9,7 +9,7 @@ import {
 import { useForm, Controller } from 'react-hook-form';
 import {
   UtensilsCrossed, Car, ShoppingBag, Tv, Home, Zap,
-  Heart, Users, BookOpen, PiggyBank, Gift, MoreHorizontal,
+  Heart, Users, BookOpen, PiggyBank, Gift, HandCoins, MoreHorizontal,
   Calendar,
 } from 'lucide-react-native';
 import { format, parseISO } from 'date-fns';
@@ -40,6 +40,7 @@ const EXPENSE_ICONS: Record<
   education:     BookOpen,
   savings:       PiggyBank,
   gifts:         Gift,
+  loans:         HandCoins,
   other:         MoreHorizontal,
 };
 

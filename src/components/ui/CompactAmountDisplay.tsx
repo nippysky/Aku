@@ -1,25 +1,20 @@
 /**
  * CompactAmountDisplay
  *
- * Shows a compact amount (₦10K / ₦1.2M / ₦3.4B) as the headline figure
- * and, when the value is actually abbreviated, shows the full precise amount
- * in a small muted subtext beneath it.
- *
- * This gives users the at-a-glance readability of compact notation while
- * ensuring they can always see every cent / kobo.
+ * Shows the full-precision amount as the headline figure — matching Ụgwọ's
+ * plain, no-abbreviation style. (Previously showed a compact figure like
+ * ₦1.2M with the precise amount in small subtext below; simplified to show
+ * the real number up front, full stop.)
  *
  * Props
  * ─────
  * kobo        — raw minor-unit amount (already converted to display currency)
- * textStyle   — style override for the main compact figure
- * subStyle    — style override for the subtext
+ * textStyle   — style override for the main figure
  * align       — 'center' (default) | 'left' | 'right'
- * showSub     — force show/hide sub-label (default: auto — shows when compact ≠ full)
  */
 import React from 'react';
 import { StyleSheet, Text, View, ViewStyle, TextStyle, StyleProp, FlexAlignType } from 'react-native';
 import { useCurrencyFormat } from '../../hooks/useCurrencyFormat';
-import { useTheme } from '../../theme';
 
 type AlignShorthand = 'center' | 'left' | 'right';
 
@@ -41,42 +36,16 @@ interface CompactAmountDisplayProps {
 export function CompactAmountDisplay({
   kobo,
   textStyle,
-  subStyle,
   align = 'center',
-  showSub,
   style,
 }: CompactAmountDisplayProps) {
-  const { fmt, fmtCompact } = useCurrencyFormat();
-  const { colors, text, fontSize, font } = useTheme();
-
-  const compact  = fmtCompact(kobo);
-  const full     = fmt(kobo);
-  const isAbbrev = compact !== full;
-
-  // showSub prop overrides; otherwise auto-detect
-  const displaySub = showSub !== undefined ? showSub : isAbbrev;
+  const { fmt } = useCurrencyFormat();
 
   return (
     <View style={[{ alignItems: toFlexAlign(align) }, style]}>
-      <Text style={[styles.main, textStyle]}>{compact}</Text>
-      {displaySub && (
-        <Text
-          style={[
-            {
-              fontFamily: font.sansRegular,
-              fontSize:   fontSize.xs,
-              color:      colors.textTertiary,
-              marginTop:  2,
-              letterSpacing: 0.2,
-            },
-            subStyle,
-          ]}
-          numberOfLines={1}
-          adjustsFontSizeToFit
-        >
-          {full}
-        </Text>
-      )}
+      <Text style={[styles.main, textStyle]} numberOfLines={1} adjustsFontSizeToFit>
+        {fmt(kobo)}
+      </Text>
     </View>
   );
 }
@@ -90,20 +59,13 @@ interface BannerAmountProps {
 }
 
 export function BannerAmount({ kobo, textStyle, align = 'left' }: BannerAmountProps) {
-  const { fmt, fmtCompact } = useCurrencyFormat();
-
-  const compact  = fmtCompact(kobo);
-  const full     = fmt(kobo);
-  const isAbbrev = compact !== full;
+  const { fmt } = useCurrencyFormat();
 
   return (
     <View style={{ alignItems: toFlexAlign(align) }}>
-      <Text style={[styles.bannerMain, textStyle]}>{compact}</Text>
-      {isAbbrev && (
-        <Text style={styles.bannerSub} numberOfLines={1} adjustsFontSizeToFit>
-          {full}
-        </Text>
-      )}
+      <Text style={[styles.bannerMain, textStyle]} numberOfLines={1} adjustsFontSizeToFit>
+        {fmt(kobo)}
+      </Text>
     </View>
   );
 }
@@ -114,13 +76,6 @@ const styles = StyleSheet.create({
     fontSize: 28,
   },
   bannerMain: {
-    // Styled by caller for different banner sizes; sub inherits linen-ish colour
-  },
-  bannerSub: {
-    fontSize:      11,
-    color:         'rgba(250,250,248,0.55)',
-    marginTop:     2,
-    letterSpacing: 0.2,
-    fontFamily:    'PlusJakartaSans_400Regular',
+    // Styled by caller for different banner sizes
   },
 });

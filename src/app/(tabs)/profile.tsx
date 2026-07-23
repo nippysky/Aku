@@ -9,8 +9,6 @@ import {
   Text,
   View,
 } from 'react-native';
-import * as ImagePicker from 'expo-image-picker';
-import * as ImageManipulator from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system/legacy';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -23,7 +21,6 @@ import {
   ChevronRight,
   Shield,
   Fingerprint,
-  Bell,
   Moon,
   DollarSign,
   TrendingUp,
@@ -32,7 +29,6 @@ import {
   FileText,
   MessageSquare,
   Check,
-  Camera,
   ExternalLink,
   HelpCircle,
 } from 'lucide-react-native';
@@ -45,12 +41,13 @@ import { useBillsStore } from '../../store/bills.store';
 import { useExpensesStore } from '../../store/expenses.store';
 import { useGoalsStore } from '../../store/goals.store';
 import { useIncomeStore } from '../../store/income.store';
-import { UserAvatar } from '../../components/ui/UserAvatar';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
+import { Input } from '../../components/ui/Input';
 import { Divider } from '../../components/ui/Divider';
 import { AkuDatePicker } from '../../components/ui/AkuDatePicker';
 import { formatAmount } from '../../lib/format';
+import { updateName } from '../../lib/api-client';
 import type { ThemeMode } from '../../store/ui.store';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -217,15 +214,38 @@ export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
 
-  const { user, updateUser, saveAvatarData, biometric, setupBiometric, disableBiometric, signOut, deleteAccount } = useAuthStore();
+  const { user, updateUser, biometric, setupBiometric, disableBiometric, signOut, deleteAccount } = useAuthStore();
   const { showToast, currency, themeMode, setThemeMode } = useUIStore();
   const { bills }    = useBillsStore();
   const { expenses } = useExpensesStore();
   const { goals }    = useGoalsStore();
   const { allRecords: incomeRecords, loadAll: loadAllInc } = useIncomeStore();
 
-  // ── Avatar picker sheet ───────────────────────────────────────────────
-  const avatarPickerRef = useRef<BottomSheetModal>(null);
+  // ── Edit name sheet ────────────────────────────────────────────────────
+  const nameSheetRef = useRef<BottomSheetModal>(null);
+  const [nameDraft, setNameDraft]   = useState('');
+  const [savingName, setSavingName] = useState(false);
+
+  const openNameSheet = useCallback(() => {
+    setNameDraft(user?.name ?? '');
+    nameSheetRef.current?.present();
+  }, [user?.name]);
+
+  const saveName = useCallback(async () => {
+    const name = nameDraft.trim();
+    if (!name) return;
+    setSavingName(true);
+    try {
+      await updateName(name);
+      updateUser({ name });
+      nameSheetRef.current?.dismiss();
+      showToast('success', 'Name updated');
+    } catch {
+      showToast('error', 'Could not update your name.');
+    } finally {
+      setSavingName(false);
+    }
+  }, [nameDraft, updateUser, showToast]);
 
   // ── Theme picker sheet ────────────────────────────────────────────────
   const themeSheetRef = useRef<BottomSheetModal>(null);
@@ -367,65 +387,6 @@ export default function ProfileScreen() {
     );
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deleteAccount]);
-
-  // ── Profile avatar ────────────────────────────────────────────────────
-  // Flow: pick → resize 250×250 JPEG → read as base64 → save to SQLite
-  // → sync to server in background. Entire flow is crash-safe.
-
-  const pickAndSaveAvatar = useCallback(async (source: 'camera' | 'library') => {
-    try {
-      let result: ImagePicker.ImagePickerResult;
-
-      if (source === 'camera') {
-        const { status } = await ImagePicker.requestCameraPermissionsAsync();
-        if (status !== 'granted') {
-          showToast('error', 'Camera permission is required');
-          return;
-        }
-        result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 1 });
-      } else {
-        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (status !== 'granted') {
-          showToast('error', 'Photo library permission is required');
-          return;
-        }
-        result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1 });
-      }
-
-      if (result.canceled || !result.assets[0]) return;
-
-      const asset = result.assets[0];
-      const { width, height } = asset;
-
-      // Step 1: center-crop to a square so avatars are never distorted
-      const size    = Math.min(width, height);
-      const originX = Math.floor((width  - size) / 2);
-      const originY = Math.floor((height - size) / 2);
-
-      // Step 2: crop → resize to 260×260 → compress to JPEG
-      const manipulated = await ImageManipulator.manipulateAsync(
-        asset.uri,
-        [
-          { crop: { originX, originY, width: size, height: size } },
-          { resize: { width: 260, height: 260 } },
-        ],
-        { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG, base64: true },
-      );
-
-      if (!manipulated.base64) throw new Error('Image processing failed');
-      const dataUri = `data:image/jpeg;base64,${manipulated.base64}`;
-
-      // saveAvatarData: updates memory + SQLite instantly, syncs server in background
-      await saveAvatarData(dataUri);
-      showToast('success', 'Profile photo updated');
-    } catch {
-      showToast('error', 'Could not update photo — please try again');
-    }
-  }, [saveAvatarData, showToast]);
-
-  const handlePickAvatar = useCallback(() => {
-    avatarPickerRef.current?.present();
-  }, []);
 
   // ── Generate PDF bank statement (with optional date range) ───────────
   const handleExportData = useCallback(async (bounds?: { from: string | null; to: string | null }) => {
@@ -813,23 +774,12 @@ export default function ProfileScreen() {
         ]}
         showsVerticalScrollIndicator={false}
       >
-        {/* ── Profile hero ── */}
-        <View style={styles.hero}>
-          <Pressable
-            onPress={handlePickAvatar}
-            style={styles.avatarWrap}
-            accessibilityLabel="Change profile photo"
-          >
-            <UserAvatar
-              name={user.name}
-              avatarData={user.avatarData}
-              size={80}
-            />
-            <View style={[styles.cameraBadge, { backgroundColor: colors.primary, borderColor: colors.background }]}>
-              <Camera size={12} color={colors.textOnForest} strokeWidth={2} />
-            </View>
-          </Pressable>
-
+        {/* ── Profile hero — plain name + email, no avatar ── */}
+        <Pressable
+          onPress={openNameSheet}
+          style={styles.hero}
+          accessibilityLabel="Edit your name"
+        >
           <Text
             style={[
               styles.heroName,
@@ -846,7 +796,7 @@ export default function ProfileScreen() {
           <Text style={[text.caption, { color: colors.textTertiary }]}>
             Member since {memberSince}
           </Text>
-        </View>
+        </Pressable>
 
 
         {/* ── Security ── */}
@@ -871,18 +821,6 @@ export default function ProfileScreen() {
           Locks Akù with your device security — Face ID, fingerprint, or your
           phone's PIN. Nothing extra to remember.
         </Text>
-
-        {/* ── Notifications ── */}
-        <SectionHeader label="Notifications" />
-        <SettingsGroup>
-          <SettingsRow
-            icon={Bell}
-            label="Notification settings"
-            onPress={() => router.push('/notification-settings' as never)}
-            isFirst
-            isLast
-          />
-        </SettingsGroup>
 
         {/* ── Appearance ── */}
         <SectionHeader label="Appearance" />
@@ -997,76 +935,45 @@ export default function ProfileScreen() {
         </View>
       </ScrollView>
 
-      {/* ── Avatar picker sheet ── */}
+      {/* ── Edit name sheet ── */}
       <BottomSheetModal
-        ref={avatarPickerRef}
-        snapPoints={['28%']}
+        ref={nameSheetRef}
+        snapPoints={['32%']}
         backdropComponent={renderBackdrop}
         backgroundStyle={{ backgroundColor: colors.card }}
         handleIndicatorStyle={{ backgroundColor: colors.border }}
+        keyboardBehavior="interactive"
+        keyboardBlurBehavior="restore"
       >
-        <BottomSheetView style={{ padding: 24, gap: 12 }}>
+        <BottomSheetView style={{ padding: 20, paddingBottom: insets.bottom + 20 }}>
           <Text
             style={{
               fontFamily:    font.displayLight,
               fontSize:      fontSize.xl,
               color:         colors.text,
-              marginBottom:  8,
+              marginBottom:  16,
               letterSpacing: -0.3,
             }}
           >
-            Change Photo
+            Your name
           </Text>
-
-          {/* Take photo */}
-          <Pressable
-            onPress={() => {
-              avatarPickerRef.current?.dismiss();
-              pickAndSaveAvatar('camera');
-            }}
-            style={({ pressed }) => [
-              {
-                flexDirection:  'row',
-                alignItems:     'center',
-                gap:            14,
-                paddingVertical: 14,
-                paddingHorizontal: 16,
-                borderRadius:   radius.lg,
-                backgroundColor: pressed ? colors.backgroundSecondary : colors.backgroundSecondary,
-                opacity: pressed ? 0.7 : 1,
-              },
-            ]}
-          >
-            <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: colors.primary + '18', alignItems: 'center', justifyContent: 'center' }}>
-              <Camera size={18} color={colors.primary} strokeWidth={1.8} />
-            </View>
-            <Text style={[text.bodyMedium, { color: colors.text }]}>Take a photo</Text>
-          </Pressable>
-
-          {/* Choose from library */}
-          <Pressable
-            onPress={() => {
-              avatarPickerRef.current?.dismiss();
-              pickAndSaveAvatar('library');
-            }}
-            style={({ pressed }) => [
-              {
-                flexDirection:  'row',
-                alignItems:     'center',
-                gap:            14,
-                paddingVertical: 14,
-                paddingHorizontal: 16,
-                borderRadius:   radius.lg,
-                backgroundColor: colors.backgroundSecondary,
-                opacity: pressed ? 0.7 : 1,
-              },
-            ]}
-          >
-            <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: colors.primary + '18', alignItems: 'center', justifyContent: 'center' }}>
-              <Download size={18} color={colors.primary} strokeWidth={1.8} />
-            </View>
-            <Text style={[text.bodyMedium, { color: colors.text }]}>Choose from library</Text>
-          </Pressable>
+          <Input
+            label="Name"
+            value={nameDraft}
+            onChangeText={setNameDraft}
+            autoCapitalize="words"
+            placeholder="Your name"
+            asBottomSheetInput
+          />
+          <View style={{ marginTop: 16 }}>
+            <Button
+              variant="primary"
+              label="Save"
+              onPress={saveName}
+              loading={savingName}
+              disabled={!nameDraft.trim()}
+            />
+          </View>
         </BottomSheetView>
       </BottomSheetModal>
 
@@ -1308,23 +1215,6 @@ const styles = StyleSheet.create({
   hero: {
     alignItems: 'center',
     marginBottom: 28,
-  },
-  avatarWrap: {
-    width:        80,
-    height:       80,
-    marginBottom: 14,
-    position:     'relative',
-  },
-  cameraBadge: {
-    position:       'absolute',
-    bottom:         0,
-    right:          0,
-    width:          24,
-    height:         24,
-    borderRadius:   12,
-    borderWidth:    2,
-    alignItems:     'center',
-    justifyContent: 'center',
   },
   heroName: {
     letterSpacing: -0.5,

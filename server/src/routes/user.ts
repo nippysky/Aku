@@ -3,7 +3,6 @@
  *
  * GET /api/user/me           — Get current user's profile
  * PUT /api/user/me           — Update name
- * PUT /api/user/avatar-data  — Sync base64 avatar (fire-and-forget from device)
  * PUT /api/user/currency     — Set preferred currency (persists across devices)
  * GET /api/user/dek          — Fetch the user's DEK (decrypted) — new-device restore
  * POST /api/user/dek         — Store/update the user's DEK (encrypted at rest)
@@ -38,8 +37,6 @@ router.get('/me', async (c) => {
     id:                      user.id,
     name:                    user.name,
     email:                   user.email,
-    avatarUrl:               user.avatarUrl,
-    avatarData:              user.avatarData,
     preferredCurrencyCode:   user.preferredCurrencyCode ?? null,
     preferredCurrencySymbol: user.preferredCurrencySymbol ?? null,
     createdAt:               user.createdAt,
@@ -72,44 +69,6 @@ router.put('/me', async (c) => {
   notifyUser(userId);
 
   return c.json({ success: true, name });
-});
-
-// ─── PUT /api/user/avatar-data ───────────────────────────────────────────────
-// Receives a base64 data URI from the device and stores it in the DB.
-// The device is authoritative — this is a background sync, not a blocking upload.
-// Payload: { avatarData: "data:image/jpeg;base64,..." }
-
-router.put('/avatar-data', async (c) => {
-  const { sub: userId } = c.get('jwtPayload');
-
-  let body: { avatarData?: string };
-  try {
-    body = await c.req.json();
-  } catch {
-    return c.json({ error: 'Invalid JSON body' }, 400);
-  }
-
-  const avatarData = body.avatarData?.trim();
-
-  // Accept null/empty to allow avatar removal
-  if (avatarData !== undefined && avatarData !== '' && !avatarData.startsWith('data:image/')) {
-    return c.json({ error: 'avatarData must be a valid image data URI' }, 400);
-  }
-
-  // Soft cap: ~100 KB base64 ≈ 75 KB image ≈ a 300×300 JPEG. More than enough.
-  if (avatarData && avatarData.length > 150_000) {
-    return c.json({ error: 'Avatar data is too large (max ~100 KB)' }, 413);
-  }
-
-  await db
-    .update(users)
-    .set({ avatarData: avatarData ?? null, updatedAt: new Date() })
-    .where(eq(users.id, userId));
-
-  // Notify other devices so they pull the updated avatar
-  notifyUser(userId);
-
-  return c.json({ success: true });
 });
 
 // ─── PUT /api/user/currency ───────────────────────────────────────────────────

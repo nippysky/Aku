@@ -9,7 +9,7 @@ import {
 import { useForm, Controller } from 'react-hook-form';
 import {
   Briefcase, Zap, Building2, TrendingUp,
-  Home, ArrowLeftRight, RotateCcw, MoreHorizontal,
+  Home, ArrowLeftRight, RotateCcw, HandCoins, MoreHorizontal,
   Calendar,
 } from 'lucide-react-native';
 import { format, parseISO } from 'date-fns';
@@ -44,6 +44,7 @@ const INCOME_ICONS: Record<
   rental:     Home,
   transfer:   ArrowLeftRight,
   refund:     RotateCcw,
+  loans:      HandCoins,
   other:      MoreHorizontal,
 };
 

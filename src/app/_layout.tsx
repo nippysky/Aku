@@ -5,7 +5,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as SplashScreen from 'expo-splash-screen';
-import * as ExpoNotifications from 'expo-notifications';
 import { useFonts } from 'expo-font';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
@@ -13,10 +12,8 @@ import { useColorScheme } from 'react-native';
 import { initializeDatabase } from '../lib/database/client';
 import { useAuthStore } from '../store/auth.store';
 import { useUIStore } from '../store/ui.store';
-import { useNotifPrefsStore } from '../store/notif-prefs.store';
 import { useBillsStore } from '../store/bills.store';
 import { useRecurringIncomeStore } from '../store/recurring-income.store';
-import { useNotifHistoryStore } from '../store/notif-history.store';
 import { migrateRecurringExpensesToBills } from '../lib/migrations/recurring-to-bills';
 import { ToastContainer } from '../components/ui/ToastContainer';
 import { AppLoader } from '../components/ui/AppLoader';
@@ -37,7 +34,6 @@ export default function RootLayout() {
 
   const { isInitialized, user, session, isLocked, hasOnboarded, initialize } = useAuthStore();
   const { themeMode, loadSettings } = useUIStore();
-  const loadNotifPrefs = useNotifPrefsStore((s) => s.load);
 
   // Track whether we've registered the push token for this session
   const pushTokenRegistered = useRef(false);
@@ -78,23 +74,16 @@ export default function RootLayout() {
       // Load persisted theme + currency before auth so the correct theme
       // is applied from the very first render after cold start.
       await loadSettings();
-      // Load notification preferences (SQLite app_state — synchronous after DB init)
-      loadNotifPrefs();
       await initialize();
 
       // Request notification permissions, set up Android channels, and
-      // schedule the repeating daily digest. All three are safe to call
-      // on every cold start — they are idempotent.
+      // schedule the repeating daily digest. All notifications are always
+      // enabled — no user-facing toggle. Safe to call on every cold start —
+      // all three are idempotent.
       const granted = await notificationService.requestPermissions();
       if (granted) {
         await notificationService.setupNotificationChannels();
-        // Only schedule daily digest if user has opted in (defaults to ON)
-        const { dailyDigest } = useNotifPrefsStore.getState();
-        if (dailyDigest) {
-          await notificationService.scheduleDailyDigest(8, 0);
-        } else {
-          await notificationService.cancelDailyDigest();
-        }
+        await notificationService.scheduleDailyDigest(8, 0);
       }
     })();
   }, []);
@@ -238,66 +227,6 @@ export default function RootLayout() {
   useEffect(() => {
     if (!session) pushTokenRegistered.current = false;
   }, [session]);
-
-  // ── Load notification history when authenticated + unlocked ─────────
-  useEffect(() => {
-    if (user && !isLocked) {
-      useNotifHistoryStore.getState().load(user.id);
-    }
-  }, [user, isLocked]);
-
-  // ── Persist received notifications to history ────────────────────────
-  // Track identifiers already persisted to prevent duplicates when the user
-  // taps a foreground banner (which fires both received + response listeners).
-  const savedNotifIds = useRef<Set<string>>(new Set());
-
-  useEffect(() => {
-    if (!user) return;
-
-    const persistNotif = (
-      identifier: string,
-      title: string | null | undefined,
-      body:  string | null | undefined,
-      data:  Record<string, unknown> | null | undefined,
-    ) => {
-      if (!title) return;
-      if (savedNotifIds.current.has(identifier)) return; // deduplicate
-      savedNotifIds.current.add(identifier);
-      useNotifHistoryStore.getState().add({
-        userId:      user.id,
-        type:        (data?.type as string) ?? 'general',
-        title,
-        body:        body ?? '',
-        referenceId: (data?.id as string) ?? null,
-      });
-    };
-
-    // Foreground: app is open when notification arrives
-    const foregroundSub = ExpoNotifications.addNotificationReceivedListener(
-      (notif) => {
-        const { title, body, data } = notif.request.content;
-        persistNotif(notif.request.identifier, title, body, data as Record<string, unknown>);
-      },
-    );
-
-    // Background / quit-state: user taps notification to open app
-    const responseSub = ExpoNotifications.addNotificationResponseReceivedListener(
-      (response) => {
-        const { title, body, data } = response.notification.request.content;
-        persistNotif(
-          response.notification.request.identifier,
-          title,
-          body,
-          data as Record<string, unknown>,
-        );
-      },
-    );
-
-    return () => {
-      foregroundSub.remove();
-      responseSub.remove();
-    };
-  }, [user]);
 
   // ── Navigation guard ─────────────────────────────────────────────────
   useEffect(() => {

@@ -146,8 +146,6 @@ export type UserProfile = {
   id:         string;
   name:       string;
   email:      string;
-  avatarUrl:  string | null;
-  avatarData: string | null;
   /** Server-persisted currency preference — null if never set. */
   preferredCurrencyCode?:   string | null;
   preferredCurrencySymbol?: string | null;
@@ -226,11 +224,6 @@ export async function deleteAccount(): Promise<void> {
 }
 
 /**
- * Sync avatar to the server (fire-and-forget).
- * Pass the full data URI: `data:image/jpeg;base64,...`
- * Server stores it in the users.avatar_data PostgreSQL column.
- */
-/**
  * Persist the user's preferred currency server-side so it survives logout,
  * reinstall, and sign-in on a new device. Fire-and-forget from the caller.
  */
@@ -238,13 +231,6 @@ export async function updateCurrencyPreference(code: string, symbol: string): Pr
   await apiFetch('/api/user/currency', {
     method: 'PUT',
     body:   { code, symbol },
-  });
-}
-
-export async function syncAvatarData(avatarData: string): Promise<void> {
-  await apiFetch('/api/user/avatar-data', {
-    method: 'PUT',
-    body:   { avatarData },
   });
 }
 
@@ -357,26 +343,6 @@ export async function reportInsight(payload: UserInsightPayload): Promise<void> 
     method: 'POST',
     body:   payload,
   });
-}
-
-/**
- * Sync notification preferences to the server so the server-side notification
- * worker can respect the user's choices. Call fire-and-forget after any
- * preference toggle in the notification settings screen.
- */
-export async function updateNotifPrefs(prefs: {
-  billReminders:  boolean;
-  goalMilestones: boolean;
-  dailyDigest:    boolean;
-}): Promise<void> {
-  try {
-    await apiFetch('/api/notifications/preferences', {
-      method: 'PATCH',
-      body:   prefs,
-    });
-  } catch {
-    // Non-critical — prefs will sync on the next insight report or app restart
-  }
 }
 
 // ─── Sync endpoints ───────────────────────────────────────────────────────────

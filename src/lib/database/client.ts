@@ -38,8 +38,6 @@ const CREATE_TABLES_SQL = `
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     email TEXT NOT NULL UNIQUE,
-    avatar_url TEXT,
-    avatar_data TEXT,
     pin_hash TEXT,
     biometric_enabled INTEGER DEFAULT 0,
     created_at TEXT NOT NULL,
@@ -190,8 +188,6 @@ const CREATE_TABLES_SQL = `
 // We catch "duplicate column name" errors and continue.
 
 const MIGRATIONS_SQL = [
-  // avatar_data: base64 profile photo stored locally — no CDN dependency
-  "ALTER TABLE users ADD COLUMN avatar_data TEXT",
   // recurring income → goal auto-contribute
   "ALTER TABLE recurring_income ADD COLUMN goal_id TEXT",
   "ALTER TABLE recurring_income ADD COLUMN allocation_pct INTEGER DEFAULT 0",
@@ -225,6 +221,9 @@ const MIGRATIONS_SQL = [
   "DROP TABLE IF EXISTS budgets",
   "DROP INDEX IF EXISTS idx_budgets_user",
   "DROP INDEX IF EXISTS idx_budgets_category",
+  // ── Avatar feature removed — clean up on existing installs ──
+  "ALTER TABLE users DROP COLUMN avatar_url",
+  "ALTER TABLE users DROP COLUMN avatar_data",
 ];
 
 export async function initializeDatabase(): Promise<void> {

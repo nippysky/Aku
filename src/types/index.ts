@@ -13,9 +13,6 @@ export interface User {
   id:             UUID;
   name:           string;
   email:          string;
-  avatarUrl:      string | null;
-  /** Base64 data URI — stored in SQLite, never in SecureStore (size limit). */
-  avatarData:     string | null;
   createdAt:      ISO8601;
   updatedAt:      ISO8601;
 }
@@ -120,6 +117,7 @@ export type ExpenseCategory =
   | 'education'
   | 'savings'
   | 'gifts'
+  | 'loans'
   | 'other';
 
 export interface Expense {
@@ -204,6 +202,7 @@ export type IncomeCategory =
   | 'rental'
   | 'transfer'
   | 'refund'
+  | 'loans'
   | 'other';
 
 export interface Income {
@@ -291,6 +290,7 @@ export const EXPENSE_CATEGORIES: Record<ExpenseCategory, CategoryMeta> = {
   education:     { label: 'Education',     icon: 'BookOpen',          color: '#5BD98A' },
   savings:       { label: 'Savings',       icon: 'PiggyBank',         color: '#C9A96A' },
   gifts:         { label: 'Gifts',         icon: 'Gift',              color: '#D97B9B' },
+  loans:         { label: 'Loans',         icon: 'HandCoins',         color: '#6D8DAA' },
   other:         { label: 'Other',         icon: 'MoreHorizontal',    color: '#888885' },
 };
 
@@ -318,6 +318,7 @@ export const INCOME_CATEGORIES: Record<IncomeCategory, CategoryMeta> = {
   rental:     { label: 'Rental',     icon: 'Home',            color: '#E07B54' },
   transfer:   { label: 'Transfer',   icon: 'ArrowLeftRight',  color: '#D9A050' },
   refund:     { label: 'Refund',     icon: 'RotateCcw',       color: '#6DD9B8' },
+  loans:      { label: 'Loans',      icon: 'HandCoins',       color: '#6D8DAA' },
   other:      { label: 'Other',      icon: 'MoreHorizontal',  color: '#888885' },
 };
 

@@ -22,7 +22,6 @@ import Animated, {
 import { Palette } from '../../theme/colors';
 import { format, subDays } from 'date-fns';
 import {
-  Bell,
   Receipt,
   Target,
   TrendingUp,
@@ -33,7 +32,7 @@ import {
 } from 'lucide-react-native';
 import {
   UtensilsCrossed, Car, ShoppingBag, Tv, Home,
-  Zap, Heart, Users, BookOpen, PiggyBank, Gift, MoreHorizontal,
+  Zap, Heart, Users, BookOpen, PiggyBank, Gift, HandCoins, MoreHorizontal,
 } from 'lucide-react-native';
 import { useTheme } from '../../theme';
 import { Card } from '../../components/ui/Card';
@@ -48,9 +47,6 @@ import { useExpensesStore } from '../../store/expenses.store';
 import { useIncomeStore } from '../../store/income.store';
 import { useGoalsStore } from '../../store/goals.store';
 import { useSyncStore } from '../../store/sync.store';
-import { useNotifHistoryStore } from '../../store/notif-history.store';
-import { FirstTimeHint } from '../../components/ui/FirstTimeHint';
-import { useFirstTimeHint } from '../../hooks/useFirstTimeHint';
 import { useCurrencyFormat } from '../../hooks/useCurrencyFormat';
 import { EXPENSE_CATEGORIES } from '../../types';
 import type { Bill, ExpenseCategory } from '../../types';
@@ -58,7 +54,7 @@ import type { Bill, ExpenseCategory } from '../../types';
 // ─── Icon map for expenses ────────────────────────────────────────────────────
 
 const EXPENSE_ICONS: Record<string, React.ComponentType<{ size?: number; color?: string; strokeWidth?: number }>> = {
-  UtensilsCrossed, Car, ShoppingBag, Tv, Home, Zap, Heart, Users, BookOpen, PiggyBank, Gift, MoreHorizontal,
+  UtensilsCrossed, Car, ShoppingBag, Tv, Home, Zap, Heart, Users, BookOpen, PiggyBank, Gift, HandCoins, MoreHorizontal,
 };
 
 // ─── Smart Insight ────────────────────────────────────────────────────────────
@@ -394,13 +390,11 @@ export default function HomeScreen() {
   const { expenses, allExpenses, loadAll: loadExpenses, isLoading: expensesLoading } = useExpensesStore();
   const { allRecords: incRecords, loadAll: loadAllInc } = useIncomeStore();
   const { goals, load: loadGoals, isLoading: goalsLoading } = useGoalsStore();
-  const notifUnread = useNotifHistoryStore((s) => s.unreadCount);
   const syncVersion = useSyncStore((s) => s.syncVersion);
-  const hintBell = useFirstTimeHint('hint_home_bell');
 
   const isLoading = billsLoading || expensesLoading || goalsLoading;
   const [refreshing, setRefreshing] = useState(false);
-  const { fmt, fmtCompact } = useCurrencyFormat();
+  const { fmt } = useCurrencyFormat();
 
   // Initial load on mount / user change
   useEffect(() => {
@@ -513,21 +507,6 @@ export default function HomeScreen() {
               {formatDate()}
             </Text>
           </View>
-
-          <TouchableOpacity
-            onPress={() => router.push('/notifications' as never)}
-            style={[styles.bellBtn, { backgroundColor: colors.backgroundSecondary, borderRadius: 999 }]}
-            hitSlop={4}
-          >
-            <Bell size={20} color={colors.text} strokeWidth={1.8} />
-            {notifUnread > 0 && (
-              <View style={[styles.bellBadge, { backgroundColor: colors.danger }]}>
-                <Text style={{ fontFamily: font.sansSemiBold, fontSize: 9, color: '#fff', lineHeight: 13 }}>
-                  {notifUnread > 9 ? '9+' : String(notifUnread)}
-                </Text>
-              </View>
-            )}
-          </TouchableOpacity>
         </Animated.View>
 
         {/* ── Wealth Snapshot Banner ── */}
@@ -634,7 +613,7 @@ export default function HomeScreen() {
                 numberOfLines={1}
                 adjustsFontSizeToFit
               >
-                {netThisMonth >= 0 ? '+' : '−'}{fmtCompact(Math.abs(netThisMonth))}
+                {netThisMonth >= 0 ? '+' : '−'}{fmt(Math.abs(netThisMonth))}
               </Text>
             }
             onPress={() => router.push('/analytics' as never)}
@@ -789,15 +768,6 @@ export default function HomeScreen() {
           )}
         </Animated.View>
       </ScrollView>
-
-      {/* First-time hint — shown once, slides up from bottom */}
-      <FirstTimeHint
-        visible={hintBell.visible}
-        onDismiss={hintBell.dismiss}
-        text="Tap the bell to see your financial alerts and notification history."
-        icon={Bell}
-        bottomOffset={layout.tabBarHeight + 16}
-      />
     </View>
   );
 }

@@ -15,9 +15,6 @@ export const users = pgTable('users', {
   id:         text('id').primaryKey(),           // UUID v4
   name:       text('name').notNull(),
   email:      text('email').notNull().unique(),
-  avatarUrl:  text('avatar_url'),
-  /** Base64 data URI — synced from the device, no CDN required. */
-  avatarData:   text('avatar_data'),
   /**
    * The user's Data Encryption Key, encrypted at rest with the server master key
    * (AES-256-GCM). Stored as base64(iv[12] || ciphertext || tag[16]).

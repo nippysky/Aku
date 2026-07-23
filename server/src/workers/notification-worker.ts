@@ -62,21 +62,16 @@ interface NotifPrefs {
 const DEFAULT_PREFS: NotifPrefs = {
   billReminders:  true,
   goalMilestones: true,
-  dailyDigest:    true,  // server-worker default is enabled (user can opt out)
+  dailyDigest:    true,
 };
 
-function parsePrefs(json: string | null): NotifPrefs {
-  if (!json) return DEFAULT_PREFS;
-  try {
-    const parsed = JSON.parse(json) as Partial<NotifPrefs>;
-    return {
-      billReminders:  parsed.billReminders  ?? DEFAULT_PREFS.billReminders,
-      goalMilestones: parsed.goalMilestones ?? DEFAULT_PREFS.goalMilestones,
-      dailyDigest:    parsed.dailyDigest    ?? DEFAULT_PREFS.dailyDigest,
-    };
-  } catch {
-    return DEFAULT_PREFS;
-  }
+// All notification types are always enabled — there is no user-facing
+// toggle in the app anymore (the notification-settings screen was removed).
+// This ignores any stored notifPrefsJson so every user gets the full
+// engagement stream regardless of what may be sitting in that column from
+// before the settings screen existed.
+function parsePrefs(_json: string | null): NotifPrefs {
+  return DEFAULT_PREFS;
 }
 
 interface UserRow {

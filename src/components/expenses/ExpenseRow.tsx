@@ -13,7 +13,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import {
   UtensilsCrossed, Car, ShoppingBag, Tv, Home, Zap,
-  Heart, Users, BookOpen, PiggyBank, Gift, MoreHorizontal,
+  Heart, Users, BookOpen, PiggyBank, Gift, HandCoins, MoreHorizontal,
 } from 'lucide-react-native';
 import { useTheme } from '../../theme';
 import { EXPENSE_CATEGORIES, type ExpenseCategory } from '../../types';
@@ -37,6 +37,7 @@ const EXPENSE_ICONS: Record<
   education:     BookOpen,
   savings:       PiggyBank,
   gifts:         Gift,
+  loans:         HandCoins,
   other:         MoreHorizontal,
 };
 
