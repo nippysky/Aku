@@ -774,28 +774,41 @@ export default function ProfileScreen() {
         ]}
         showsVerticalScrollIndicator={false}
       >
-        {/* ── Profile hero — plain name + email, no avatar ── */}
+        {/* ── Profile card — name + email, tap to edit ── */}
         <Pressable
           onPress={openNameSheet}
-          style={styles.hero}
+          style={({ pressed }) => [
+            styles.hero,
+            {
+              backgroundColor: colors.card,
+              borderColor:     colors.border,
+              borderRadius:    radius.lg,
+              opacity:         pressed ? 0.85 : 1,
+            },
+          ]}
           accessibilityLabel="Edit your name"
+          accessibilityRole="button"
         >
-          <Text
-            style={[
-              styles.heroName,
-              { fontFamily: font.displayLight, fontSize: fontSize['2xl'], color: colors.text },
-            ]}
-          >
-            {user.name}
-          </Text>
+          <View style={{ flex: 1 }}>
+            <Text
+              style={[
+                styles.heroName,
+                { fontFamily: font.displayLight, fontSize: fontSize.xl, color: colors.text },
+              ]}
+            >
+              {user.name}
+            </Text>
 
-          <Text style={[text.bodySm, styles.heroEmail, { color: colors.textSecondary }]}>
-            {user.email}
-          </Text>
+            <Text style={[text.bodySm, styles.heroEmail, { color: colors.textSecondary }]}>
+              {user.email}
+            </Text>
 
-          <Text style={[text.caption, { color: colors.textTertiary }]}>
-            Member since {memberSince}
-          </Text>
+            <Text style={[text.caption, { color: colors.textTertiary }]}>
+              Member since {memberSince}
+            </Text>
+          </View>
+
+          <ChevronRight size={18} color={colors.textTertiary} strokeWidth={1.8} />
         </Pressable>
 
 
@@ -1213,11 +1226,15 @@ const styles = StyleSheet.create({
     gap: 0,
   },
   hero: {
-    alignItems: 'center',
-    marginBottom: 28,
+    flexDirection: 'row',
+    alignItems:    'center',
+    gap:           12,
+    padding:       16,
+    borderWidth:   1,
+    marginBottom:  28,
   },
   heroName: {
-    letterSpacing: -0.5,
+    letterSpacing: -0.4,
     marginBottom:  4,
   },
   heroEmail: {

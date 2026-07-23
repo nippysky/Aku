@@ -155,12 +155,19 @@ export type UserProfile = {
 
 /**
  * Request a magic link email. Call this when the user taps "Continue" on the
- * email screen during onboarding.
+ * email screen during onboarding (intent: 'sign-up') or on the sign-in screen
+ * (intent: 'sign-in'). The server enforces the intent: sign-in rejects
+ * unknown emails (404), sign-up rejects emails that already have an account
+ * (409) — see getFriendlyErrorMessage / ApiError for surfacing these inline.
  */
-export async function requestMagicLink(email: string, name?: string): Promise<void> {
+export async function requestMagicLink(
+  email:   string,
+  name?:   string,
+  intent?: 'sign-in' | 'sign-up',
+): Promise<void> {
   await apiFetch('/api/auth/magic-link', {
     method:  'POST',
-    body:    { email, name },
+    body:    { email, name, intent },
     noAuth:  true,
   });
 }

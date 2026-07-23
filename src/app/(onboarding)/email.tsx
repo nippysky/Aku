@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import {
   Linking,
+  Pressable,
   StyleSheet,
   Text,
   View,
@@ -20,7 +21,7 @@ import { Button, Input, OnboardingHeader } from '../../components/ui';
 import { useTheme } from '../../theme';
 import { OnboardingStorage } from '../../lib/onboarding-storage';
 import { useAuthStore } from '../../store/auth.store';
-import { getFriendlyErrorMessage } from '../../lib/api-client';
+import { getFriendlyErrorMessage, ApiError } from '../../lib/api-client';
 
 // ─── Schema ────────────────────────────────────────────────────────────────
 
@@ -42,6 +43,10 @@ export default function EmailScreen() {
   const { signIn, isLoading, error } = useAuthStore();
 
   const [sendError, setSendError] = useState<string | null>(null);
+  // Inline, field-level error — set when the server tells us this email is
+  // already registered (a distinct case from "invalid email format").
+  const [emailError, setEmailError]             = useState<string | null>(null);
+  const [emailAlreadyUsed, setEmailAlreadyUsed] = useState(false);
 
   const {
     control,
@@ -58,11 +63,18 @@ export default function EmailScreen() {
     const name       = OnboardingStorage.getName() ?? undefined;
     OnboardingStorage.setEmail(normalised);
     setSendError(null);
+    setEmailError(null);
+    setEmailAlreadyUsed(false);
 
     try {
       // Sends a real magic link email via the server.
-      await signIn(normalised, name);
+      await signIn(normalised, name, 'sign-up');
     } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        setEmailError('That email is already registered.');
+        setEmailAlreadyUsed(true);
+        return;
+      }
       setSendError(getFriendlyErrorMessage(err, 'Could not send the email. Please try again.'));
       return;
     }
@@ -124,7 +136,10 @@ export default function EmailScreen() {
                   label="Email address"
                   placeholder="you@example.com"
                   value={value}
-                  onChangeText={onChange}
+                  onChangeText={(v) => {
+                    onChange(v);
+                    if (emailAlreadyUsed) { setEmailError(null); setEmailAlreadyUsed(false); }
+                  }}
                   onBlur={onBlur}
                   keyboardType="email-address"
                   autoCapitalize="none"
@@ -132,11 +147,23 @@ export default function EmailScreen() {
                   autoComplete="email"
                   textContentType="emailAddress"
                   returnKeyType="done"
-                  error={errors.email?.message}
+                  error={errors.email?.message ?? emailError ?? undefined}
                   onSubmitEditing={handleSubmit(onSubmit)}
                 />
               )}
             />
+            {emailAlreadyUsed && (
+              <Pressable
+                onPress={() => router.push('/sign-in' as never)}
+                style={styles.inlineActionLink}
+                accessibilityRole="button"
+              >
+                <Text style={[text.bodySm, { color: colors.textSecondary }]}>
+                  Already have an account?{' '}
+                  <Text style={{ color: colors.primary }}>Sign in instead</Text>
+                </Text>
+              </Pressable>
+            )}
           </Animated.View>
         </View>
       </KeyboardAwareScrollView>
@@ -204,5 +231,9 @@ const styles = StyleSheet.create({
   },
   footer: {
     paddingTop: 8,
+  },
+  inlineActionLink: {
+    marginTop:       10,
+    paddingVertical: 2,
   },
 });

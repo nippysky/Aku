@@ -96,7 +96,7 @@ interface AuthState {
   // Actions — Auth
   initialize:              () => Promise<void>;
   createLocalUser:         (name: string, email: string) => Promise<void>;
-  signIn:                  (email: string, name?: string) => Promise<void>;
+  signIn:                  (email: string, name?: string, intent?: 'sign-in' | 'sign-up') => Promise<void>;
   handleAuthCallback:      (jwt: string, user: UserProfile) => Promise<void>;
   signOut:                 () => Promise<void>;
   /**
@@ -322,10 +322,10 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
   },
 
   // ── Sign In: request a magic link email via the server ────────────────
-  signIn: async (email: string, name?: string) => {
+  signIn: async (email: string, name?: string, intent?: 'sign-in' | 'sign-up') => {
     set({ isLoading: true, error: null });
     try {
-      await requestMagicLink(email, name);
+      await requestMagicLink(email, name, intent);
       // After this, the user checks their email and taps the magic link.
       // The deep link opens the app and calls handleAuthCallback().
     } catch (err) {

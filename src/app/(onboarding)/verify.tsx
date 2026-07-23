@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   StyleSheet,
@@ -23,6 +23,11 @@ import { Palette } from '../../theme/colors';
 import { useAuthStore } from '../../store/auth.store';
 import { OnboardingStorage } from '../../lib/onboarding-storage';
 import { verifyMagicOTP, getFriendlyErrorMessage } from '../../lib/api-client';
+
+// Cooldown between resend taps — long enough to discourage hammering the
+// button (and the email provider), short enough not to be annoying if the
+// email is slow to arrive.
+const RESEND_COOLDOWN_SECONDS = 30;
 
 // ─── Envelope + Check SVG ──────────────────────────────────────────────────
 
@@ -76,6 +81,9 @@ export default function VerifyScreen() {
 
   const [resent, setResent]       = useState(false);
   const [resending, setResending] = useState(false);
+  // Starts already running — the initial send from email.tsx just happened,
+  // so a fresh screen shouldn't let the user immediately hammer resend too.
+  const [cooldown, setCooldown]   = useState(RESEND_COOLDOWN_SECONDS);
 
   // OTP toggle state
   const [showOtp, setShowOtp]     = useState(false);
@@ -84,21 +92,32 @@ export default function VerifyScreen() {
   const [verifying, setVerifying] = useState(false);
   const otpInputRef               = useRef<TextInput>(null);
 
+  // Tick the resend cooldown down once a second while it's running.
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const id = setTimeout(() => setCooldown((c) => c - 1), 1000);
+    return () => clearTimeout(id);
+  }, [cooldown]);
+
   const handleResend = useCallback(async () => {
-    if (resending) return;
+    if (resending || cooldown > 0) return;
     setResending(true);
     try {
       const name        = OnboardingStorage.getName() ?? undefined;
       const storedEmail = OnboardingStorage.getEmail() ?? email;
+      // No intent here: by this point the account already exists (created on
+      // the initial send from email.tsx), so the sign-up/sign-in gate on the
+      // server doesn't need to run again — it'd only get in the way.
       await signIn(storedEmail, name);
       setResent(true);
+      setCooldown(RESEND_COOLDOWN_SECONDS);
       setTimeout(() => setResent(false), 4000);
     } catch {
       // Non-fatal — user can try again
     } finally {
       setResending(false);
     }
-  }, [resending, email, signIn]);
+  }, [resending, cooldown, email, signIn]);
 
   const handleToggleOtp = useCallback(() => {
     setShowOtp((v) => !v);
@@ -285,12 +304,17 @@ export default function VerifyScreen() {
         ) : (
           <>
             <Button
-              label={resending ? 'Sending…' : resent ? 'Email sent!' : 'Resend email'}
+              label={
+                resending ? 'Sending…'
+                : resent ? 'Email sent!'
+                : cooldown > 0 ? `Resend email (${cooldown}s)`
+                : 'Resend email'
+              }
               variant="secondary"
               size="lg"
               fullWidth
               loading={resending}
-              disabled={resending}
+              disabled={resending || cooldown > 0}
               onPress={handleResend}
             />
             <Pressable onPress={handleToggleOtp} style={styles.backLink}>

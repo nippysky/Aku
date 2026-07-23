@@ -43,7 +43,12 @@ export function CompactAmountDisplay({
 
   return (
     <View style={[{ alignItems: toFlexAlign(align) }, style]}>
-      <Text style={[styles.main, textStyle]} numberOfLines={1} adjustsFontSizeToFit>
+      <Text
+        style={[styles.main, { fontVariant: ['tabular-nums'] }, textStyle]}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.75}
+      >
         {fmt(kobo)}
       </Text>
     </View>
@@ -63,7 +68,12 @@ export function BannerAmount({ kobo, textStyle, align = 'left' }: BannerAmountPr
 
   return (
     <View style={{ alignItems: toFlexAlign(align) }}>
-      <Text style={[styles.bannerMain, textStyle]} numberOfLines={1} adjustsFontSizeToFit>
+      <Text
+        style={[styles.bannerMain, { fontVariant: ['tabular-nums'] }, textStyle]}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.75}
+      >
         {fmt(kobo)}
       </Text>
     </View>

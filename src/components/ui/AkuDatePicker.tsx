@@ -136,10 +136,30 @@ export function AkuDatePicker({
     end:   endOfMonth(viewMonth),
   }), [viewMonth]);
 
-  const leadingBlanks = useMemo(
-    () => (days.length > 0 ? mondayBased(days[0]!) : 0),
-    [days],
-  );
+  // Explicit week rows (exactly 7 cells each: null = blank leading/trailing
+  // cell, Date = a real day) — computed entirely in JS rather than relying
+  // on flexWrap to auto-break a flat list into rows of 7. flexWrap depends
+  // on the container measuring out to precisely 7 × CELL_SIZE with zero
+  // rounding slack; any layout-timing quirk can silently shift where a row
+  // breaks, which visually misplaces dates under the wrong weekday even
+  // though the underlying date math (mondayBased) is correct. Chunking into
+  // fixed 7-item weeks up front removes that entire class of bug.
+  const weeks = useMemo(() => {
+    if (days.length === 0) return [];
+    const leading = mondayBased(days[0]!);
+    const cells: (Date | null)[] = [
+      ...Array.from({ length: leading }, () => null),
+      ...days,
+    ];
+    // Pad the final week out to a full 7 so every row has exactly 7 cells.
+    while (cells.length % 7 !== 0) cells.push(null);
+
+    const result: (Date | null)[][] = [];
+    for (let i = 0; i < cells.length; i += 7) {
+      result.push(cells.slice(i, i + 7));
+    }
+    return result;
+  }, [days]);
 
   const isDayDisabled = useCallback((d: Date) => {
     if (minDateObj && isBefore(d, minDateObj) && !isSameDay(d, minDateObj)) return true;
@@ -266,43 +286,50 @@ export function AkuDatePicker({
                 ))}
               </View>
 
-              {/* Day grid */}
-              <View style={styles.grid}>
-                {Array.from({ length: leadingBlanks }).map((_, i) => (
-                  <View key={`b${i}`} style={styles.cell} />
-                ))}
-                {days.map((d) => {
-                  const isToday  = isSameDay(d, today);
-                  const isSel    = selected !== null && isSameDay(d, selected);
-                  const disabled = isDayDisabled(d);
-                  return (
-                    <Pressable
-                      key={d.toISOString()}
-                      onPress={() => handleDayPress(d)}
-                      disabled={disabled}
-                      style={styles.cell}
-                    >
-                      <View style={[styles.cellInner, isSel && { backgroundColor: Palette.forest }]}>
-                        <Text
-                          style={[
-                            styles.cellText,
-                            {
-                              fontFamily: font.sansRegular,
-                              fontSize:   fontSize.sm,
-                              color:      disabled ? colors.textTertiary : isSel ? Palette.linen : colors.text,
-                              opacity:    disabled ? 0.35 : 1,
-                            },
-                          ]}
+              {/* Day grid — explicit week rows, each exactly 7 cells wide.
+                  No flexWrap: every row's contents are computed in JS
+                  (see `weeks` above), so there is no layout-engine line-
+                  break to ever land in the wrong place. */}
+              <View style={styles.weekGrid}>
+                {weeks.map((week, weekIdx) => (
+                  <View key={`week-${weekIdx}`} style={styles.weekGridRow}>
+                    {week.map((d, dayIdx) => {
+                      if (!d) {
+                        return <View key={`b-${weekIdx}-${dayIdx}`} style={styles.cell} />;
+                      }
+                      const isToday  = isSameDay(d, today);
+                      const isSel    = selected !== null && isSameDay(d, selected);
+                      const disabled = isDayDisabled(d);
+                      return (
+                        <Pressable
+                          key={toISO(d)}
+                          onPress={() => handleDayPress(d)}
+                          disabled={disabled}
+                          style={styles.cell}
                         >
-                          {format(d, 'd')}
-                        </Text>
-                        {isToday && !isSel && (
-                          <View style={styles.todayDot} />
-                        )}
-                      </View>
-                    </Pressable>
-                  );
-                })}
+                          <View style={[styles.cellInner, isSel && { backgroundColor: Palette.forest }]}>
+                            <Text
+                              style={[
+                                styles.cellText,
+                                {
+                                  fontFamily: font.sansRegular,
+                                  fontSize:   fontSize.sm,
+                                  color:      disabled ? colors.textTertiary : isSel ? Palette.linen : colors.text,
+                                  opacity:    disabled ? 0.35 : 1,
+                                },
+                              ]}
+                            >
+                              {format(d, 'd')}
+                            </Text>
+                            {isToday && !isSel && (
+                              <View style={styles.todayDot} />
+                            )}
+                          </View>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                ))}
               </View>
 
               {/* Confirm */}
@@ -447,16 +474,17 @@ const styles = StyleSheet.create({
     marginBottom:  4,
   },
   weekLabel: {
-    width:     CELL_SIZE,
+    flex:      1,
     textAlign: 'center',
   },
-  grid: {
+  weekGrid: {
+    marginBottom: 20,
+  },
+  weekGridRow: {
     flexDirection: 'row',
-    flexWrap:      'wrap',
-    marginBottom:  20,
   },
   cell: {
-    width:          CELL_SIZE,
+    flex:           1,
     height:         CELL_SIZE,
     alignItems:     'center',
     justifyContent: 'center',

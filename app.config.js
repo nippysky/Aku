@@ -27,12 +27,6 @@ module.exports = {
       ITSAppUsesNonExemptEncryption: false,
       NSFaceIDUsageDescription:
         'Akù uses Face ID to keep your financial data secure and unlock the app instantly.',
-      NSCameraUsageDescription:
-        'Akù uses the camera so you can take a profile photo.',
-      NSPhotoLibraryUsageDescription:
-        'Akù needs access to your photo library so you can set a profile photo.',
-      NSPhotoLibraryAddUsageDescription:
-        'Akù saves your profile photo to your library.',
       UIBackgroundModes: ['fetch', 'remote-notification'],
     },
   },
@@ -51,7 +45,6 @@ module.exports = {
       'android.permission.RECEIVE_BOOT_COMPLETED',
       'android.permission.VIBRATE',
       'android.permission.POST_NOTIFICATIONS',
-      'android.permission.CAMERA',
       // NOTE: SCHEDULE_EXACT_ALARM deliberately NOT requested — Google Play
       // restricts it to alarm/calendar apps. Inexact scheduling is fine for
       // bill reminders and costs nothing in review.
@@ -94,15 +87,6 @@ module.exports = {
       },
     ],
     'expo-sharing',
-    [
-      'expo-image-picker',
-      {
-        photosPermission:
-          'Akù needs access to your photo library so you can set a profile photo.',
-        cameraPermission:
-          'Akù needs access to your camera so you can take a profile photo.',
-      },
-    ],
   ],
   experiments: {
     typedRoutes: true,

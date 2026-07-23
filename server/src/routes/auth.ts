@@ -45,20 +45,46 @@ function getSessionExpiry(): Date {
 // ─── POST /api/auth/magic-link ────────────────────────────────────────────────
 
 router.post('/magic-link', async (c) => {
-  let body: { email?: string; name?: string };
+  let body: { email?: string; name?: string; intent?: 'sign-in' | 'sign-up' };
   try {
     body = await c.req.json();
   } catch {
     return c.json({ error: 'Invalid JSON body' }, 400);
   }
 
-  const email = body.email?.trim().toLowerCase();
+  const email  = body.email?.trim().toLowerCase();
+  const intent = body.intent;
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return c.json({ error: 'Valid email is required' }, 400);
   }
 
-  // Find or create the user — track whether this is a brand-new account.
   let [user] = await db.select().from(users).where(eq(users.email, email)).limit(1);
+
+  // ── Security hardening ──────────────────────────────────────────────────
+  // Previously ANY email — known or not — silently created an account and
+  // signed the requester in. That meant typing a stranger's email into
+  // "Sign in" logged you into a brand-new, empty account under their name,
+  // which looks like (and functionally is) an account-enumeration/identity
+  // hole. Now the client tells us which flow it's in, and we enforce it:
+  //   sign-in → email MUST already exist
+  //   sign-up → email must NOT already exist
+  // No intent (e.g. a resend from verify.tsx, or Ụgwọ's Connect-Akù flow
+  // acting as a second client of this same API) falls through to the
+  // original find-or-create behavior, unchanged.
+  if (intent === 'sign-in' && !user) {
+    return c.json({
+      error: "We couldn't find an account with that email. Try signing up instead.",
+      code:  'account_not_found',
+    }, 404);
+  }
+  if (intent === 'sign-up' && user) {
+    return c.json({
+      error: 'That email is already registered. Try signing in instead.',
+      code:  'account_exists',
+    }, 409);
+  }
+
+  // Find or create the user — track whether this is a brand-new account.
   let isNewUser = false;
 
   if (!user) {

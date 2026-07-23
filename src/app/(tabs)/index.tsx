@@ -551,22 +551,34 @@ export default function HomeScreen() {
                 marginTop:     4,
               }}
             />
-            <View style={{ flexDirection: 'row', gap: 16, marginTop: 12 }}>
-              <View>
-                <Text style={[text.caption, { color: 'rgba(250,250,248,0.55)' }]}>Due this week</Text>
+            {/* Each column gets an equal, bounded share of the row — without
+                flex:1 here, BannerAmount's adjustsFontSizeToFit has no width
+                to shrink against and the row just overflows the card at
+                large figures (confirmed: billions-scale amounts cut off the
+                last column entirely). */}
+            <View style={{ flexDirection: 'row', gap: 12, marginTop: 12 }}>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={[text.caption, { color: 'rgba(250,250,248,0.55)' }]} numberOfLines={1}>
+                  Due this week
+                </Text>
                 <BannerAmount kobo={dueSoonTotal} textStyle={[text.bodyMedium, { color: Palette.gold }]} />
               </View>
               <View style={{ width: 1, backgroundColor: 'rgba(250,250,248,0.15)' }} />
-              <View>
-                <Text style={[text.caption, { color: 'rgba(250,250,248,0.55)' }]}>Spent today</Text>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={[text.caption, { color: 'rgba(250,250,248,0.55)' }]} numberOfLines={1}>
+                  Spent today
+                </Text>
                 <BannerAmount kobo={spentToday} textStyle={[text.bodyMedium, { color: Palette.linen }]} />
               </View>
               <View style={{ width: 1, backgroundColor: 'rgba(250,250,248,0.15)' }} />
               <Pressable
                 onPress={() => router.push({ pathname: '/(tabs)/expenses', params: { segment: 'income' } } as never)}
                 hitSlop={8}
+                style={{ flex: 1, minWidth: 0 }}
               >
-                <Text style={[text.caption, { color: 'rgba(250,250,248,0.55)' }]}>Earned · Month</Text>
+                <Text style={[text.caption, { color: 'rgba(250,250,248,0.55)' }]} numberOfLines={1}>
+                  Earned · Month
+                </Text>
                 <BannerAmount kobo={incomeThisMonth} textStyle={[text.bodyMedium, { color: '#A5F3C0' }]} />
               </Pressable>
             </View>
@@ -609,9 +621,15 @@ export default function HomeScreen() {
             label="Net · Month"
             value={
               <Text
-                style={{ fontFamily: font.sansSemiBold, fontSize: fontSize.md, color: netThisMonth >= 0 ? colors.success : colors.danger }}
+                style={{
+                  fontFamily: font.sansSemiBold,
+                  fontSize:   fontSize.md,
+                  color:      netThisMonth >= 0 ? colors.success : colors.danger,
+                  fontVariant: ['tabular-nums'],
+                }}
                 numberOfLines={1}
                 adjustsFontSizeToFit
+                minimumFontScale={0.75}
               >
                 {netThisMonth >= 0 ? '+' : '−'}{fmt(Math.abs(netThisMonth))}
               </Text>
@@ -757,7 +775,10 @@ export default function HomeScreen() {
                         {exp.date}
                       </Text>
                     </View>
-                    <Text style={[text.amount, { color: colors.text }]}>
+                    <Text
+                      style={[text.amount, { color: colors.text, fontVariant: ['tabular-nums'] }, styles.expenseAmount]}
+                      numberOfLines={1}
+                    >
                       {fmt(exp.amount)}
                     </Text>
                   </View>
@@ -877,6 +898,12 @@ const styles = StyleSheet.create({
   expenseCenter: {
     flex:        1,
     marginRight: 10,
+  },
+  // Never let the figure itself shrink or wrap — if the row gets tight
+  // (long description + a large amount), the description truncates first.
+  // Matches the pattern already used by BillRow/ExpenseRow/IncomeRow.
+  expenseAmount: {
+    flexShrink: 0,
   },
 
   // Goals — bleed carousel to screen edge
