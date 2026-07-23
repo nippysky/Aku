@@ -22,9 +22,27 @@
   overflow: hidden;
   position: relative;
 }
+/* Slow-drifting ambient glow behind the hero content — decorative only,
+   purely CSS, disabled under prefers-reduced-motion via the global rule
+   in styles.css (`* { animation: none !important; }`). */
+.hero::before {
+  content: '';
+  position: absolute;
+  top: -20%; right: -10%;
+  width: 620px; height: 620px;
+  background: radial-gradient(circle, rgba(201,169,106,0.16) 0%, rgba(201,169,106,0) 70%);
+  filter: blur(10px);
+  pointer-events: none;
+  animation: heroGlowDrift 16s ease-in-out infinite alternate;
+}
+@keyframes heroGlowDrift {
+  0%   { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(-40px, 30px) scale(1.08); }
+}
 .hero-inner {
   max-width: 1120px; margin: 0 auto;
   display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 40px; align-items: center;
+  position: relative; z-index: 1;
 }
 .hero .kicker {
   color: var(--gold); font-size: 12.5px; letter-spacing: 3px;
@@ -57,8 +75,27 @@
   height: 500px; display: flex; flex-direction: column;
   font-size: 11px;
 }
-.phone.back  { right: 150px; top: 40px; transform: rotate(-7deg); opacity: 0.9; }
-.phone.front { right: 0; top: 0; transform: rotate(4deg); z-index: 2; }
+.phone.back  {
+  right: 150px; top: 40px; opacity: 0.9;
+  animation: floatBack 6.5s ease-in-out infinite;
+}
+.phone.front {
+  right: 0; top: 0; z-index: 2;
+  animation: floatFront 5.5s ease-in-out infinite; animation-delay: .2s;
+}
+@keyframes floatBack {
+  0%, 100% { transform: rotate(-7deg) translateY(0); }
+  50%      { transform: rotate(-7deg) translateY(-14px); }
+}
+@keyframes floatFront {
+  0%, 100% { transform: rotate(4deg) translateY(0); }
+  50%      { transform: rotate(4deg) translateY(-10px); }
+}
+/* Subtle lift on hover — the whole stack rises slightly and the shadow
+   deepens, a common "hero product shot" touch on modern marketing sites. */
+.phones { transition: opacity .8s cubic-bezier(.16,.8,.24,1), transform .4s cubic-bezier(.16,.8,.24,1); }
+.phones:hover { transform: translateY(-4px); }
+.phones:hover .phone { box-shadow: 0 48px 96px rgba(0,0,0,0.5); }
 
 /* mock UI bits */
 .m-head { padding: 18px 16px 10px; }
@@ -171,21 +208,17 @@
 .final p { color: var(--ink-soft); margin-bottom: 32px; }
 .final .store-row { justify-content: center; }
 
+/* Phone mockups are a nice-to-have flourish, not core content — below
+   tablet width they're hidden entirely rather than shrunk, so mobile
+   visitors get the full-width hero copy instead of a cramped illustration. */
 @media (max-width: 860px) {
   .hero-inner { grid-template-columns: 1fr; }
-  .phones { height: 470px; margin-top: 12px; }
-  .phone { width: 220px; }
-  .phone .screen { height: 440px; }
-  .phone.back { right: auto; left: 8%; }
-  .phone.front { right: 8%; }
+  .phones { display: none; }
 }
 @media (max-width: 480px) {
   .hero { padding-top: 36px; }
   .hero h1 { font-size: clamp(32px, 9vw, 44px); letter-spacing: -1px; }
   .hero .sub { max-width: none; }
-  .phones { height: 400px; }
-  .phone { width: 172px; }
-  .phone .screen { height: 350px; font-size: 10px; }
   .hero-trust { gap: 20px 28px; padding-bottom: 40px; }
   .store-btn { padding: 9px 16px 9px 12px; gap: 9px; }
   .store-btn .store-txt strong { font-size: 15px; }
@@ -280,7 +313,7 @@
           <div class="m-tabbar">
             <div class="m-tab"><div class="dot"></div>Home</div>
             <div class="m-tab"><div class="dot"></div>Bills</div>
-            <div class="m-fab">⌂</div>
+            <div class="m-fab">💳</div>
             <div class="m-tab"><div class="dot"></div>Goals</div>
             <div class="m-tab"><div class="dot"></div>More</div>
           </div>

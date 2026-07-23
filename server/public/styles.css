@@ -135,6 +135,7 @@ nav .links a.cta:hover { background: var(--forest-mut); transform: translateY(-1
 @media (prefers-reduced-motion: reduce) {
   .reveal { transition: none !important; opacity: 1 !important; transform: none !important; }
   html { scroll-behavior: auto; }
+  * { animation: none !important; }
 }
 
 /* ── Shared page scaffolding (legal pages) ── */
