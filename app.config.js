@@ -65,6 +65,7 @@ module.exports = {
     'expo-local-authentication',
     'expo-secure-store',
     'expo-sqlite',
+    'expo-web-browser',
     [
       'expo-notifications',
       {
