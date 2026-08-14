@@ -12,6 +12,9 @@
       },
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://aku.nippysky.com"
       }
     },
     "development-device": {
@@ -22,6 +25,9 @@
       },
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://aku.nippysky.com"
       }
     },
     "preview": {
@@ -32,12 +38,18 @@
       },
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://aku.nippysky.com"
       }
     },
     "production": {
       "channel": "production",
       "ios": {
         "simulator": false
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://aku.nippysky.com"
       }
     }
   },
