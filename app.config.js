@@ -32,6 +32,12 @@ module.exports = {
   },
   android: {
     package: 'com.nippysky.aku',
+    // Must be bumped by 1 on every new production build — Google Play
+    // rejects re-uploads that reuse a version code already seen for this
+    // app, even across different tracks (internal/closed/open/production).
+    // /android is gitignored and regenerated fresh each build (CNG), so
+    // this can't be tracked automatically — increment it by hand.
+    versionCode: 2,
     googleServicesFile: './google-services.json',
     adaptiveIcon: {
       foregroundImage: './assets/images/android-icon-foreground.png',
