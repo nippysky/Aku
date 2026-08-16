@@ -53,7 +53,7 @@ const FAQ_DATA: FAQCategory[] = [
     items: [
       {
         q: "What is Aku?",
-        a: "Aku is a personal finance app that helps you track expenses, manage bills, set savings goals, and understand your money. Everything syncs securely across your devices.",
+        a: "\"Akù\" is Igbo for wealth. It's a personal finance app that helps you track expenses, manage bills, set savings goals, and understand your money — without judgment. Everything syncs securely across your devices. Its sister app, Ụgwọ (Igbo for debt), handles the money that moves between people — loans, IOUs, who owes who.",
       },
       {
         q: "How do I log my first expense?",

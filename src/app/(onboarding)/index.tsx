@@ -132,8 +132,9 @@ export default function WelcomeScreen() {
 
         <Animated.View style={[styles.textGroup, textAnimStyle]}>
           <Text style={styles.wordmark}>Akù</Text>
+          <Text style={styles.meaning}>IGBO FOR WEALTH</Text>
           <Text style={styles.tagline}>
-            Plan your money.{'\n'}Own your future.
+            No judgment.{'\n'}Just clarity.
           </Text>
         </Animated.View>
       </View>
@@ -194,6 +195,13 @@ const styles = StyleSheet.create({
     fontSize:      FontSize['4xl'],
     color:         Palette.gold,
     letterSpacing: -1,
+  },
+  meaning: {
+    fontFamily:    FontFamily.sansSemiBold,
+    fontSize:      10,
+    color:         'rgba(212,175,55,0.65)',
+    letterSpacing: 2.5,
+    marginTop:     -6,
   },
   tagline: {
     fontFamily:  FontFamily.sansRegular,

@@ -538,18 +538,25 @@ export default function HomeScreen() {
           />
           {/* Content — sits above the overlay */}
           <View style={{ position: 'relative' }}>
+            {/* Leads with net position (income − expenses this month) rather than
+                bills outstanding. Someone opening the app worried about their
+                spending shouldn't be greeted by a wall of what they owe before
+                anything positive — the amount they're actually short/ahead by
+                is a fairer, less anxiety-inducing first number to see. Bills
+                are still one tap away in the summary grid right below. */}
             <Text style={[text.caption, { color: 'rgba(250,250,248,0.65)', letterSpacing: 1 }]}>
-              BILLS OUTSTANDING
+              NET · THIS MONTH
             </Text>
             <BannerAmount
-              kobo={allUnpaidTotal}
+              kobo={Math.abs(netThisMonth)}
               textStyle={{
                 fontFamily:    font.displayLight,
                 fontSize:      fontSize['3xl'],
-                color:         Palette.linen,
+                color:         netThisMonth >= 0 ? '#A5F3C0' : '#F0A196',
                 letterSpacing: -1,
                 marginTop:     4,
               }}
+              prefix={netThisMonth >= 0 ? '+' : '−'}
             />
             {/* Each column gets an equal, bounded share of the row — without
                 flex:1 here, BannerAmount's adjustsFontSizeToFit has no width

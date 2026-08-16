@@ -45,15 +45,25 @@ function getSessionExpiry(): Date {
 // ─── POST /api/auth/magic-link ────────────────────────────────────────────────
 
 router.post('/magic-link', async (c) => {
-  let body: { email?: string; name?: string; intent?: 'sign-in' | 'sign-up' };
+  let body: { email?: string; name?: string; intent?: 'sign-in' | 'sign-up'; purpose?: 'app_link' };
   try {
     body = await c.req.json();
   } catch {
     return c.json({ error: 'Invalid JSON body' }, 400);
   }
 
-  const email  = body.email?.trim().toLowerCase();
-  const intent = body.intent;
+  const email   = body.email?.trim().toLowerCase();
+  const intent  = body.intent;
+  // 'app_link' = another NIPPYSKY app (currently Ụgwọ's Connect-Akù flow) is
+  // requesting this code on the user's behalf. That client can only accept a
+  // typed code — it has no way to receive the browser redirect from the
+  // clickable link. Sending the normal link+button email invites the exact
+  // bug this fixes: tapping the big "Sign in to Akù" button (the natural
+  // first instinct) opens the Akù app instead of returning to Ụgwọ, AND
+  // — because the link and the OTP share one database row — consuming the
+  // link marks that row used, silently invalidating the OTP too. So for this
+  // purpose we skip the clickable link entirely and send a code-only email.
+  const purpose = body.purpose;
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return c.json({ error: 'Valid email is required' }, 400);
   }
@@ -125,7 +135,7 @@ router.post('/magic-link', async (c) => {
   const verifyUrl = `${apiUrl}/api/auth/magic-link/verify?token=${rawToken}`;
 
   try {
-    await sendMagicLinkEmail({ to: email, name: user.name, url: verifyUrl, otpCode });
+    await sendMagicLinkEmail({ to: email, name: user.name, url: verifyUrl, otpCode, purpose });
   } catch (err) {
     console.error('[auth] Failed to send magic link email:', err);
     return c.json({ error: 'Failed to send email. Please try again.' }, 500);

@@ -175,8 +175,8 @@ const SLIDES: Slide[] = [
   {
     key:          'track',
     Illustration: IllustrationTrack,
-    headline:     'Everything in one place',
-    body:         'Log expenses, bills, and income in seconds. No spreadsheets. No guesswork. Just clarity.',
+    headline:     'See it all, no shame',
+    body:         'Log expenses, bills, and income in seconds. No lectures, no spreadsheets — just an honest picture of where your money goes.',
   },
   {
     key:          'goals',

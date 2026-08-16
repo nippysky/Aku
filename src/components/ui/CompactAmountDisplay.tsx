@@ -61,9 +61,13 @@ interface BannerAmountProps {
   kobo:       number;
   textStyle?: StyleProp<TextStyle>;
   align?:     AlignShorthand;
+  /** Optional literal prefix (e.g. '+' / '−') for signed figures — pass the
+   *  absolute value as `kobo` and the sign here, rather than a negative kobo,
+   *  so the currency symbol still reads naturally (₦500, not ₦-500). */
+  prefix?:    string;
 }
 
-export function BannerAmount({ kobo, textStyle, align = 'left' }: BannerAmountProps) {
+export function BannerAmount({ kobo, textStyle, align = 'left', prefix = '' }: BannerAmountProps) {
   const { fmt } = useCurrencyFormat();
 
   return (
@@ -74,7 +78,7 @@ export function BannerAmount({ kobo, textStyle, align = 'left' }: BannerAmountPr
         adjustsFontSizeToFit
         minimumFontScale={0.75}
       >
-        {fmt(kobo)}
+        {prefix}{fmt(kobo)}
       </Text>
     </View>
   );
