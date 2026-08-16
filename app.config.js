@@ -32,12 +32,10 @@ module.exports = {
   },
   android: {
     package: 'com.nippysky.aku',
-    // Must be bumped by 1 on every new production build — Google Play
-    // rejects re-uploads that reuse a version code already seen for this
-    // app, even across different tracks (internal/closed/open/production).
-    // /android is gitignored and regenerated fresh each build (CNG), so
-    // this can't be tracked automatically — increment it by hand.
-    versionCode: 2,
+    // versionCode is intentionally NOT set here — eas.json's
+    // "appVersionSource": "remote" + the production profile's
+    // "autoIncrement": true mean EAS tracks and bumps it automatically
+    // on every `eas build --profile production`. No manual edits needed.
     googleServicesFile: './google-services.json',
     adaptiveIcon: {
       foregroundImage: './assets/images/android-icon-foreground.png',
