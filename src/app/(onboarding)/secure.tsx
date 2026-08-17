@@ -25,6 +25,7 @@ import * as LocalAuthentication from 'expo-local-authentication';
 import { ScanFace, Fingerprint, ShieldCheck, ShieldAlert } from 'lucide-react-native';
 import { LoadingScreen } from '../../components/ui';
 import { useAuthStore } from '../../store';
+import { seedDemoDataIfNeeded } from '../../lib/demo-seed';
 import { Palette } from '../../theme/colors';
 import { FontFamily, FontSize } from '../../theme/typography';
 import { Spacing, Layout } from '../../theme/spacing';
@@ -49,7 +50,7 @@ export default function SecureScreen() {
   const params = useLocalSearchParams<{ returning?: string }>();
   const isReturning = params.returning === '1';
 
-  const { setupDeviceSecurity, setupBiometric, completeOnboardingAndUnlock } = useAuthStore();
+  const { setupDeviceSecurity, setupBiometric, completeOnboardingAndUnlock, user } = useAuthStore();
 
   const [phase, setPhase]         = useState<Phase>('setting-up');
   const [hasDeviceLock, setHasDeviceLock] = useState(false);
@@ -81,6 +82,13 @@ export default function SecureScreen() {
         }
 
         if (cancelled) return;
+
+        // First-ever demo-account sign-in: populate sample data so App
+        // Store / Play Store reviewers see a working app, not an empty one.
+        // No-op for every real user and every later demo login.
+        if (!isReturning && user) {
+          await seedDemoDataIfNeeded(user.id, user.email);
+        }
 
         if (isReturning) {
           // Returning user — mark onboarding done + unlock, restore data, enter.
