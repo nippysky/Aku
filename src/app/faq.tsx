@@ -133,11 +133,11 @@ const FAQ_DATA: FAQCategory[] = [
     items: [
       {
         q: "What kinds of notifications does Aku send?",
-        a: "Aku sends bill due date reminders, savings goal milestones, hourly logging nudges through the day, and personalised financial insights.",
+        a: "Aku sends bill due date reminders, savings goal milestones, auto-log confirmations for scheduled items, and personalised financial insights or reminder nudges.",
       },
       {
         q: "How do I turn off certain notifications?",
-        a: "Go to More > Notification Settings. You can toggle each category on or off independently — bills, goals, and daily reminders each have their own switch.",
+        a: "There isn't a master Notification Settings screen right now. To stop notifications entirely, use your device's notification settings. For bills, you can still adjust reminder timings on each bill when creating or editing it.",
       },
     ],
   },
