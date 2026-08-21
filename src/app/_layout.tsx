@@ -67,7 +67,7 @@ export default function RootLayout() {
     PlusJakartaSans_700Bold:     require('../../assets/fonts/PlusJakartaSans_700Bold.ttf'),
   });
 
-  // ── Database + Auth + Notifications init ─────────────────────────────
+  // ── Database + Auth init ──────────────────────────────────────────────
   useEffect(() => {
     (async () => {
       await initializeDatabase();
@@ -75,18 +75,32 @@ export default function RootLayout() {
       // is applied from the very first render after cold start.
       await loadSettings();
       await initialize();
-
-      // Request notification permissions, set up Android channels, and
-      // schedule the repeating daily digest. All notifications are always
-      // enabled — no user-facing toggle. Safe to call on every cold start —
-      // all three are idempotent.
-      const granted = await notificationService.requestPermissions();
-      if (granted) {
-        await notificationService.setupNotificationChannels();
-        await notificationService.scheduleDailyDigest(8, 0);
-      }
     })();
   }, []);
+
+  // ── Daily digest: gated on actually being signed in ───────────────────
+  // The digest was previously scheduled unconditionally on every cold start,
+  // so it kept firing "tap to see your financial snapshot" even with no
+  // signed-in account behind it (logged out, never signed up, or — as
+  // happened during testing — server data wiped without going through the
+  // app's own delete-account flow, which is the only path that calls
+  // cancelDailyDigest()). Re-run whenever auth state settles: schedule only
+  // when there's a real user, cancel otherwise so no dangling notification
+  // survives a state where there's nothing behind it.
+  useEffect(() => {
+    if (!isInitialized) return;
+    (async () => {
+      if (user) {
+        const granted = await notificationService.requestPermissions();
+        if (granted) {
+          await notificationService.setupNotificationChannels();
+          await notificationService.scheduleDailyDigest(8, 0);
+        }
+      } else {
+        await notificationService.cancelDailyDigest();
+      }
+    })();
+  }, [isInitialized, user]);
 
   // ── Hide splash when ready ───────────────────────────────────────────
   useEffect(() => {

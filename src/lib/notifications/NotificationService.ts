@@ -274,8 +274,8 @@ class NotificationService {
     await Notifications.scheduleNotificationAsync({
       identifier: 'aku_daily_digest',
       content: {
-        title: 'Your Akù daily summary',
-        body:  'Tap to see your financial snapshot for today.',
+        title: 'Your Akù check-in',
+        body:  "Tap to see how today's spending is shaping up.",
         sound: true,
         data: {
           screen: 'home',
