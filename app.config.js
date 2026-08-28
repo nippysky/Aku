@@ -70,6 +70,7 @@ module.exports = {
     'expo-secure-store',
     'expo-sqlite',
     'expo-web-browser',
+    'expo-image',
     [
       'expo-notifications',
       {
