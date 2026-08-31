@@ -35,8 +35,18 @@ yarn-error.*
 .env.*
 .env*.local
 
+# Firebase config — project-specific credentials, never commit
+google-services.json
+GoogleService-Info.plist
+
 # Google Play service account key — grants Play Console API access, never commit
 google-play-service-account.json
+
+# Local AI-assistant tooling — dev-machine only, not part of the project
+.claude/
+CLAUDE.md
+AGENTS.md
+scripts/AGENTS.md
 
 # typescript
 *.tsbuildinfo

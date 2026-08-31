@@ -1,56 +1,72 @@
-# Welcome to your Expo app 👋
+# Akù — Wealth. Tracked. Understood.
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+A personal finance tracker by **NIPPYSKY**. Sibling product to
+[Ụgwọ](https://ugwo.nippysky.com) — same DNA: self-logged data, zero bank
+connections, end-to-end encrypted, local-first, reminder-driven.
 
-## Get started
+**We can't see your money. Nobody can.**
 
-1. Install dependencies
+## Layout
 
-   ```bash
-   npm install
-   ```
-
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
-
-```bash
-npm run reset-project
+```
+.
+├── src/                 # Expo app (SDK 56, expo-router, TypeScript strict)
+│   ├── app/             #   screens (tabs, expenses, income, bills, goals, onboarding, auth)
+│   ├── components/      #   UI kit + finance components (sheets, charts)
+│   ├── lib/             #   crypto, sqlite (drizzle), sync engine, notifications
+│   ├── store/           #   zustand stores (auth, expenses, income, bills, goals, sync, ui)
+│   └── theme/           #   design tokens (Fraunces + Plus Jakarta Sans)
+├── server/              # aku-api (Hono + Drizzle + Postgres + Redis + Resend)
+│   ├── src/             #   auth (magic link + OTP), sync, DEK escrow, notifications
+│   ├── public/          #   marketing site aku.nippysky.com (+ privacy/terms/delete-account)
+│   ├── nginx-aku.conf   #   nginx site
+│   ├── ecosystem.config.cjs
+│   └── DEPLOY.md        #   step-by-step droplet deployment
+└── assets/              # icons, splash, fonts (brand assets)
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+## Architecture in one paragraph
 
-### Other setup steps
+The SQLite database on the phone is the source of truth. Every record —
+expenses, income, bills, goals — is encrypted on-device (AES-256-GCM) with a
+per-account DEK before sync; the server stores ciphertext plus the DEK
+wrapped by a server master key, so a returning user on a new device restores
+by email sign-in alone. Reminders (bill due dates, daily check-ins) are Expo
+local notifications scheduled on-device — the server can't read any of it.
+Real-time cross-device sync rides a WebSocket nudge (Redis pub/sub on the
+server), with foreground pull as the safety net. Ụgwọ can optionally mirror
+debts and repayments in as expense/income entries under a Loans category —
+one-way, opt-in, and gated on matching currencies.
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+## Development
 
-## Learn more
+```bash
+npm install
+cp .env.example .env        # set EXPO_PUBLIC_API_URL
+npx expo start              # app (use a dev build — expo-sqlite etc. need native code)
 
-To learn more about developing your project with Expo, look at the following resources:
+cd server
+npm install
+cp .env.example .env        # dev values
+npm run dev                 # API on :3000
+```
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+## Builds & stores
 
-## Join the community
+- `npx eas init` once, paste the project ID into `app.config.js` (two spots).
+- `eas build --profile production` — profiles are in `eas.json`.
+- Store URLs: privacy `https://aku.nippysky.com/privacy`, deletion
+  `https://aku.nippysky.com/delete-account`.
+- iOS export compliance is pre-answered (`ITSAppUsesNonExemptEncryption=false`
+  — standard encryption only).
+- A reviewer demo login is supported via `DEMO_EMAIL`/`DEMO_OTP` server env.
 
-Join our community of developers creating universal apps.
+## Deployment
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+See [server/DEPLOY.md](server/DEPLOY.md) — same droplet as ugwo-api, own
+Postgres DB (`aku_db`), own PM2 process (`aku-api`), own nginx site
+(`aku.nippysky.com`).
+
+---
+
+Akù · A venture by NIPPYSKY · By the makers of Ụgwọ
