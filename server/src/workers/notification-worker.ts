@@ -510,7 +510,7 @@ const HOURLY_POOLS: Record<number, Array<{ title: string; body: string }>> = {
   ],
   13: [
     { title: 'Post-lunch check-in ✅',         body: 'Lunch logged? Income landed today? Keep your picture complete.' },
-    { title: 'The 1pm audit 🕐',               body: 'A quick glance at today\'s spending now beats a shock at month-end.' },
+    { title: 'The midday audit 🕐',            body: 'A quick glance at today\'s spending now beats a shock at month-end.' },
     { title: 'Stay on top of it 💼',           body: 'Money moves fast in the afternoon. Log as you go and nothing escapes.' },
   ],
   14: [
@@ -519,12 +519,12 @@ const HOURLY_POOLS: Record<number, Array<{ title: string; body: string }>> = {
     { title: 'Keep the streak alive 🔥',       body: 'Consistent logging is the single best money habit. Add anything new.' },
   ],
   15: [
-    { title: '3pm — still in control? 🕒',     body: 'Afternoon spending sneaks up quietly. Log anything new since lunch.' },
+    { title: 'Afternoon check-in 🕒',          body: 'Still in control? Afternoon spending sneaks up quietly — log anything new since lunch.' },
     { title: 'Small buys, big picture 🧩',     body: 'Airtime, snacks, transport — the small stuff shapes the month. Log it.' },
     { title: 'Your money, your rules 👑',      body: 'Owning your finances starts with knowing them. Quick log check.' },
   ],
   16: [
-    { title: 'The 4 o\'clock look 👁️',        body: 'Take a 20-second look at today\'s numbers. Awareness is the whole game.' },
+    { title: 'The late-afternoon look 👁️',    body: 'Take a 20-second look at today\'s numbers. Awareness is the whole game.' },
     { title: 'Before the evening rush 🕓',     body: 'Log your afternoon spending now — evenings have a way of getting busy.' },
     { title: 'Money clarity hour 💡',          body: 'A quick log now means tonight\'s picture is already complete.' },
   ],
@@ -536,7 +536,7 @@ const HOURLY_POOLS: Record<number, Array<{ title: string; body: string }>> = {
   18: [
     { title: 'Dinner plans? 🍲',               body: 'Whether you are cooking or ordering, log the spend while it is happening.' },
     { title: 'Evening check-in 🌆',            body: 'The day is winding down. Is everything you spent and earned today logged?' },
-    { title: '6pm money moment 🕕',            body: 'A complete day of logs is a beautiful thing. You are almost there.' },
+    { title: 'Evening money moment 🕕',        body: 'A complete day of logs is a beautiful thing. You are almost there.' },
   ],
   // 19:00 is the personalised insight slot — handled by pickDailyMessage()
   20: [

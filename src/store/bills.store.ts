@@ -97,6 +97,20 @@ interface BillsState {
    * Safe to call concurrently — a module-level guard prevents double-processing.
    */
   processAutoPay: (userId: string) => Promise<{ name: string; amount: number }[]>;
+  /**
+   * Recompute every unpaid bill's reminder times against the device's CURRENT
+   * local timezone. Call on every app foreground (see _layout.tsx).
+   *
+   * Bill reminders are one-off `DATE`-type notification triggers — expo-notifications
+   * has no cross-platform "calendar day + local hour" trigger that adapts to a
+   * timezone change after scheduling (Android has no CALENDAR trigger type at
+   * all). A `DATE` trigger bakes in a fixed instant computed from the device's
+   * timezone AT SCHEDULING TIME; if the bill was added before a trip (e.g.
+   * Lagos → Stockholm) and the reminder hasn't fired yet, re-running the same
+   * "N days before, 9am" math here recomputes it against wherever the user's
+   * clock currently is, self-correcting the drift on next foreground.
+   */
+  refreshAllReminders: () => void;
 }
 
 // ─── Store ────────────────────────────────────────────────────────────────────
@@ -484,6 +498,14 @@ export const useBillsStore = create<BillsState>()((set, get) => ({
   },
 
   clearError: () => set({ error: null }),
+
+  refreshAllReminders: () => {
+    const symbol = useUIStore.getState().currency.symbol;
+    for (const bill of get().bills) {
+      if (bill.isPaid) continue;
+      notificationService.scheduleBillReminders(bill, symbol).catch(() => {});
+    }
+  },
 }));
 
 // ─── Private helper: set bills + recompute computed slices ────────────────────

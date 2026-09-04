@@ -37,6 +37,12 @@ export default function RootLayout() {
 
   // Track whether we've registered the push token for this session
   const pushTokenRegistered = useRef(false);
+  // Cached token + the IANA timezone last sent to the server with it — lets
+  // the foreground handler re-send just the timezone (cheap) when it drifts
+  // from what the server has on file (e.g. the user travelled). See the
+  // "Push token registration" and foreground-handler effects below.
+  const pushTokenRef = useRef<string | null>(null);
+  const lastTimezoneRef = useRef<string | null>(null);
 
   // Track the last calendar day recurring items were processed.
   // Used by the foreground AppState handler to catch midnight crossovers
@@ -172,6 +178,35 @@ export default function RootLayout() {
           setBadgeCountAsync(0).catch(() => {});
         });
 
+        // Recompute every unpaid bill's reminder times against the phone's
+        // CURRENT timezone — self-corrects reminders scheduled before a trip
+        // (e.g. Lagos → Stockholm) so "9am" always means 9am wherever the
+        // user's clock currently is. See refreshAllReminders's doc comment
+        // in bills.store.ts for why this can't be solved with a
+        // timezone-adaptive trigger type instead (Android has none).
+        if (user && !isLocked) {
+          useBillsStore.getState().refreshAllReminders();
+        }
+
+        // Re-sync the server-side push timezone if it drifted since we last
+        // told the server — this is the actual root cause of notifications
+        // arriving at the "wrong" local hour while travelling. The server's
+        // hourly engagement worker sends push notifications based solely on
+        // the timezone string stored in push_tokens; that column only ever
+        // got set once, at first registration each session, so a user who
+        // travels without signing out (the common case) kept getting pushes
+        // timed for wherever they registered from. Cheap no-op when nothing
+        // has changed since the check is a plain string compare.
+        if (Device.isDevice && session && user && !isLocked && pushTokenRef.current) {
+          const currentTz = Intl.DateTimeFormat().resolvedOptions().timeZone ?? null;
+          if (currentTz && currentTz !== lastTimezoneRef.current) {
+            const platform: 'ios' | 'android' = Platform.OS === 'android' ? 'android' : 'ios';
+            registerPushToken(pushTokenRef.current, platform)
+              .then(() => { lastTimezoneRef.current = currentTz; })
+              .catch(() => {});
+          }
+        }
+
         // Midnight crossover: if the date changed since last recurring-process run,
         // run processOverdue again so items due today get logged even if the app
         // stayed open all night (no unlock transition).
@@ -219,6 +254,10 @@ export default function RootLayout() {
   // ── Push token registration ──────────────────────────────────────────
   // Register after the user is authenticated and unlocked, once per session.
   // Skip entirely on simulators — push tokens require a physical device.
+  //
+  // The token itself is cached in pushTokenRef (it doesn't change once
+  // issued) so the foreground handler below can cheaply re-send it with a
+  // fresh timezone without re-requesting a token from Expo every time.
   useEffect(() => {
     if (!Device.isDevice) return;
     if (!session || !user || isLocked || pushTokenRegistered.current) return;
@@ -228,8 +267,10 @@ export default function RootLayout() {
       try {
         const token = await notificationService.getExpoPushToken();
         if (!token) return;
+        pushTokenRef.current = token;
         const platform: 'ios' | 'android' = Platform.OS === 'android' ? 'android' : 'ios';
         await registerPushToken(token, platform);
+        lastTimezoneRef.current = Intl.DateTimeFormat().resolvedOptions().timeZone ?? null;
       } catch (err) {
         // Non-critical — push notifications are additive, not required
         console.warn('[layout] Push token registration failed:', err);
@@ -237,9 +278,13 @@ export default function RootLayout() {
     })();
   }, [session, user, isLocked]);
 
-  // Reset flag on sign-out so the next login re-registers
+  // Reset flag + caches on sign-out so the next login re-registers cleanly
   useEffect(() => {
-    if (!session) pushTokenRegistered.current = false;
+    if (!session) {
+      pushTokenRegistered.current = false;
+      pushTokenRef.current = null;
+      lastTimezoneRef.current = null;
+    }
   }, [session]);
 
   // ── Navigation guard ─────────────────────────────────────────────────
